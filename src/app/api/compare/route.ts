@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData()
     const fileA = formData.get('fileA') as File | null
     const fileB = formData.get('fileB') as File | null
-    const mode = formData.get('mode') as string | null  // 'compare' | 'tia'
+    const mode = formData.get('mode') as string | null
     const contextStr = formData.get('context') as string | null
     const fragnetCategorizationsStr = formData.get('fragnetCategorizations') as string | null
 
@@ -27,7 +27,6 @@ export async function POST(req: NextRequest) {
     const comparison = compareXER(parsedA, parsedB)
 
     if (mode === 'tia') {
-      // Generate Word document
       const ctx = contextStr ? JSON.parse(contextStr) : {}
       const fragnetCategorizations = fragnetCategorizationsStr ? JSON.parse(fragnetCategorizationsStr) : {}
 
@@ -41,7 +40,10 @@ export async function POST(req: NextRequest) {
         fragnetCategorizations,
       })
 
-      return new NextResponse(buffer, {
+      // Fix: convert Buffer to Uint8Array for NextResponse compatibility
+      const uint8 = new Uint8Array(buffer)
+
+      return new NextResponse(uint8, {
         status: 200,
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -50,7 +52,6 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // Default: return comparison data as JSON
     return NextResponse.json({ success: true, comparison })
 
   } catch (error: any) {
