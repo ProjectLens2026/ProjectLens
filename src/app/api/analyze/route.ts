@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { parseXER, analyzeXER } from '@/lib/xerParser'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -10,88 +11,109 @@ export async function POST(req: NextRequest) {
     const contextStr = formData.get('context') as string
     const ctx = contextStr ? JSON.parse(contextStr) : {}
 
-    let scheduleContent = ''
+    if (!file) {
+      return NextResponse.json({ error: 'No file uploaded' }, { status: 400 })
+    }
 
-    if (file) {
-      const ext = file.name.split('.').pop()?.toLowerCase()
-      const bytes = await file.arrayBuffer()
-      const buffer = Buffer.from(bytes)
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    const bytes = await file.arrayBuffer()
+    const buffer = Buffer.from(bytes)
+    
+    let analysis: any = null
+    let fileType = ext?.toUpperCase() || 'UNKNOWN'
 
-      if (ext === 'pdf') {
-        // For PDF: extract basic text info
-        scheduleContent = `Schedule file: ${file.name} (PDF, ${(file.size/1024).toFixed(0)}KB)`
-        // In production you'd use pdf-parse here
-      } else if (ext === 'xer') {
-        // P6 XER is text-based
-        const text = buffer.toString('utf-8').slice(0, 8000)
-        scheduleContent = `Primavera P6 XER Schedule:\n${text}`
-      } else if (ext === 'xml') {
-        const text = buffer.toString('utf-8').slice(0, 8000)
-        scheduleContent = `P6 XML Schedule:\n${text}`
-      } else {
-        scheduleContent = `Schedule file: ${file.name} (${ext?.toUpperCase()}, ${(file.size/1024).toFixed(0)}KB)`
+    if (ext === 'xer') {
+      const text = buffer.toString('utf-8')
+      const parsed = parseXER(text)
+      const result = analyzeXER(parsed)
+      analysis = {
+        ...result,
+        projectName: parsed.projectName || ctx.projectName || file.name,
+        dataDate: parsed.dataDate,
+        contractEnd: parsed.contractEnd,
+        projectedEnd: parsed.projectedEnd,
+        fileType: 'Primavera P6 XER',
+      }
+    } else {
+      analysis = {
+        fileType: fileType,
+        projectName: ctx.projectName || file.name,
+        message: 'File received. Detailed parsing is currently optimized for Primavera P6 XER files. AI analysis will use the project context you provided.',
+        healthScore: 65,
+        condition: 'Monitor Closely',
+        totalActivities: 0,
+        complete: 0,
+        inProgress: 0,
+        notStarted: 0,
+        negativeFloat: 0,
+        outOfSequence: [],
+        noTies: [],
+        longLeadItems: [],
+        criticalDrivers: [],
+        inProgressActivities: [],
+        delayDays: 0,
       }
     }
 
     const apiKey = process.env.ANTHROPIC_API_KEY
-    if (!apiKey) {
-      return NextResponse.json({ error: 'API key not configured' }, { status: 500 })
+    let aiNarrative = ''
+
+    if (apiKey && analysis) {
+      try {
+        const Anthropic = (await import('@anthropic-ai/sdk')).default
+        const client = new Anthropic({ apiKey })
+
+        const prompt = `You are ProjectLens — an experienced construction project controls advisor with 20+ years of P6 scheduling, USACE/DGS workflow, and TIA preparation experience. Speak like a senior PM giving honest analysis to a colleague.
+
+Project: ${analysis.projectName}
+File type: ${analysis.fileType}
+Current phase: ${ctx.phase || 'Not specified'}
+Owner: ${ctx.owner || 'Not specified'}
+Contract: ${ctx.contractValue || 'Not specified'}
+Concerns raised by PM: ${ctx.criticalConcerns || 'None'}
+Known procurement issues: ${ctx.procurementIssues || 'None'}
+Known constraints: ${ctx.keyConstraints || 'None'}
+
+Schedule analysis findings:
+- Total activities: ${analysis.totalActivities}
+- Complete: ${analysis.complete} | In Progress: ${analysis.inProgress} | Not Started: ${analysis.notStarted}
+- Activities with negative float: ${analysis.negativeFloat}
+- Out-of-sequence violations: ${analysis.outOfSequence?.length || 0}
+- Activities with no logic ties: ${analysis.noTies?.length || 0}
+- Long lead items: ${analysis.longLeadItems?.length || 0}
+- Days behind contract: ${analysis.delayDays}
+- Health score: ${analysis.healthScore}/100 (${analysis.condition})
+
+Top critical drivers: ${(analysis.criticalDrivers || []).slice(0, 5).map((t: any) => `${t.task_code} ${t.task_name}`).join(', ')}
+
+Write a 400-500 word operational analysis in plain language for the PM. Structure:
+1. PROJECT CONDITION (one sentence verdict)
+2. WHAT THE SCHEDULE IS REALLY TELLING YOU (operational interpretation)
+3. THE THREE THINGS THAT MATTER MOST (what to fix first)
+4. CONVERSATIONS TO HAVE THIS WEEK (specific people, specific questions)
+5. TIA EVIDENCE (if delayDays > 30, mention what to document)
+
+Be direct. No fluff. Speak like an experienced advisor — not a software report.`
+
+        const message = await client.messages.create({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1500,
+          messages: [{ role: 'user', content: prompt }]
+        })
+
+        aiNarrative = message.content[0].type === 'text' ? message.content[0].text : ''
+      } catch (err: any) {
+        console.error('AI narrative error:', err)
+        aiNarrative = `AI narrative unavailable. The schedule analysis above is based on direct file parsing. (Error: ${err.message || 'unknown'})`
+      }
     }
 
-    const prompt = `You are ProjectLens — an experienced construction project controls advisor with 20+ years of experience in scheduling, procurement, risk management, and construction operations. You think like a senior PM who has seen hundreds of projects succeed and fail.
-
-A construction professional has uploaded their project schedule and provided context. Your job is to analyze this information and produce a clear, operational, human-centered analysis — not a software report.
-
-PROJECT CONTEXT PROVIDED:
-- Project Name: ${ctx.projectName || 'Not specified'}
-- Current Phase: ${ctx.phase || 'Not specified'}
-- Owner/Client: ${ctx.owner || 'Not specified'}
-- General Contractor: ${ctx.gc || 'Not specified'}
-- Contract Value: ${ctx.contractValue || 'Not specified'}
-- Planned Completion: ${ctx.completionDate || 'Not specified'}
-- Procurement Issues: ${ctx.procurementIssues || 'None specified'}
-- Key Constraints: ${ctx.keyConstraints || 'None specified'}
-- Biggest Concerns: ${ctx.criticalConcerns || 'Not specified'}
-
-SCHEDULE FILE CONTENT:
-${scheduleContent || 'No schedule file content extracted — analyze based on context provided.'}
-
-INSTRUCTIONS:
-Write a ProjectLens Operational Analysis. Be direct, operational, and conversational — like you are sitting beside the PM giving your honest assessment. Use plain English. Do NOT use bullet points or headers with ### markdown. Use simple section headers with em-dashes or uppercase labels followed by colons.
-
-Structure your analysis as follows:
-
-1. PROJECT CONDITION (one sentence verdict + health score out of 100)
-2. SCHEDULE HEALTH (what the schedule tells you operationally — not mathematically)
-3. PROCUREMENT PRESSURE (what could stop the project from finishing on time)
-4. OPERATIONAL INTERPRETATION (what is REALLY happening vs what the schedule shows — like a doctor interpreting symptoms)
-5. WHAT TO WATCH (the 2-3 things that will determine whether this project succeeds or struggles)
-6. CONVERSATIONS TO HAVE THIS WEEK (specific, practical conversations the PM should initiate)
-7. PROJECTLENS NOTE (remind them this is visibility support, not a guarantee — keep it brief and human)
-
-Keep total length to 500-700 words. Write like a trusted advisor, not a software tool.`
-
-    const Anthropic = (await import('@anthropic-ai/sdk')).default
-    const client = new Anthropic({ apiKey })
-
-    const message = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: prompt }]
+    return NextResponse.json({
+      success: true,
+      analysis,
+      aiNarrative,
+      context: ctx,
     })
-
-    const analysis = message.content[0].type === 'text' ? message.content[0].text : 'Analysis unavailable'
-
-    // Determine health score from analysis
-    const scoreMatch = analysis.match(/(\d{1,3})\s*\/\s*100/)
-    const healthScore = scoreMatch ? parseInt(scoreMatch[1]) : 65
-
-    let condition = 'Stable'
-    if (healthScore < 50) condition = 'Recovery Required'
-    else if (healthScore < 65) condition = 'Attention Needed'
-    else if (healthScore < 80) condition = 'Monitor Closely'
-
-    return NextResponse.json({ analysis, healthScore, condition, projectName: ctx.projectName })
 
   } catch (error: any) {
     console.error('Analysis error:', error)
