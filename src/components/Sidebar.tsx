@@ -24,6 +24,7 @@ const nav = [
   { group: 'Intelligence', items: [
     { href: '/dashboard/lens', icon: '🔍', label: 'Project Lens' },
     { href: '/dashboard/upload', icon: '⬆', label: 'Upload Schedule' },
+    { href: '/dashboard/tia', icon: '📑', label: 'TIA Comparison' },
   ]},
 ]
 
