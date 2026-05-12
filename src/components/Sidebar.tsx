@@ -34,7 +34,7 @@ interface SidebarProps {
   condition?: string
 }
 
-export default function Sidebar({ user, projectName = 'Riverside Commercial Tower', condition = 'Attention Needed' }: SidebarProps) {
+export default function Sidebar({ user, projectName = 'ProjectLens Demo', condition = 'Attention Needed' }: SidebarProps) {
   const pathname = usePathname()
 
   const condColor = condition === 'Stable' ? 'text-green-400' :

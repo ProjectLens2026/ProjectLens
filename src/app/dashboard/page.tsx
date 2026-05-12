@@ -54,7 +54,7 @@ export default function DashboardPage() {
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0">
         <div>
           <span className="font-bold text-slate-900 text-base">Executive Dashboard</span>
-          <span className="text-slate-400 text-sm ml-2">· Riverside Commercial Tower</span>
+          <span className="text-slate-400 text-sm ml-2">· ProjectLens Demo</span>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <span className="text-xs text-slate-400 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg">Last updated: Today 8:30 AM</span>

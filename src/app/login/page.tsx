@@ -16,11 +16,11 @@ export default function LoginPage() {
     setLoading(true)
     // Store user in localStorage for demo
     localStorage.setItem('pl_user', JSON.stringify({
-      name: form.name || 'Ahmed S.',
-      company: form.company || 'Nobel Construction',
+      name: form.name || 'Name',
+      company: form.company || 'ProjectLens',
       email: form.email,
-      role: form.role,
-      initials: (form.name || 'AS').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+      role: form.role || 'Project Manager',
+      initials: (form.name || 'N').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     }))
     setTimeout(() => router.push('/dashboard'), 800)
   }

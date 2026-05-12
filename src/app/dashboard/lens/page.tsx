@@ -34,7 +34,7 @@ export default function LensPage() {
   async function generateEmail() {
     setGenerating(true)
     setShowEmail(true)
-    const draft = `Subject: Project Status Update — ${analysis?.projectName || 'Riverside Commercial Tower'}
+    const draft = `Subject: Project Status Update — ${analysis?.projectName || 'ProjectLens Demo'}
 
 Dear Owner Team,
 

@@ -41,7 +41,7 @@ export default function RisksPage() {
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0">
         <div>
           <span className="font-bold text-slate-900 text-base">Risks & Issues</span>
-          <span className="text-slate-400 text-sm ml-2">· Riverside Commercial Tower</span>
+          <span className="text-slate-400 text-sm ml-2">· ProjectLens Demo</span>
         </div>
         <div className="ml-auto">
           <button onClick={() => setShowForm(!showForm)}
