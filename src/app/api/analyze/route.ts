@@ -96,7 +96,7 @@ Write a 400-500 word operational analysis in plain language for the PM. Structur
 Be direct. No fluff. Speak like an experienced advisor — not a software report.`
 
         const message = await client.messages.create({
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-sonnet-4-5',
           max_tokens: 1500,
           messages: [{ role: 'user', content: prompt }]
         })
