@@ -83,19 +83,17 @@ Classification rules:
 - POTENTIALLY_IMPACTING: RFI that may affect work sequence, procurement, or timing but does not explicitly request time extension or compensation
 - SCHEDULE_IMPACTING: RFI that mentions delay, time extension, critical path, substantial completion, recovery schedule, mitigation, compensation, or additional time`
           }
-        ]
+        ] as any
       }]
     })
 
     const text = message.content[0].type === 'text' ? message.content[0].text : ''
     
-    // Clean and parse JSON
     const clean = text.replace(/```json|```/g, '').trim()
     let evaluation: any
     try {
       evaluation = JSON.parse(clean)
     } catch {
-      // Try to extract JSON from the response
       const match = clean.match(/\{[\s\S]*\}/)
       if (match) {
         evaluation = JSON.parse(match[0])
