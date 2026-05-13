@@ -51,3 +51,149 @@ body {
   from { width: 0%; }
 }
 .bar-animated { animation: fillBar 1s ease forwards; }
+
+
+/* ============================================== */
+/* PRINT STYLES — make full report printable */
+/* ============================================== */
+@media print {
+  /* Page setup — letter size, narrow margins */
+  @page {
+    size: letter;
+    margin: 0.5in 0.4in;
+  }
+
+  /* Reset background colors to save ink and reveal everything */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  body {
+    background: white !important;
+    font-size: 10pt;
+    color: #000;
+  }
+
+  /* CRITICAL: Release all height and overflow constraints so content can flow across pages */
+  html, body, #__next, main, aside, div, section, article {
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    overflow-x: visible !important;
+    overflow-y: visible !important;
+  }
+
+  /* Hide sidebar and navigation */
+  aside,
+  nav,
+  .no-print,
+  [class*="bg-slate-800"],
+  button {
+    display: none !important;
+  }
+
+  /* But keep the user info area visible if needed, and SHOW everything else */
+  .print-only {
+    display: block !important;
+  }
+
+  /* Make main content take full width since sidebar is hidden */
+  .flex,
+  .flex-1,
+  .flex-col {
+    display: block !important;
+    width: 100% !important;
+  }
+
+  /* Remove rounded corners and heavy shadows that don't print well */
+  [class*="rounded"] {
+    border-radius: 0 !important;
+  }
+  [class*="shadow"] {
+    box-shadow: none !important;
+  }
+
+  /* Tables and lists — allow page breaks but keep rows together */
+  table, .grid {
+    page-break-inside: auto;
+  }
+  tr, .grid > div {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  /* Headings stay with content */
+  h1, h2, h3, h4 {
+    page-break-after: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Don't break inside a card box */
+  .border, [class*="border-"] {
+    page-break-inside: avoid;
+  }
+
+  /* Force page break before major sections */
+  .page-break {
+    page-break-before: always;
+  }
+
+  /* Critical: scrollable containers should show ALL their content for print */
+  [class*="overflow-auto"],
+  [class*="overflow-y-auto"],
+  [class*="overflow-x-auto"],
+  [class*="overflow-hidden"] {
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+  }
+
+  /* Sticky headers — release them so they don't repeat or block content */
+  [class*="sticky"] {
+    position: static !important;
+  }
+
+  /* Tabs — show only the active tab content when printing */
+  /* (Most pages use conditional rendering so inactive tabs aren't in the DOM) */
+
+  /* Print header for context — only visible on print */
+  body::before {
+    content: "ProjectLens Schedule Intelligence Report";
+    display: block;
+    font-size: 9pt;
+    color: #6b7280;
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 4pt;
+    margin-bottom: 8pt;
+  }
+
+  /* Footer — page number on each page */
+  @page {
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 8pt;
+      color: #9ca3af;
+    }
+    @bottom-left {
+      content: "ProjectLens · " attr(data-print-date);
+      font-size: 8pt;
+      color: #9ca3af;
+    }
+  }
+
+  /* Anchor links — show full URL */
+  a[href]:after {
+    content: "";  /* Don't show URLs - keeps print clean */
+  }
+
+  /* Ensure colored backgrounds print (health score, classification banners) */
+  .bg-red-50, .bg-amber-50, .bg-green-50, .bg-blue-50,
+  .bg-red-100, .bg-amber-100, .bg-green-100, .bg-blue-100,
+  [class*="bg-red"], [class*="bg-amber"], [class*="bg-green"], [class*="bg-blue"] {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
