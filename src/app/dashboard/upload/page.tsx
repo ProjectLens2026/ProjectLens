@@ -2,6 +2,116 @@
 import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
+// Gantt Chart Component
+function GanttChart({ activities, dataDate, projectedEnd }: { activities: any[], dataDate: string, projectedEnd: string }) {
+  if (!activities || activities.length === 0) {
+    return <div className="text-center py-8 text-slate-400 text-sm">No activities with 0 or negative float found.</div>
+  }
+
+  const start = new Date(dataDate?.replace(' ', 'T') || new Date())
+  const end = new Date(projectedEnd?.replace(' ', 'T') || new Date())
+  const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)))
+
+  function getLeft(dateStr?: string) {
+    if (!dateStr) return 0
+    const d = new Date(dateStr.replace(' ', 'T'))
+    const days = Math.round((d.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
+    return Math.max(0, Math.min(100, (days / totalDays) * 100))
+  }
+
+  function getWidth(startStr?: string, endStr?: string) {
+    if (!startStr || !endStr) return 1
+    const s = new Date(startStr.replace(' ', 'T'))
+    const e = new Date(endStr.replace(' ', 'T'))
+    const days = Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24))
+    return Math.max(0.5, Math.min(100, (days / totalDays) * 100))
+  }
+
+  function shortDate(d?: string) { return d ? d.slice(0, 10) : '—' }
+
+  // Generate month labels
+  const months: { label: string; left: number }[] = []
+  const cur = new Date(start)
+  cur.setDate(1)
+  while (cur <= end) {
+    const left = getLeft(cur.toISOString())
+    if (left >= 0 && left <= 100) {
+      months.push({ label: cur.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }), left })
+    }
+    cur.setMonth(cur.getMonth() + 1)
+  }
+
+  const displayed = activities.slice(0, 100)
+
+  return (
+    <div className="overflow-auto max-h-[600px] border border-slate-200 rounded-xl">
+      {/* Timeline header */}
+      <div className="sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
+        <div className="flex">
+          <div className="w-80 flex-shrink-0 px-3 py-2 text-[10px] font-bold text-slate-500 uppercase border-r border-slate-200">Activity</div>
+          <div className="flex-1 relative h-8 min-w-[600px]">
+            {months.map((m, i) => (
+              <div key={i} className="absolute top-0 h-full flex items-center" style={{ left: `${m.left}%` }}>
+                <div className="h-full border-l border-slate-300 border-dashed" />
+                <span className="text-[9px] text-slate-400 ml-1 whitespace-nowrap">{m.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Rows */}
+      {displayed.map((t: any, i: number) => {
+        const taskStart = t.act_start_date || t.early_start_date || t.target_start_date || ''
+        const taskEnd = t.early_end_date || t.act_end_date || t.target_end_date || ''
+        const float = parseFloat(t.total_float_hr_cnt || '0')
+        const isComplete = t.status_code === 'TK_Complete'
+        const barColor = isComplete ? 'bg-slate-400' : float < 0 ? 'bg-red-500' : 'bg-amber-500'
+        const left = getLeft(taskStart)
+        const width = getWidth(taskStart, taskEnd)
+        const pct = parseFloat(t.phys_complete_pct || '0')
+
+        return (
+          <div key={i} className={`flex border-b border-slate-100 hover:bg-blue-50/30 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
+            {/* Activity info */}
+            <div className="w-80 flex-shrink-0 px-3 py-2 border-r border-slate-100 flex items-center gap-2">
+              <div className="min-w-0">
+                <div className="text-[11px] font-mono font-bold text-slate-800 truncate">{t.task_code}</div>
+                <div className="text-[10px] text-slate-500 truncate">{t.task_name}</div>
+              </div>
+              <div className={`ml-auto text-[10px] font-bold flex-shrink-0 ${float < 0 ? 'text-red-600' : float === 0 ? 'text-amber-600' : 'text-green-600'}`}>
+                {Math.round(float / 8)}d
+              </div>
+            </div>
+
+            {/* Bar */}
+            <div className="flex-1 relative py-2 min-w-[600px] h-10">
+              <div className="absolute inset-y-0 flex items-center" style={{ left: `${left}%`, width: `${width}%`, minWidth: '4px' }}>
+                <div className={`relative h-5 w-full rounded-sm ${barColor} opacity-80 overflow-hidden`}>
+                  {/* Progress fill */}
+                  <div className="absolute inset-y-0 left-0 bg-black/20 rounded-l-sm" style={{ width: `${pct}%` }} />
+                  {/* Label if wide enough */}
+                  {width > 8 && (
+                    <div className="absolute inset-0 flex items-center px-1">
+                      <span className="text-[9px] text-white font-semibold truncate">{shortDate(taskEnd)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })}
+      {activities.length > 100 && (
+        <div className="text-center py-3 text-xs text-slate-400 border-t border-slate-200">
+          Showing first 100 of {activities.length} activities
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 type Step = 'upload' | 'context' | 'analyzing' | 'done'
 
 interface ProjectContext {
@@ -65,6 +175,8 @@ export default function UploadPage() {
       if (!res.ok) throw new Error('Analysis failed')
       const data = await res.json()
       setResult(data)
+      // Save to localStorage so Submittals/RFI/Procurement pages can access it
+      try { localStorage.setItem('pl_last_analysis', JSON.stringify(data.analysis)) } catch {}
       setTimeout(() => setStep('done'), 500)
 
     } catch (err: any) {
@@ -165,7 +277,8 @@ export default function UploadPage() {
           <div className="bg-white border border-slate-200 rounded-xl">
             <div className="tab-bar flex gap-0 border-b border-slate-100 overflow-x-auto no-print">
               {[
-                { id: 'critical', label: 'Critical Path', icon: '🎯' },
+                { id: 'gantt', label: 'Gantt Chart', icon: '📊' },
+              { id: 'critical', label: 'Critical Path', icon: '🎯' },
                 { id: 'logic', label: 'Logic Check', icon: '🔧' },
                 { id: 'noties', label: 'No Logic Ties', icon: '⛓️' },
                 { id: 'longlead', label: 'Long Lead Items', icon: '📦' },
@@ -181,6 +294,15 @@ export default function UploadPage() {
             </div>
 
             <div className="p-5">
+              {/* GANTT CHART */}
+              {activeTab === 'gantt' && (
+                <div>
+                  <h3 className="text-sm font-bold mb-1">Critical Path Gantt — activities with 0 or negative float</h3>
+                  <p className="text-xs text-slate-500 mb-4">Sorted by early finish date. Red = negative float, Orange = zero float, Gray = complete.</p>
+                  <GanttChart activities={a.ganttActivities || []} dataDate={a.dataDate} projectedEnd={a.projectedEnd} />
+                </div>
+              )}
+
               {/* CRITICAL PATH */}
               {(activeTab === 'critical' || typeof window !== 'undefined' && window.matchMedia?.('print').matches) && (
                 <div className="tab-pane">
