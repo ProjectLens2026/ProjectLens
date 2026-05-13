@@ -15,6 +15,15 @@ export interface Task {
   act_end_date: string
   target_start_date: string
   target_end_date: string
+  clndr_id: string
+}
+
+export interface Calendar {
+  clndr_id: string
+  clndr_name: string
+  clndr_type: string
+  day_hr_cnt: string
+  week_hr_cnt: string
 }
 
 export interface Relationship {
@@ -33,6 +42,7 @@ export interface ParsedXER {
   relationships: Relationship[]
   predMap: Record<string, string[]>
   succMap: Record<string, string[]>
+  calendars: Record<string, Calendar>
 }
 
 export interface XERAnalysis {
@@ -44,7 +54,9 @@ export interface XERAnalysis {
   outOfSequence: OutOfSequence[]
   noTies: Task[]
   longLeadItems: LongLeadItem[]
+  shortLeadItems: LongLeadItem[]
   criticalDrivers: Task[]
+  ganttActivities: Task[]
   inProgressActivities: Task[]
   healthScore: number
   condition: string
@@ -61,9 +73,30 @@ export interface LongLeadItem extends Task {
   durationDays: number
   remainingDays: number
   floatDays: number
+  calendarName: string
 }
 
 const LONG_LEAD_KEYWORDS = ['PROC', 'PRO-', 'FABRICAT', 'DELIVER', 'PROCURE', 'LONG LEAD', 'LEAD TIME']
+
+// Convert P6 hours to calendar days using the activity's assigned calendar
+export function hoursToDays(hours: string | number, calendar?: Calendar): number {
+  const h = typeof hours === 'string' ? parseFloat(hours || '0') : hours
+  if (isNaN(h) || h === 0) return 0
+  
+  if (!calendar) return Math.round(h / 8) // default working days
+  
+  const dayHr = parseFloat(calendar.day_hr_cnt || '8')
+  const weekHr = parseFloat(calendar.week_hr_cnt || '40')
+  
+  // 7-day calendar: week_hr >= 56 (7 days × 8 hrs)
+  if (weekHr >= 56) return Math.round(h / (weekHr / 7))
+  
+  // 6-day calendar: week_hr between 44-55
+  if (weekHr >= 44) return Math.round(h / (weekHr / 6))
+  
+  // 5-day calendar (standard working days)
+  return Math.round(h / dayHr)
+}
 
 export function parseXER(content: string): ParsedXER {
   const lines = content.split(/\r?\n/)
@@ -71,6 +104,7 @@ export function parseXER(content: string): ParsedXER {
   let currentFields: string[] = []
   const tasks: Record<string, Task> = {}
   const relationships: Relationship[] = []
+  const calendars: Record<string, Calendar> = {}
   let projectName = ''
   let dataDate = ''
   let contractEnd = ''
@@ -79,8 +113,7 @@ export function parseXER(content: string): ParsedXER {
   for (const rawLine of lines) {
     const line = rawLine.trim()
     if (line.startsWith('%T')) {
-      const parts = line.split('\t')
-      currentTable = parts[1] || ''
+      currentTable = line.split('\t')[1] || ''
       currentFields = []
     } else if (line.startsWith('%F')) {
       currentFields = line.split('\t').slice(1)
@@ -93,6 +126,10 @@ export function parseXER(content: string): ParsedXER {
         dataDate = row.last_recalc_date || ''
         contractEnd = row.plan_end_date || ''
         projectedEnd = row.scd_end_date || ''
+      } else if (currentTable === 'CALENDAR') {
+        const cal: any = {}
+        currentFields.forEach((f, i) => cal[f] = values[i] || '')
+        calendars[cal.clndr_id] = cal as Calendar
       } else if (currentTable === 'TASK') {
         const task: any = {}
         currentFields.forEach((f, i) => task[f] = values[i] || '')
@@ -114,12 +151,14 @@ export function parseXER(content: string): ParsedXER {
     succMap[r.pred_task_id].push(r.task_id)
   }
 
-  return { projectName, dataDate, contractEnd, projectedEnd, tasks, relationships, predMap, succMap }
+  return { projectName, dataDate, contractEnd, projectedEnd, tasks, relationships, predMap, succMap, calendars }
 }
 
 export function analyzeXER(parsed: ParsedXER): XERAnalysis {
-  const { tasks, relationships, predMap, succMap } = parsed
+  const { tasks, relationships, predMap, succMap, calendars } = parsed
   const taskArr = Object.values(tasks)
+
+  const getCalendar = (t: Task) => calendars[t.clndr_id]
 
   const complete = taskArr.filter(t => t.status_code === 'TK_Complete').length
   const inProgress = taskArr.filter(t => t.status_code === 'TK_Active').length
@@ -130,6 +169,7 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     return !isNaN(f) && f < 0
   }).length
 
+  // Out of sequence
   const outOfSequence: OutOfSequence[] = []
   for (const r of relationships) {
     if (r.pred_type !== 'PR_FS') continue
@@ -144,6 +184,7 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     }
   }
 
+  // No logic ties
   const noTies: Task[] = []
   for (const t of taskArr) {
     if (t.status_code === 'TK_Complete') continue
@@ -152,31 +193,64 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     if (!hasPred || !hasSucc) noTies.push(t)
   }
 
+  // Long lead & short lead using calendar-aware durations
+  // Long lead: >= 35 calendar days, Short lead: 20-34 calendar days
   const longLeadItems: LongLeadItem[] = []
+  const shortLeadItems: LongLeadItem[] = []
+
   for (const t of taskArr) {
     const upper = (t.task_name || '').toUpperCase() + ' ' + (t.task_code || '').toUpperCase()
     if (!LONG_LEAD_KEYWORDS.some(k => upper.includes(k))) continue
-    const durationDays = Math.round((parseFloat(t.target_drtn_hr_cnt || '0') || 0) / 8)
+    
+    const cal = getCalendar(t)
+    const durationDays = hoursToDays(t.target_drtn_hr_cnt || '0', cal)
     if (durationDays < 20) continue
-    const remainingDays = Math.round((parseFloat(t.remain_drtn_hr_cnt || '0') || 0) / 8)
-    const floatDays = Math.round((parseFloat(t.total_float_hr_cnt || '0') || 0) / 8)
-    longLeadItems.push({ ...t, durationDays, remainingDays, floatDays })
-  }
-  longLeadItems.sort((a, b) => a.floatDays - b.floatDays)
+    
+    const remainingDays = hoursToDays(t.remain_drtn_hr_cnt || '0', cal)
+    const floatDays = hoursToDays(t.total_float_hr_cnt || '0', cal)
+    const calendarName = cal?.clndr_name || 'Standard'
 
+    const item: LongLeadItem = { ...t, durationDays, remainingDays, floatDays, calendarName }
+
+    if (durationDays >= 35) {
+      longLeadItems.push(item)
+    } else {
+      shortLeadItems.push(item)
+    }
+  }
+
+  longLeadItems.sort((a, b) => a.floatDays - b.floatDays)
+  shortLeadItems.sort((a, b) => a.floatDays - b.floatDays)
+
+  // Critical drivers — sorted by early finish date ascending
   const criticalDrivers = taskArr
-    .filter(t => t.driving_path_flag === 'Y' && t.status_code !== 'TK_Complete')
-    .sort((a, b) => {
-      const fa = parseFloat(a.total_float_hr_cnt || '999')
-      const fb = parseFloat(b.total_float_hr_cnt || '999')
-      return fa - fb
+    .filter(t => {
+      const f = parseFloat(t.total_float_hr_cnt || '999')
+      return f <= 0 && t.status_code !== 'TK_Complete'
     })
-    .slice(0, 15)
+    .sort((a, b) => {
+      const fa = a.early_end_date || a.act_end_date || ''
+      const fb = b.early_end_date || b.act_end_date || ''
+      return fa.localeCompare(fb)
+    })
+
+  // Gantt activities — all with 0 or negative float, sorted by early finish
+  const ganttActivities = taskArr
+    .filter(t => {
+      const f = parseFloat(t.total_float_hr_cnt || '999')
+      return f <= 0
+    })
+    .sort((a, b) => {
+      const fa = a.early_end_date || a.act_end_date || a.target_end_date || ''
+      const fb = b.early_end_date || b.act_end_date || b.target_end_date || ''
+      return fa.localeCompare(fb)
+    })
 
   const inProgressActivities = taskArr
     .filter(t => t.status_code === 'TK_Active')
     .sort((a, b) => parseFloat(a.total_float_hr_cnt || '0') - parseFloat(b.total_float_hr_cnt || '0'))
 
+  // Delay days
   let delayDays = 0
   if (parsed.contractEnd && parsed.projectedEnd) {
     const ce = new Date(parsed.contractEnd.replace(' ', 'T'))
@@ -184,6 +258,7 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     delayDays = Math.round((pe.getTime() - ce.getTime()) / (1000 * 60 * 60 * 24))
   }
 
+  // Health score
   let healthScore = 100
   if (delayDays > 0) healthScore -= Math.min(50, delayDays / 3)
   healthScore -= Math.min(20, (negativeFloat / taskArr.length) * 30)
@@ -198,17 +273,10 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
 
   return {
     totalActivities: taskArr.length,
-    complete,
-    inProgress,
-    notStarted,
-    negativeFloat,
-    outOfSequence,
-    noTies,
-    longLeadItems,
-    criticalDrivers,
-    inProgressActivities,
-    healthScore,
-    condition,
-    delayDays,
+    complete, inProgress, notStarted, negativeFloat,
+    outOfSequence, noTies,
+    longLeadItems, shortLeadItems,
+    criticalDrivers, ganttActivities, inProgressActivities,
+    healthScore, condition, delayDays,
   }
 }
