@@ -36,7 +36,13 @@ interface RFIRecord {
 }
 
 export default function RFIsPage() {
-  const [rfis, setRfis] = useState<RFIRecord[]>([])
+  const [rfis, setRfis] = useState<RFIRecord[]>(() => {
+    if (typeof window === 'undefined') return []
+    try {
+      const stored = localStorage.getItem('pl_rfis')
+      return stored ? JSON.parse(stored) : []
+    } catch { return [] }
+  })
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState('')
   const [selectedRFI, setSelectedRFI] = useState<RFIRecord | null>(null)
@@ -67,7 +73,11 @@ export default function RFIsPage() {
         evaluation: data.evaluation,
       }
 
-      setRfis(prev => [record, ...prev])
+      setRfis(prev => {
+        const updated = [record, ...prev]
+        try { localStorage.setItem('pl_rfis', JSON.stringify(updated)) } catch {}
+        return updated
+      })
       setSelectedRFI(record)
 
     } catch (err: any) {
