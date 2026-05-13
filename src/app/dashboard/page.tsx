@@ -1,21 +1,26 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { getActiveProject, getActiveVersion, getActiveAnalysis, getActiveProjectRFIs } from '@/lib/projectStore'
 
 export default function DashboardPage() {
   const [analysis, setAnalysis] = useState<any>(null)
   const [rfis, setRfis] = useState<any[]>([])
+  const [project, setProject] = useState<any>(null)
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem('pl_last_analysis')
-      if (stored) setAnalysis(JSON.parse(stored))
-    } catch {}
-    try {
-      const storedRFIs = localStorage.getItem('pl_rfis')
-      if (storedRFIs) setRfis(JSON.parse(storedRFIs))
-    } catch {}
+    refresh()
+    // Poll for active project changes
+    const interval = setInterval(refresh, 1000)
+    return () => clearInterval(interval)
   }, [])
+
+  function refresh() {
+    const p = getActiveProject()
+    setProject(p)
+    setAnalysis(getActiveAnalysis())
+    setRfis(getActiveProjectRFIs())
+  }
 
   function formatMonthDay(d?: string) {
     if (!d) return '—'
@@ -73,7 +78,7 @@ export default function DashboardPage() {
   const longLeadAtRisk = longLead.filter((t: any) => t.floatDays < 0).length
   const condition = analysis.condition || 'Stable'
   const healthScore = analysis.healthScore || 0
-  const projectName = analysis.projectName || 'Untitled Schedule'
+  const projectName = project?.name || analysis.projectName || 'Untitled Schedule'
 
   // CONDITION STYLING
   const condStyle = (() => {

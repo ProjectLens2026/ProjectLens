@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { getActiveProject, getActiveAnalysis, getActiveProjectRFIs } from '@/lib/projectStore'
 
 interface RiskItem {
   category: string
@@ -12,17 +13,19 @@ interface RiskItem {
 export default function ProjectLensPage() {
   const [analysis, setAnalysis] = useState<any>(null)
   const [rfis, setRfis] = useState<any[]>([])
+  const [project, setProject] = useState<any>(null)
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem('pl_last_analysis')
-      if (stored) setAnalysis(JSON.parse(stored))
-    } catch {}
-    try {
-      const storedRFIs = localStorage.getItem('pl_rfis')
-      if (storedRFIs) setRfis(JSON.parse(storedRFIs))
-    } catch {}
+    refresh()
+    const interval = setInterval(refresh, 1000)
+    return () => clearInterval(interval)
   }, [])
+
+  function refresh() {
+    setProject(getActiveProject())
+    setAnalysis(getActiveAnalysis())
+    setRfis(getActiveProjectRFIs())
+  }
 
   function shortDate(d?: string) {
     if (!d) return '—'
@@ -205,7 +208,8 @@ export default function ProjectLensPage() {
             <div className={`w-3 h-3 rounded-full ${col.dot} animate-pulse mt-2 flex-shrink-0`} />
             <div className="flex-1">
               <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Active Schedule</div>
-              <div className="text-2xl font-extrabold text-slate-900 mb-1">{analysis.projectName || 'Untitled Schedule'}</div>
+              <div className="text-2xl font-extrabold text-slate-900 mb-1">{project?.name || analysis.projectName || 'Untitled Schedule'}</div>
+              {project?.projectId && <div className="text-[10px] font-mono text-blue-600 mb-1">{project.projectId}</div>}
               <div className="text-xs text-slate-500">
                 {analysis.fileType || 'Primavera P6'} · Data Date: {shortDate(analysis.dataDate)} ·
                 {' '}Contract: {shortDate(analysis.contractEnd)} ·

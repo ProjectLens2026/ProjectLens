@@ -2,7 +2,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  getActiveProject, createProject, addVersionToProject,
+  getActiveProject, getActiveProjectId, loadProjects,
+  createProject, addVersionToProject,
   ScheduleVersion
 } from '@/lib/projectStore'
 
@@ -227,6 +228,24 @@ export default function UploadPage() {
     completionDate: '', owner: '', gc: '', procurementIssues: '',
     keyConstraints: '', criticalConcerns: ''
   })
+
+  // Project assignment state
+  const [existingProjects, setExistingProjects] = useState<any[]>([])
+  const [projectMode, setProjectMode] = useState<'new' | 'existing'>('new')
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('')
+  const [newProjectId, setNewProjectId] = useState<string>('')
+
+  useEffect(() => {
+    const all = loadProjects()
+    setExistingProjects(all)
+    // Default to existing project if there's an active one
+    const activeId = getActiveProjectId()
+    if (activeId && all.find(p => p.id === activeId)) {
+      setSelectedProjectId(activeId)
+      setProjectMode('existing')
+    }
+  }, [])
+
   const fileRef = useRef<HTMLInputElement>(null)
 
   const accept = '.xer,.xml,.mpp,.pdf,.xlsx,.xls,.csv'
@@ -264,7 +283,7 @@ export default function UploadPage() {
       const data = await res.json()
       setResult(data)
 
-      // Save as a project version
+      // Save as a project version based on user selection
       try {
         const version: ScheduleVersion = {
           id: 'ver_' + Date.now().toString(36),
@@ -275,25 +294,21 @@ export default function UploadPage() {
           context: ctx,
         }
 
-        const activeProject = getActiveProject()
-
-        // If there's an active project AND user is adding another version
-        // (we detect this if the project name from XER matches existing project)
-        const projectNameFromXER = data.analysis?.projectName || file?.name || 'Untitled Project'
-
-        if (activeProject && (
-          activeProject.name === projectNameFromXER ||
-          activeProject.name.toLowerCase().includes(projectNameFromXER.toLowerCase()) ||
-          projectNameFromXER.toLowerCase().includes(activeProject.name.toLowerCase())
-        )) {
+        if (projectMode === 'existing' && selectedProjectId) {
           // Add as new version to existing project
-          addVersionToProject(activeProject.id, version)
+          addVersionToProject(selectedProjectId, version)
         } else {
           // Create a new project
-          createProject(projectNameFromXER, version, ctx.owner)
+          const projectName = ctx.projectName || data.analysis?.projectName || file?.name?.replace('.xer', '') || 'Untitled Project'
+          createProject({
+            name: projectName,
+            projectId: newProjectId.trim() || undefined,
+            owner: ctx.owner,
+            version,
+          })
         }
 
-        // Keep legacy keys for backward compat with old pages
+        // Keep legacy keys for backward compat
         localStorage.setItem('pl_last_analysis', JSON.stringify(data.analysis))
       } catch (err) {
         console.error('Failed to save project:', err)
@@ -703,6 +718,70 @@ export default function UploadPage() {
 
             <h2 className="text-xl font-extrabold text-slate-900 mb-1">Tell us about your project</h2>
             <p className="text-slate-500 text-sm mb-5">Takes 2 minutes. The more context you give, the more accurate the analysis.</p>
+
+            {/* Project assignment */}
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5">
+              <div className="text-xs font-bold text-blue-900 uppercase tracking-wider mb-3">Assign this schedule to:</div>
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <button
+                  type="button"
+                  onClick={() => setProjectMode('new')}
+                  className={`text-left p-3 rounded-lg border-2 transition-all ${projectMode === 'new' ? 'border-blue-500 bg-white' : 'border-slate-200 bg-white/50 hover:border-blue-300'}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className={`w-4 h-4 rounded-full border-2 ${projectMode === 'new' ? 'border-blue-500' : 'border-slate-300'} flex items-center justify-center`}>
+                      {projectMode === 'new' && <div className="w-2 h-2 rounded-full bg-blue-500" />}
+                    </div>
+                    <span className="font-bold text-xs text-slate-900">Create new project</span>
+                  </div>
+                  <div className="text-[10px] text-slate-500 ml-6">This is a brand new construction project</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setProjectMode('existing')}
+                  disabled={existingProjects.length === 0}
+                  className={`text-left p-3 rounded-lg border-2 transition-all ${projectMode === 'existing' ? 'border-blue-500 bg-white' : 'border-slate-200 bg-white/50 hover:border-blue-300'} ${existingProjects.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className={`w-4 h-4 rounded-full border-2 ${projectMode === 'existing' ? 'border-blue-500' : 'border-slate-300'} flex items-center justify-center`}>
+                      {projectMode === 'existing' && <div className="w-2 h-2 rounded-full bg-blue-500" />}
+                    </div>
+                    <span className="font-bold text-xs text-slate-900">Update existing project</span>
+                  </div>
+                  <div className="text-[10px] text-slate-500 ml-6">
+                    {existingProjects.length === 0 ? 'No projects yet' : `Add as new version to one of your ${existingProjects.length} project${existingProjects.length > 1 ? 's' : ''}`}
+                  </div>
+                </button>
+              </div>
+
+              {projectMode === 'existing' && (
+                <div>
+                  <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">Select Project</label>
+                  <select
+                    value={selectedProjectId}
+                    onChange={e => setSelectedProjectId(e.target.value)}
+                    className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white">
+                    <option value="">— Choose a project —</option>
+                    {existingProjects.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}{p.projectId ? ` (${p.projectId})` : ''} · {p.versions.length} version{p.versions.length > 1 ? 's' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {projectMode === 'new' && (
+                <div>
+                  <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">Project ID (optional)</label>
+                  <input
+                    value={newProjectId}
+                    onChange={e => setNewProjectId(e.target.value)}
+                    placeholder="e.g. USACE-CT-2024-001 (P6 Enterprise project ID)"
+                    className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white font-mono"
+                  />
+                  <div className="text-[10px] text-slate-500 mt-1">Unique identifier for this project (like P6 EPS structure)</div>
+                </div>
+              )}
+            </div>
 
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">

@@ -1,5 +1,10 @@
 'use client'
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import Link from 'next/link'
+import {
+  getActiveProject, getActiveProjectRFIs, addRFIToActiveProject,
+  deleteRFIFromActiveProject
+} from '@/lib/projectStore'
 
 interface RFIEvaluation {
   rfi_number: string
@@ -36,27 +41,38 @@ interface RFIRecord {
 }
 
 export default function RFIsPage() {
-  const [rfis, setRfis] = useState<RFIRecord[]>(() => {
-    if (typeof window === 'undefined') return []
-    try {
-      const stored = localStorage.getItem('pl_rfis')
-      return stored ? JSON.parse(stored) : []
-    } catch { return [] }
-  })
+  const [rfis, setRfis] = useState<RFIRecord[]>([])
+  const [project, setProject] = useState<any>(null)
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState('')
   const [selectedRFI, setSelectedRFI] = useState<RFIRecord | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  useEffect(() => {
+    refresh()
+    const interval = setInterval(refresh, 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  function refresh() {
+    setProject(getActiveProject())
+    setRfis(getActiveProjectRFIs())
+  }
+
   async function analyzeRFI(file: File) {
+    if (!project) {
+      alert('Please create or select a project first before uploading RFIs.')
+      return
+    }
+
     setUploading(true)
     setProgress('Reading RFI document...')
 
     try {
       const formData = new FormData()
       formData.append('file', file)
-      formData.append('projectName', 'ProjectLens Demo')
+      formData.append('projectName', project.name)
 
       setProgress('ProjectLens is evaluating schedule impact...')
 
@@ -67,17 +83,14 @@ export default function RFIsPage() {
       setProgress('Analysis complete')
 
       const record: RFIRecord = {
-        id: Date.now().toString(),
+        id: 'rfi_' + Date.now().toString(36),
         filename: file.name,
         uploadedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
         evaluation: data.evaluation,
       }
 
-      setRfis(prev => {
-        const updated = [record, ...prev]
-        try { localStorage.setItem('pl_rfis', JSON.stringify(updated)) } catch {}
-        return updated
-      })
+      addRFIToActiveProject(record)
+      refresh()
       setSelectedRFI(record)
 
     } catch (err: any) {
@@ -130,12 +143,40 @@ export default function RFIsPage() {
   const potentiallyImpacting = rfis.filter(r => r.evaluation.classification === 'POTENTIALLY_IMPACTING')
   const informational = rfis.filter(r => r.evaluation.classification === 'INFORMATIONAL')
 
+  // No active project — show empty state
+  if (!project) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center flex-shrink-0">
+          <div>
+            <span className="font-bold text-slate-900 text-base">RFIs</span>
+            <span className="text-slate-400 text-sm ml-2">· No active project</span>
+          </div>
+        </div>
+        <div className="flex-1 flex items-center justify-center bg-slate-50">
+          <div className="text-center max-w-md">
+            <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 rounded-2xl flex items-center justify-center">
+              <span className="text-3xl">❓</span>
+            </div>
+            <div className="text-lg font-bold text-slate-700 mb-2">Select a project first</div>
+            <div className="text-sm text-slate-500 mb-6">RFIs are tied to specific projects. Open a project to upload and evaluate its RFIs.</div>
+            <Link href="/dashboard/projects"
+              className="inline-block bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors">
+              Go to Projects →
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-full overflow-hidden">
       {/* Left panel - RFI list */}
       <div className="w-80 flex-shrink-0 flex flex-col border-r border-slate-200 bg-white">
         <div className="px-4 py-4 border-b border-slate-200">
           <div className="font-bold text-slate-900 text-sm mb-1">RFI Evaluation</div>
+          <div className="text-[10px] text-blue-600 font-semibold mb-1 truncate">{project.name}</div>
           <div className="text-xs text-slate-500">Upload RFI PDFs for schedule impact analysis</div>
         </div>
 

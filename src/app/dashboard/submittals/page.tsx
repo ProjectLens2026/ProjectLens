@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { getActiveAnalysis } from '@/lib/projectStore'
 
 export default function SubmittalsPage() {
   const [analysis, setAnalysis] = useState<any>(null)
@@ -7,11 +8,14 @@ export default function SubmittalsPage() {
   const [search, setSearch] = useState('')
 
   useEffect(() => {
-    const stored = localStorage.getItem('pl_last_analysis')
-    if (stored) {
-      try { setAnalysis(JSON.parse(stored)) } catch {}
-    }
+    refresh()
+    const interval = setInterval(refresh, 1000)
+    return () => clearInterval(interval)
   }, [])
+
+  function refresh() {
+    setAnalysis(getActiveAnalysis())
+  }
 
   function shortDate(d?: string) {
     if (!d) return '—'

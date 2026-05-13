@@ -1,4 +1,4 @@
-// Project storage layer — uses localStorage for now, will migrate to Supabase in Phase 3
+// Project storage layer — uses localStorage. Will migrate to Supabase later.
 
 export interface ScheduleVersion {
   id: string
@@ -7,10 +7,12 @@ export interface ScheduleVersion {
   analysis: any
   aiNarrative?: string
   context?: any
+  versionLabel?: string  // e.g. "May 2026 Update"
 }
 
 export interface Project {
   id: string
+  projectId?: string  // User-defined unique identifier (e.g. "USACE-CT-2024-001")
   name: string
   owner?: string
   contractValue?: string
@@ -24,8 +26,8 @@ export interface Project {
 
 const PROJECTS_KEY = 'pl_projects'
 const ACTIVE_PROJECT_KEY = 'pl_active_project_id'
+const ACTIVE_VERSION_KEY = 'pl_active_version_id'
 
-// Backward compat — read older keys if new ones don't exist yet
 const LEGACY_ANALYSIS_KEY = 'pl_last_analysis'
 const LEGACY_RFIS_KEY = 'pl_rfis'
 
@@ -49,15 +51,26 @@ export function saveProjects(projects: Project[]) {
 
 export function getActiveProjectId(): string | null {
   if (typeof window === 'undefined') return null
-  try {
-    return localStorage.getItem(ACTIVE_PROJECT_KEY)
-  } catch { return null }
+  try { return localStorage.getItem(ACTIVE_PROJECT_KEY) } catch { return null }
 }
 
 export function setActiveProjectId(id: string | null) {
   if (typeof window === 'undefined') return
   if (id) localStorage.setItem(ACTIVE_PROJECT_KEY, id)
   else localStorage.removeItem(ACTIVE_PROJECT_KEY)
+  // Reset active version when switching projects
+  localStorage.removeItem(ACTIVE_VERSION_KEY)
+}
+
+export function getActiveVersionId(): string | null {
+  if (typeof window === 'undefined') return null
+  try { return localStorage.getItem(ACTIVE_VERSION_KEY) } catch { return null }
+}
+
+export function setActiveVersionId(id: string | null) {
+  if (typeof window === 'undefined') return
+  if (id) localStorage.setItem(ACTIVE_VERSION_KEY, id)
+  else localStorage.removeItem(ACTIVE_VERSION_KEY)
 }
 
 export function getActiveProject(): Project | null {
@@ -67,37 +80,63 @@ export function getActiveProject(): Project | null {
   return projects.find(p => p.id === id) || null
 }
 
-export function getActiveVersion(project: Project | null): ScheduleVersion | null {
+// Get latest version of project (sorted by uploadedAt descending)
+export function getLatestVersion(project: Project | null): ScheduleVersion | null {
   if (!project || !project.versions || project.versions.length === 0) return null
-  // Latest version (most recent uploadedAt)
   return [...project.versions].sort((a, b) =>
     new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
   )[0]
 }
 
+// Get currently selected version (either explicitly chosen OR latest)
+export function getActiveVersion(project?: Project | null): ScheduleVersion | null {
+  const p = project || getActiveProject()
+  if (!p) return null
+
+  const versionId = getActiveVersionId()
+  if (versionId) {
+    const found = p.versions.find(v => v.id === versionId)
+    if (found) return found
+  }
+
+  return getLatestVersion(p)
+}
+
+// Get the analysis from the currently active project + version
 export function getActiveAnalysis(): any {
-  const project = getActiveProject()
-  const version = getActiveVersion(project)
-  return version?.analysis || null
+  const v = getActiveVersion()
+  return v?.analysis || null
+}
+
+// Get RFIs for the active project
+export function getActiveProjectRFIs(): any[] {
+  const p = getActiveProject()
+  return p?.rfis || []
 }
 
 // Create a new project from an XER upload
-export function createProject(name: string, version: ScheduleVersion, owner?: string): Project {
+export function createProject(opts: {
+  name: string
+  projectId?: string
+  owner?: string
+  version: ScheduleVersion
+}): Project {
   const project: Project = {
     id: 'proj_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-    name,
-    owner,
+    projectId: opts.projectId,
+    name: opts.name,
+    owner: opts.owner,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    versions: [version],
+    versions: [opts.version],
     rfis: [],
     changeOrders: [],
   }
-
   const projects = loadProjects()
   projects.unshift(project)
   saveProjects(projects)
   setActiveProjectId(project.id)
+  setActiveVersionId(opts.version.id)
   return project
 }
 
@@ -109,6 +148,8 @@ export function addVersionToProject(projectId: string, version: ScheduleVersion)
   projects[idx].versions.unshift(version)
   projects[idx].updatedAt = new Date().toISOString()
   saveProjects(projects)
+  setActiveProjectId(projectId)
+  setActiveVersionId(version.id)
   return projects[idx]
 }
 
@@ -120,12 +161,23 @@ export function addRFIToActiveProject(rfi: any): Project | null {
   const idx = projects.findIndex(p => p.id === id)
   if (idx === -1) return null
   projects[idx].rfis.unshift({
+    id: 'rfi_' + Date.now().toString(36),
     ...rfi,
     addedAt: new Date().toISOString(),
   })
   projects[idx].updatedAt = new Date().toISOString()
   saveProjects(projects)
   return projects[idx]
+}
+
+export function deleteRFIFromActiveProject(rfiId: string) {
+  const id = getActiveProjectId()
+  if (!id) return
+  const projects = loadProjects()
+  const idx = projects.findIndex(p => p.id === id)
+  if (idx === -1) return
+  projects[idx].rfis = projects[idx].rfis.filter((r: any) => r.id !== rfiId)
+  saveProjects(projects)
 }
 
 export function deleteProject(id: string) {
@@ -137,21 +189,33 @@ export function deleteProject(id: string) {
   }
 }
 
-export function renameProject(id: string, newName: string) {
+export function deleteVersion(projectId: string, versionId: string) {
+  const projects = loadProjects()
+  const idx = projects.findIndex(p => p.id === projectId)
+  if (idx === -1) return
+  projects[idx].versions = projects[idx].versions.filter(v => v.id !== versionId)
+  projects[idx].updatedAt = new Date().toISOString()
+  saveProjects(projects)
+  if (getActiveVersionId() === versionId) {
+    setActiveVersionId(null)
+  }
+}
+
+export function renameProject(id: string, newName: string, projectId?: string) {
   const projects = loadProjects()
   const idx = projects.findIndex(p => p.id === id)
   if (idx === -1) return
   projects[idx].name = newName
+  if (projectId !== undefined) projects[idx].projectId = projectId
   projects[idx].updatedAt = new Date().toISOString()
   saveProjects(projects)
 }
 
-// Migrate from old localStorage schema (pl_last_analysis + pl_rfis) to new project-based one
-// Called once on app load. Safe to run multiple times.
+// Migrate from old localStorage schema to new project-based one
 export function migrateLegacyData() {
   if (typeof window === 'undefined') return
   const projects = loadProjects()
-  if (projects.length > 0) return // already migrated
+  if (projects.length > 0) return
 
   try {
     const legacyAnalysis = localStorage.getItem(LEGACY_ANALYSIS_KEY)
