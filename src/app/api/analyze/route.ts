@@ -86,14 +86,24 @@ Schedule analysis findings:
 
 Top critical drivers: ${(analysis.criticalDrivers || []).slice(0, 5).map((t: any) => `${t.task_code} ${t.task_name}`).join(', ')}
 
-Write a 400-500 word operational analysis in plain language for the PM. Structure:
-1. PROJECT CONDITION (one sentence verdict)
-2. WHAT THE SCHEDULE IS REALLY TELLING YOU (operational interpretation)
-3. THE THREE THINGS THAT MATTER MOST (what to fix first)
-4. CONVERSATIONS TO HAVE THIS WEEK (specific people, specific questions)
-5. TIA EVIDENCE (if delayDays > 30, mention what to document)
+Write a 400-500 word operational analysis focused on HOW TO FIX THIS. The PM needs concrete next steps, not generic commentary. Structure exactly like this:
 
-Be direct. No fluff. Speak like an experienced advisor — not a software report.`
+1. PROJECT CONDITION
+One sentence verdict on where this project stands.
+
+2. WHAT THE SCHEDULE IS REALLY TELLING YOU
+Operational interpretation of the findings — what is actually happening in the field, in plain language.
+
+3. HOW TO FIX THIS — TOP THREE ACTIONS
+Three specific actions the PM should take this week to recover the schedule. Be concrete: name activities, name trades, name decisions. No generic advice.
+
+4. CONVERSATIONS TO HAVE THIS WEEK
+Specific people to call (the architect, the mechanical sub, the owner's PM, the GC scheduler) and specific questions to ask each one. No vague phrases like "communicate with stakeholders".
+
+5. TIA EVIDENCE
+If delayDays > 30, list exactly what to document right now to protect the time extension request. If under 30, write "TIA not yet warranted — continue tracking delay events."
+
+Be direct. No fluff. No "AI-style" hedging. Speak like a senior scheduler who has done this on 100 federal projects.`
 
         const message = await client.messages.create({
           model: 'claude-sonnet-4-5',

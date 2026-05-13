@@ -368,7 +368,7 @@ export default function UploadPage() {
                 { id: 'longlead', label: 'Long Lead Items', icon: '📦' },
                 { id: 'field', label: 'Field Reality', icon: '👷' },
                 { id: 'plain', label: 'Plain Language', icon: '💬' },
-                { id: 'ai', label: 'AI Narrative', icon: '✨' },
+                { id: 'ai', label: 'Narrative', icon: '📝' },
               ].map(t => (
                 <button key={t.id} onClick={() => setActiveTab(t.id)}
                   className={`px-4 py-3 text-xs font-semibold whitespace-nowrap transition-colors ${activeTab === t.id ? 'text-blue-600 border-b-2 border-blue-600 -mb-px' : 'text-slate-500 hover:text-slate-900'}`}>
@@ -550,16 +550,17 @@ export default function UploadPage() {
                 </div>
               )}
 
-              {/* AI NARRATIVE */}
+              {/* NARRATIVE */}
               {activeTab === 'ai' && (
                 <div>
-                  <h3 className="text-sm font-bold mb-3">ProjectLens AI operational analysis</h3>
+                  <h3 className="text-sm font-bold mb-1">Operational analysis — how to fix this</h3>
+                  <p className="text-xs text-slate-500 mb-3">A direct read of what the schedule is telling you, what matters most, and what conversations to have this week.</p>
                   {result.aiNarrative ? (
                     <div className="bg-slate-50 border-l-4 border-blue-500 rounded-r-lg p-4 text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
                       {result.aiNarrative}
                     </div>
                   ) : (
-                    <div className="text-xs text-slate-500 text-center py-8">AI narrative generation requires the ANTHROPIC_API_KEY environment variable to be set.</div>
+                    <div className="text-xs text-slate-500 text-center py-8">Narrative generation requires the ANTHROPIC_API_KEY environment variable to be set.</div>
                   )}
                 </div>
               )}
@@ -742,7 +743,7 @@ export default function UploadPage() {
                 { label: 'Identifying critical path...', done: progress > 45 },
                 { label: 'Detecting logic violations...', done: progress > 60 },
                 { label: 'Flagging long lead items...', done: progress > 75 },
-                { label: 'Generating AI narrative...', done: progress > 90 },
+                { label: 'Generating narrative...', done: progress > 90 },
               ].map(item => (
                 <div key={item.label} className={`flex items-center gap-3 text-xs ${item.done ? 'text-green-600' : 'text-slate-400'}`}>
                   <span>{item.done ? '✅' : '⏳'}</span>
