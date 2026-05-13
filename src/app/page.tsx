@@ -183,7 +183,7 @@ export default function HomePage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {[
               { name: 'Free', price: '$0', period: 'forever', features: ['1 active project', 'XER upload & analysis', '7-tab analysis', 'Print / Save PDF'], cta: 'Start Free', highlight: false },
-              { name: 'ProjectLens', price: '$49', period: '/month', features: ['5 active projects', 'Full Lens analysis', 'AI operational narrative', 'Project history & saves', 'Email support'], cta: 'Start 14-day Trial', highlight: true },
+              { name: 'ProjectLens', price: '$49', period: '/month', features: ['5 active projects', 'Full Lens analysis', 'Operational narrative', 'Project history & saves', 'Email support'], cta: 'Start 14-day Trial', highlight: true },
               { name: 'ProjectLens Plus', price: '$199', period: '/month', features: ['Unlimited projects', 'TIA Comparison Engine', 'Fragnet detection & Word report', 'Multi-user team access', 'Priority support'], cta: 'Start Plus Trial', highlight: false },
             ].map(p => (
               <div key={p.name} className={`rounded-2xl p-6 border ${p.highlight ? 'border-blue-500 bg-white shadow-xl shadow-blue-100 relative' : 'border-slate-200 bg-white'}`}>

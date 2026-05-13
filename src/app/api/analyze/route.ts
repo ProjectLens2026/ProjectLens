@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
       analysis = {
         fileType: fileType,
         projectName: ctx.projectName || file.name,
-        message: 'File received. Detailed parsing is currently optimized for Primavera P6 XER files. AI analysis will use the project context you provided.',
+        message: 'File received. Detailed parsing is currently optimized for Primavera P6 XER files. Narrative will use the project context you provided.',
         healthScore: 65,
         condition: 'Monitor Closely',
         totalActivities: 0,
@@ -114,7 +114,7 @@ Be direct. No fluff. No "AI-style" hedging. Speak like a senior scheduler who ha
         aiNarrative = message.content[0].type === 'text' ? message.content[0].text : ''
       } catch (err: any) {
         console.error('AI narrative error:', err)
-        aiNarrative = `AI narrative unavailable. The schedule analysis above is based on direct file parsing. (Error: ${err.message || 'unknown'})`
+        aiNarrative = `Narrative unavailable. The schedule analysis above is based on direct file parsing. (Error: ${err.message || 'unknown'})`
       }
     }
 

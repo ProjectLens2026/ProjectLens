@@ -647,7 +647,7 @@ export default function UploadPage() {
                 <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Activities with no logic ties (schedule quality)</div>
                 <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Field reality check on in-progress activities</div>
                 <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Plain language summary and TIA evidence</div>
-                <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>AI-generated operational narrative</div>
+                <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Operational narrative — how to fix this</div>
               </div>
             </div>
           </div>
