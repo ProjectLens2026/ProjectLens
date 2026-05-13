@@ -1,6 +1,10 @@
 'use client'
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import {
+  getActiveProject, createProject, addVersionToProject,
+  ScheduleVersion
+} from '@/lib/projectStore'
 
 // Gantt Chart Component
 function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
@@ -259,8 +263,42 @@ export default function UploadPage() {
       if (!res.ok) throw new Error('Analysis failed')
       const data = await res.json()
       setResult(data)
-      // Save to localStorage so Submittals/RFI/Procurement pages can access it
-      try { localStorage.setItem('pl_last_analysis', JSON.stringify(data.analysis)) } catch {}
+
+      // Save as a project version
+      try {
+        const version: ScheduleVersion = {
+          id: 'ver_' + Date.now().toString(36),
+          uploadedAt: new Date().toISOString(),
+          fileName: file?.name || 'schedule.xer',
+          analysis: data.analysis,
+          aiNarrative: data.aiNarrative,
+          context: ctx,
+        }
+
+        const activeProject = getActiveProject()
+
+        // If there's an active project AND user is adding another version
+        // (we detect this if the project name from XER matches existing project)
+        const projectNameFromXER = data.analysis?.projectName || file?.name || 'Untitled Project'
+
+        if (activeProject && (
+          activeProject.name === projectNameFromXER ||
+          activeProject.name.toLowerCase().includes(projectNameFromXER.toLowerCase()) ||
+          projectNameFromXER.toLowerCase().includes(activeProject.name.toLowerCase())
+        )) {
+          // Add as new version to existing project
+          addVersionToProject(activeProject.id, version)
+        } else {
+          // Create a new project
+          createProject(projectNameFromXER, version, ctx.owner)
+        }
+
+        // Keep legacy keys for backward compat with old pages
+        localStorage.setItem('pl_last_analysis', JSON.stringify(data.analysis))
+      } catch (err) {
+        console.error('Failed to save project:', err)
+      }
+
       setTimeout(() => setStep('done'), 500)
 
     } catch (err: any) {

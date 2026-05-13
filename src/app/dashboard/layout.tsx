@@ -1,28 +1,42 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
+import { migrateLegacyData, loadProjects, getActiveProjectId, setActiveProjectId } from '@/lib/projectStore'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
+  const pathname = usePathname()
   const [user, setUser] = useState<any>(null)
   const [checking, setChecking] = useState(true)
 
   useEffect(() => {
+    // Auth check
     const stored = localStorage.getItem('pl_user')
     if (!stored) {
       router.replace('/login')
-    } else {
-      try {
-        setUser(JSON.parse(stored))
-      } catch {
-        router.replace('/login')
-      }
+      return
     }
-    setChecking(false)
-  }, [])
+    try {
+      setUser(JSON.parse(stored))
+    } catch {
+      router.replace('/login')
+      return
+    }
 
-  // Show nothing while checking auth — prevents flash of dashboard
+    // Migrate any legacy data into project store
+    migrateLegacyData()
+
+    // If user has projects but no active project ID, set first one
+    const projects = loadProjects()
+    if (projects.length > 0 && !getActiveProjectId()) {
+      setActiveProjectId(projects[0].id)
+    }
+
+    setChecking(false)
+  }, [router])
+
+  // Show loading state while checking auth
   if (checking || !user) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-900">
       <div className="flex flex-col items-center gap-3">

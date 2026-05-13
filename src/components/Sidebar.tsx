@@ -1,59 +1,88 @@
 'use client'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import clsx from 'clsx'
-
-const nav = [
-  { group: 'Overview', items: [
-    { href: '/dashboard', icon: '⊞', label: 'Dashboard' },
-    { href: '/dashboard/projects', icon: '🏗', label: 'Projects' },
-  ]},
-  { group: 'Project Controls', items: [
-    { href: '/dashboard/schedule', icon: '📅', label: 'Schedule' },
-    { href: '/dashboard/risks', icon: '⚠', label: 'Risks & Issues', badge: '4' },
-    { href: '/dashboard/procurement', icon: '🚚', label: 'Procurement' },
-    { href: '/dashboard/rfis', icon: '❓', label: 'RFIs', badge: '6' },
-    { href: '/dashboard/submittals', icon: '📋', label: 'Submittals' },
-    { href: '/dashboard/changes', icon: '🔄', label: 'Change Orders' },
-  ]},
-  { group: 'Field & Reporting', items: [
-    { href: '/dashboard/site', icon: '👷', label: 'Site Reports' },
-    { href: '/dashboard/meetings', icon: '🤝', label: 'Meetings' },
-    { href: '/dashboard/documents', icon: '📁', label: 'Documents' },
-  ]},
-  { group: 'Intelligence', items: [
-    { href: '/dashboard/lens', icon: '🔍', label: 'Project Lens' },
-    { href: '/dashboard/upload', icon: '⬆', label: 'Upload Schedule' },
-    { href: '/dashboard/tia', icon: '📑', label: 'TIA Comparison' },
-  ]},
-]
+import { getActiveProject, loadProjects, Project } from '@/lib/projectStore'
 
 interface SidebarProps {
   user?: { name: string; role: string; initials: string; company: string }
-  projectName?: string
-  condition?: string
 }
 
-export default function Sidebar({ user, projectName = 'ProjectLens Demo', condition = 'Attention Needed' }: SidebarProps) {
+export default function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
+  const [activeProject, setActiveProject] = useState<Project | null>(null)
+  const [totalProjects, setTotalProjects] = useState(0)
+
+  useEffect(() => {
+    refreshProject()
+    // Poll for changes (when user uploads new project, switches projects, etc.)
+    const interval = setInterval(refreshProject, 1000)
+    return () => clearInterval(interval)
+  }, [pathname])
+
+  function refreshProject() {
+    const p = getActiveProject()
+    setActiveProject(p)
+    setTotalProjects(loadProjects().length)
+  }
 
   function handleSignOut() {
     localStorage.removeItem('pl_user')
-    localStorage.removeItem('pl_last_analysis')
     router.push('/login')
   }
 
+  const latest = activeProject?.versions?.[0]
+  const analysis = latest?.analysis
+  const condition = analysis?.condition || 'No data'
   const condColor = condition === 'Stable' ? 'text-green-400' :
-                   condition.includes('Recovery') ? 'text-red-400' : 'text-yellow-400'
+                   condition.includes('Recovery') ? 'text-red-400' :
+                   condition.includes('Attention') ? 'text-amber-400' :
+                   condition.includes('Monitor') ? 'text-yellow-400' : 'text-slate-400'
   const condDot = condition === 'Stable' ? 'bg-green-400' :
-                  condition.includes('Recovery') ? 'bg-red-400' : 'bg-yellow-400'
+                  condition.includes('Recovery') ? 'bg-red-400' :
+                  condition.includes('Attention') ? 'bg-amber-400' :
+                  condition.includes('Monitor') ? 'bg-yellow-400' : 'bg-slate-400'
+
+  // Build nav based on whether there's an active project
+  const overviewItems = [
+    { href: '/dashboard/projects', icon: '🏗', label: 'Projects', badge: totalProjects > 0 ? String(totalProjects) : null },
+  ]
+
+  const projectScopedNav = activeProject ? [
+    {
+      group: 'Active Project',
+      items: [
+        { href: '/dashboard', icon: '⊞', label: 'Dashboard' },
+        { href: '/dashboard/lens', icon: '🔍', label: 'ProjectLens' },
+      ]
+    },
+    {
+      group: 'Project Controls',
+      items: [
+        { href: '/dashboard/schedule', icon: '📅', label: 'Schedule' },
+        { href: '/dashboard/risks', icon: '⚠', label: 'Risks & Issues' },
+        { href: '/dashboard/procurement', icon: '🚚', label: 'Procurement' },
+        { href: '/dashboard/rfis', icon: '❓', label: 'RFIs', badge: activeProject.rfis.length > 0 ? String(activeProject.rfis.length) : null },
+        { href: '/dashboard/submittals', icon: '📋', label: 'Submittals' },
+        { href: '/dashboard/changes', icon: '🔄', label: 'Change Orders' },
+      ]
+    },
+    {
+      group: 'Schedule Tools',
+      items: [
+        { href: '/dashboard/upload', icon: '⬆', label: 'Upload New Version' },
+        { href: '/dashboard/tia', icon: '📑', label: 'TIA Comparison' },
+      ]
+    },
+  ] : []
 
   return (
-    <aside className="w-56 flex-shrink-0 flex flex-col h-full" style={{ background: '#0d1b2e' }}>
+    <aside className="w-56 flex-shrink-0 flex flex-col h-full no-print" style={{ background: '#0d1b2e' }}>
       {/* Logo */}
       <div className="px-4 py-5 border-b border-white/10 flex-shrink-0">
-        <div className="flex items-center gap-2.5">
+        <Link href="/dashboard/projects" className="flex items-center gap-2.5">
           <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
               <circle cx="11" cy="11" r="4"/><circle cx="11" cy="11" r="8.5"/>
@@ -64,25 +93,66 @@ export default function Sidebar({ user, projectName = 'ProjectLens Demo', condit
             <div className="text-white font-extrabold text-sm tracking-tight">ProjectLens</div>
             <div className="text-white/30 text-[9px]">Construction Intelligence</div>
           </div>
-        </div>
+        </Link>
       </div>
 
       {/* Active project pill */}
       <div className="mx-3 my-3 bg-white/5 rounded-lg p-3 border border-white/10 flex-shrink-0">
         <div className="text-white/30 text-[9px] uppercase tracking-widest mb-1">Active Project</div>
-        <div className="text-white text-xs font-semibold leading-tight">{projectName}</div>
-        <div className="flex items-center gap-1.5 mt-1.5">
-          <div className={`w-1.5 h-1.5 rounded-full ${condDot} animate-pulse`} />
-          <span className={`text-[10px] font-medium ${condColor}`}>{condition}</span>
-        </div>
+        {activeProject ? (
+          <>
+            <div className="text-white text-xs font-semibold leading-tight truncate" title={activeProject.name}>
+              {activeProject.name}
+            </div>
+            {analysis ? (
+              <div className="flex items-center gap-1.5 mt-1.5">
+                <div className={`w-1.5 h-1.5 rounded-full ${condDot} animate-pulse`} />
+                <span className={`text-[10px] font-medium ${condColor}`}>{condition}</span>
+              </div>
+            ) : (
+              <div className="text-[10px] text-white/40 mt-1.5">No schedule uploaded</div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="text-white/60 text-xs italic">No active project</div>
+            <Link href="/dashboard/projects" className="text-[10px] text-blue-400 hover:underline mt-1 inline-block">
+              Select a project →
+            </Link>
+          </>
+        )}
       </div>
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-2 pb-3">
-        {nav.map(group => (
+        {/* Overview - always shown */}
+        <div className="mb-1">
+          <div className="text-white/25 text-[9px] uppercase tracking-widest px-2 py-2">Overview</div>
+          {overviewItems.map(item => {
+            const active = pathname === item.href
+            return (
+              <Link key={item.href} href={item.href}
+                className={clsx(
+                  'flex items-center gap-2.5 px-3 py-2 rounded-lg mb-0.5 transition-all text-xs font-medium border-l-2',
+                  active
+                    ? 'bg-blue-600/20 text-white border-blue-500'
+                    : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
+                )}>
+                <span className="text-sm w-4 text-center">{item.icon}</span>
+                <span className="flex-1">{item.label}</span>
+                {item.badge && (
+                  <span className="bg-blue-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">{item.badge}</span>
+                )}
+              </Link>
+            )
+          })}
+        </div>
+
+        {/* Project-scoped nav - only shown when a project is active */}
+        {projectScopedNav.map(group => (
           <div key={group.group} className="mb-1">
             <div className="text-white/25 text-[9px] uppercase tracking-widest px-2 py-2">{group.group}</div>
-            {group.items.map(item => {
+            {group.items.map((item: any) => {
               const active = pathname === item.href
               return (
                 <Link key={item.href} href={item.href}
