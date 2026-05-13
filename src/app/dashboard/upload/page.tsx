@@ -3,110 +3,194 @@ import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
 // Gantt Chart Component
-function GanttChart({ activities, dataDate, projectedEnd }: { activities: any[], dataDate: string, projectedEnd: string }) {
-  if (!activities || activities.length === 0) {
-    return <div className="text-center py-8 text-slate-400 text-sm">No activities with 0 or negative float found.</div>
-  }
+function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
+  activities: any[]  // 0 or negative float activities
+  drivingPath: any[] // driving_path_flag = Y activities (fallback)
+  dataDate: string
+  projectedEnd: string
+}) {
+  const hasZeroNegFloat = activities && activities.length > 0
+  const hasDrivingPath = drivingPath && drivingPath.length > 0
+  const displayActivities = hasZeroNegFloat ? activities : (hasDrivingPath ? drivingPath : [])
+  const mode = hasZeroNegFloat ? 'float' : hasDrivingPath ? 'driving' : 'none'
 
-  const start = new Date(dataDate?.replace(' ', 'T') || new Date())
-  const end = new Date(projectedEnd?.replace(' ', 'T') || new Date())
-  const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)))
+  function renderGantt(acts: any[]) {
+    const start = new Date(dataDate?.replace(' ', 'T') || new Date())
+    const end = new Date(projectedEnd?.replace(' ', 'T') || new Date())
+    const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)))
 
-  function getLeft(dateStr?: string) {
-    if (!dateStr) return 0
-    const d = new Date(dateStr.replace(' ', 'T'))
-    const days = Math.round((d.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
-    return Math.max(0, Math.min(100, (days / totalDays) * 100))
-  }
-
-  function getWidth(startStr?: string, endStr?: string) {
-    if (!startStr || !endStr) return 1
-    const s = new Date(startStr.replace(' ', 'T'))
-    const e = new Date(endStr.replace(' ', 'T'))
-    const days = Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24))
-    return Math.max(0.5, Math.min(100, (days / totalDays) * 100))
-  }
-
-  function shortDate(d?: string) { return d ? d.slice(0, 10) : '—' }
-
-  // Generate month labels
-  const months: { label: string; left: number }[] = []
-  const cur = new Date(start)
-  cur.setDate(1)
-  while (cur <= end) {
-    const left = getLeft(cur.toISOString())
-    if (left >= 0 && left <= 100) {
-      months.push({ label: cur.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }), left })
+    function getLeft(dateStr?: string) {
+      if (!dateStr) return 0
+      const d = new Date(dateStr.replace(' ', 'T'))
+      const days = Math.round((d.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
+      return Math.max(0, Math.min(100, (days / totalDays) * 100))
     }
-    cur.setMonth(cur.getMonth() + 1)
-  }
 
-  const displayed = activities.slice(0, 100)
+    function getWidth(startStr?: string, endStr?: string) {
+      if (!startStr || !endStr) return 1
+      const s = new Date(startStr.replace(' ', 'T'))
+      const e = new Date(endStr.replace(' ', 'T'))
+      const days = Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24))
+      return Math.max(0.5, Math.min(100, (days / totalDays) * 100))
+    }
 
-  return (
-    <div className="overflow-auto max-h-[600px] border border-slate-200 rounded-xl">
-      {/* Timeline header */}
-      <div className="sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
-        <div className="flex">
-          <div className="w-80 flex-shrink-0 px-3 py-2 text-[10px] font-bold text-slate-500 uppercase border-r border-slate-200">Activity</div>
-          <div className="flex-1 relative h-8 min-w-[600px]">
-            {months.map((m, i) => (
-              <div key={i} className="absolute top-0 h-full flex items-center" style={{ left: `${m.left}%` }}>
-                <div className="h-full border-l border-slate-300 border-dashed" />
-                <span className="text-[9px] text-slate-400 ml-1 whitespace-nowrap">{m.label}</span>
-              </div>
-            ))}
+    function shortDate(d?: string) { return d ? d.slice(0, 10) : '—' }
+
+    const months: { label: string; left: number }[] = []
+    const cur = new Date(start)
+    cur.setDate(1)
+    while (cur <= end) {
+      const left = getLeft(cur.toISOString())
+      if (left >= 0 && left <= 100) {
+        months.push({ label: cur.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }), left })
+      }
+      cur.setMonth(cur.getMonth() + 1)
+    }
+
+    const displayed = acts.slice(0, 100)
+
+    return (
+      <div className="overflow-auto max-h-[550px] border border-slate-200 rounded-xl">
+        <div className="sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
+          <div className="flex">
+            <div className="w-80 flex-shrink-0 px-3 py-2 text-[10px] font-bold text-slate-500 uppercase border-r border-slate-200">Activity</div>
+            <div className="flex-1 relative h-8 min-w-[600px]">
+              {months.map((m, i) => (
+                <div key={i} className="absolute top-0 h-full flex items-center" style={{ left: `${m.left}%` }}>
+                  <div className="h-full border-l border-slate-300 border-dashed" />
+                  <span className="text-[9px] text-slate-400 ml-1 whitespace-nowrap">{m.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+        {displayed.map((t: any, i: number) => {
+          const taskStart = t.act_start_date || t.early_start_date || t.target_start_date || ''
+          const taskEnd = t.early_end_date || t.act_end_date || t.target_end_date || ''
+          const float = parseFloat(t.total_float_hr_cnt || '0')
+          const isComplete = t.status_code === 'TK_Complete'
+          const barColor = isComplete ? 'bg-slate-400' : mode === 'driving' ? 'bg-blue-500' : float < 0 ? 'bg-red-500' : 'bg-amber-500'
+          const left = getLeft(taskStart)
+          const width = getWidth(taskStart, taskEnd)
+          const pct = parseFloat(t.phys_complete_pct || '0')
 
-      {/* Rows */}
-      {displayed.map((t: any, i: number) => {
-        const taskStart = t.act_start_date || t.early_start_date || t.target_start_date || ''
-        const taskEnd = t.early_end_date || t.act_end_date || t.target_end_date || ''
-        const float = parseFloat(t.total_float_hr_cnt || '0')
-        const isComplete = t.status_code === 'TK_Complete'
-        const barColor = isComplete ? 'bg-slate-400' : float < 0 ? 'bg-red-500' : 'bg-amber-500'
-        const left = getLeft(taskStart)
-        const width = getWidth(taskStart, taskEnd)
-        const pct = parseFloat(t.phys_complete_pct || '0')
-
-        return (
-          <div key={i} className={`flex border-b border-slate-100 hover:bg-blue-50/30 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
-            {/* Activity info */}
-            <div className="w-80 flex-shrink-0 px-3 py-2 border-r border-slate-100 flex items-center gap-2">
-              <div className="min-w-0">
-                <div className="text-[11px] font-mono font-bold text-slate-800 truncate">{t.task_code}</div>
-                <div className="text-[10px] text-slate-500 truncate">{t.task_name}</div>
+          return (
+            <div key={i} className={`flex border-b border-slate-100 hover:bg-blue-50/30 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
+              <div className="w-80 flex-shrink-0 px-3 py-2 border-r border-slate-100 flex items-center gap-2">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-mono font-bold text-slate-800 truncate">{t.task_code}</div>
+                  <div className="text-[10px] text-slate-500 truncate">{t.task_name}</div>
+                </div>
+                <div className={`ml-auto text-[10px] font-bold flex-shrink-0 ${float < 0 ? 'text-red-600' : float === 0 ? 'text-amber-600' : 'text-green-600'}`}>
+                  {Math.round(float / 8)}d
+                </div>
               </div>
-              <div className={`ml-auto text-[10px] font-bold flex-shrink-0 ${float < 0 ? 'text-red-600' : float === 0 ? 'text-amber-600' : 'text-green-600'}`}>
-                {Math.round(float / 8)}d
-              </div>
-            </div>
-
-            {/* Bar */}
-            <div className="flex-1 relative py-2 min-w-[600px] h-10">
-              <div className="absolute inset-y-0 flex items-center" style={{ left: `${left}%`, width: `${width}%`, minWidth: '4px' }}>
-                <div className={`relative h-5 w-full rounded-sm ${barColor} opacity-80 overflow-hidden`}>
-                  {/* Progress fill */}
-                  <div className="absolute inset-y-0 left-0 bg-black/20 rounded-l-sm" style={{ width: `${pct}%` }} />
-                  {/* Label if wide enough */}
-                  {width > 8 && (
-                    <div className="absolute inset-0 flex items-center px-1">
-                      <span className="text-[9px] text-white font-semibold truncate">{shortDate(taskEnd)}</span>
-                    </div>
-                  )}
+              <div className="flex-1 relative py-2 min-w-[600px] h-10">
+                <div className="absolute inset-y-0 flex items-center" style={{ left: `${left}%`, width: `${width}%`, minWidth: '4px' }}>
+                  <div className={`relative h-5 w-full rounded-sm ${barColor} opacity-80 overflow-hidden`}>
+                    <div className="absolute inset-y-0 left-0 bg-black/20 rounded-l-sm" style={{ width: `${pct}%` }} />
+                    {width > 8 && (
+                      <div className="absolute inset-0 flex items-center px-1">
+                        <span className="text-[9px] text-white font-semibold truncate">{shortDate(taskEnd)}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
+          )
+        })}
+        {acts.length > 100 && (
+          <div className="text-center py-3 text-xs text-slate-400 border-t border-slate-200">
+            Showing first 100 of {acts.length} activities
           </div>
-        )
-      })}
-      {activities.length > 100 && (
-        <div className="text-center py-3 text-xs text-slate-400 border-t border-slate-200">
-          Showing first 100 of {activities.length} activities
+        )}
+      </div>
+    )
+  }
+
+  // Case 1: No activities at all
+  if (mode === 'none') {
+    return (
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
+        <div className="flex gap-3 items-start">
+          <div className="text-2xl">⚠️</div>
+          <div>
+            <div className="font-bold text-amber-900 mb-1">Gantt chart cannot be displayed</div>
+            <div className="text-sm text-amber-800 leading-relaxed mb-3">
+              ProjectLens could not find any activities with driving path or float data in this schedule.
+              This usually means the schedule has not been calculated in P6, or the XER was exported before
+              a schedule calculation was run.
+            </div>
+            <div className="text-xs font-bold text-amber-700 mb-1">What to do:</div>
+            <div className="text-xs text-amber-700 leading-relaxed">
+              Open the schedule in Primavera P6, run Schedule (F9), then re-export the XER and upload again.
+            </div>
+          </div>
         </div>
-      )}
+      </div>
+    )
+  }
+
+  // Case 2: No 0/negative float but has driving path — explain why and show driving path
+  if (mode === 'driving') {
+    return (
+      <div className="space-y-4">
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
+          <div className="flex gap-3 items-start">
+            <div className="text-2xl">ℹ️</div>
+            <div>
+              <div className="font-bold text-blue-900 mb-1">
+                Critical path is showing positive float — here is why
+              </div>
+              <div className="text-sm text-blue-800 leading-relaxed mb-3">
+                All activities in this schedule carry positive total float — meaning no activity is technically
+                "late" according to the schedule calculation. This is usually caused by one of the following:
+              </div>
+              <div className="space-y-2 text-sm text-blue-800">
+                <div className="flex gap-2">
+                  <span className="font-bold flex-shrink-0">1.</span>
+                  <span><span className="font-semibold">No "Must Finish By" constraint on the completion milestone.</span> If the project finish milestone has no hard constraint date, P6 calculates float against an open-ended horizon — so everything appears to have float even if the project is running late against the contract date.</span>
+                </div>
+                <div className="flex gap-2">
+                  <span className="font-bold flex-shrink-0">2.</span>
+                  <span><span className="font-semibold">Schedule calculated without a project deadline.</span> The scheduler may not have set the contract completion date as a constraint in P6. The network drives the dates but there is no fixed end date to calculate float against.</span>
+                </div>
+                <div className="flex gap-2">
+                  <span className="font-bold flex-shrink-0">3.</span>
+                  <span><span className="font-semibold">Float type set to "Finish Float" instead of "Total Float."</span> Some P6 configurations calculate float differently, which can show positive values even on a driving path.</span>
+                </div>
+              </div>
+              <div className="mt-4 p-3 bg-blue-100 rounded-lg text-xs text-blue-900 leading-relaxed">
+                <span className="font-bold">What this means operationally:</span> The schedule is showing a longest path but not a true critical path with float enforcement. 
+                The PM should verify in P6 that a "Must Finish By" constraint is set on the contract completion milestone (MM-125 or equivalent). 
+                Without this, the schedule cannot accurately calculate negative float or show the true delay condition.
+                This is an important finding to discuss with the project scheduler and document in the schedule narrative.
+              </div>
+              <div className="mt-3 text-xs text-blue-700 font-semibold">
+                ProjectLens is showing the Longest Path (driving path flag = Y) as the best available substitute:
+              </div>
+            </div>
+          </div>
+        </div>
+        {renderGantt(displayActivities)}
+        <div className="text-xs text-slate-400 text-center">
+          Bars shown in blue = longest path activities · Float values shown are positive (no finish constraint detected)
+        </div>
+      </div>
+    )
+  }
+
+  // Case 3: Normal — show 0/negative float activities
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-4 text-xs">
+        <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-red-500" /><span className="text-slate-600">Negative float (behind schedule)</span></div>
+        <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-amber-500" /><span className="text-slate-600">Zero float (on the critical path)</span></div>
+        <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-slate-400" /><span className="text-slate-600">Complete</span></div>
+        <div className="ml-auto text-slate-400">{activities.length} activities · sorted by early finish date</div>
+      </div>
+      {renderGantt(displayActivities)}
     </div>
   )
 }
@@ -299,7 +383,7 @@ export default function UploadPage() {
                 <div>
                   <h3 className="text-sm font-bold mb-1">Critical Path Gantt — activities with 0 or negative float</h3>
                   <p className="text-xs text-slate-500 mb-4">Sorted by early finish date. Red = negative float, Orange = zero float, Gray = complete.</p>
-                  <GanttChart activities={a.ganttActivities || []} dataDate={a.dataDate} projectedEnd={a.projectedEnd} />
+                  <GanttChart activities={a.ganttActivities || []} drivingPath={a.criticalDrivers || []} dataDate={a.dataDate} projectedEnd={a.projectedEnd} />
                 </div>
               )}
 
