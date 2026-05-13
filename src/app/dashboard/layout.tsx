@@ -6,16 +6,33 @@ import Sidebar from '@/components/Sidebar'
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
+  const [checking, setChecking] = useState(true)
 
   useEffect(() => {
     const stored = localStorage.getItem('pl_user')
-    if (!stored) { router.push('/login'); return }
-    setUser(JSON.parse(stored))
+    if (!stored) {
+      router.replace('/login')
+    } else {
+      try {
+        setUser(JSON.parse(stored))
+      } catch {
+        router.replace('/login')
+      }
+    }
+    setChecking(false)
   }, [])
 
-  if (!user) return (
+  // Show nothing while checking auth — prevents flash of dashboard
+  if (checking || !user) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-900">
-      <div className="text-white text-sm animate-pulse">Opening your workspace...</div>
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center animate-pulse">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
+            <circle cx="11" cy="11" r="4"/><circle cx="11" cy="11" r="8.5"/>
+          </svg>
+        </div>
+        <div className="text-white/40 text-sm">Loading ProjectLens...</div>
+      </div>
     </div>
   )
 

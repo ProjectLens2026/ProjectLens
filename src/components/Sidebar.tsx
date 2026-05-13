@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import clsx from 'clsx'
 
 const nav = [
@@ -9,7 +9,7 @@ const nav = [
     { href: '/dashboard/projects', icon: '🏗', label: 'Projects' },
   ]},
   { group: 'Project Controls', items: [
-    { href: '/dashboard/schedule', icon: '📅', label: 'Schedule', badge: '' },
+    { href: '/dashboard/schedule', icon: '📅', label: 'Schedule' },
     { href: '/dashboard/risks', icon: '⚠', label: 'Risks & Issues', badge: '4' },
     { href: '/dashboard/procurement', icon: '🚚', label: 'Procurement' },
     { href: '/dashboard/rfis', icon: '❓', label: 'RFIs', badge: '6' },
@@ -36,6 +36,13 @@ interface SidebarProps {
 
 export default function Sidebar({ user, projectName = 'ProjectLens Demo', condition = 'Attention Needed' }: SidebarProps) {
   const pathname = usePathname()
+  const router = useRouter()
+
+  function handleSignOut() {
+    localStorage.removeItem('pl_user')
+    localStorage.removeItem('pl_last_analysis')
+    router.push('/login')
+  }
 
   const condColor = condition === 'Stable' ? 'text-green-400' :
                    condition.includes('Recovery') ? 'text-red-400' : 'text-yellow-400'
@@ -97,18 +104,24 @@ export default function Sidebar({ user, projectName = 'ProjectLens Demo', condit
         ))}
       </nav>
 
-      {/* User */}
+      {/* User + Sign Out */}
       {user && (
         <div className="px-3 py-3 border-t border-white/10 flex-shrink-0">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 mb-2">
             <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
               {user.initials}
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="text-white text-xs font-semibold truncate">{user.name}</div>
               <div className="text-white/40 text-[10px] truncate">{user.role}</div>
             </div>
           </div>
+          <button
+            onClick={handleSignOut}
+            className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all text-xs border border-white/10 hover:border-white/20">
+            <span>🚪</span>
+            <span>Sign Out</span>
+          </button>
         </div>
       )}
     </aside>
