@@ -1,19 +1,185 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { getActiveProject, getActiveAnalysis, getActiveProjectRFIs } from '@/lib/projectStore'
+import { getActiveProject, getActiveAnalysis } from '@/lib/projectStore'
 
-interface RiskItem {
-  category: string
-  title: string
-  detail: string
-  severity: 'critical' | 'high' | 'medium'
+// Gantt Chart Component
+function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
+  activities: any[]
+  drivingPath: any[]
+  dataDate: string
+  projectedEnd: string
+}) {
+  const hasZeroNegFloat = activities && activities.length > 0
+  const hasDrivingPath = drivingPath && drivingPath.length > 0
+  const displayActivities = hasZeroNegFloat ? activities : (hasDrivingPath ? drivingPath : [])
+  const mode = hasZeroNegFloat ? 'float' : hasDrivingPath ? 'driving' : 'none'
+
+  function renderGantt(acts: any[]) {
+    const start = new Date(dataDate?.replace(' ', 'T') || new Date())
+    const end = new Date(projectedEnd?.replace(' ', 'T') || new Date())
+    const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)))
+
+    function getLeft(dateStr?: string) {
+      if (!dateStr) return 0
+      const d = new Date(dateStr.replace(' ', 'T'))
+      const days = Math.round((d.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
+      return Math.max(0, Math.min(100, (days / totalDays) * 100))
+    }
+
+    function getWidth(startStr?: string, endStr?: string) {
+      if (!startStr || !endStr) return 1
+      const s = new Date(startStr.replace(' ', 'T'))
+      const e = new Date(endStr.replace(' ', 'T'))
+      const days = Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24))
+      return Math.max(0.5, Math.min(100, (days / totalDays) * 100))
+    }
+
+    function shortDate(d?: string) { return d ? d.slice(0, 10) : '—' }
+
+    const months: { label: string; left: number }[] = []
+    const cur = new Date(start)
+    cur.setDate(1)
+    while (cur <= end) {
+      const left = getLeft(cur.toISOString())
+      if (left >= 0 && left <= 100) {
+        months.push({ label: cur.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }), left })
+      }
+      cur.setMonth(cur.getMonth() + 1)
+    }
+
+    const displayed = acts.slice(0, 100)
+
+    return (
+      <div className="overflow-auto max-h-[550px] border border-slate-200 rounded-xl">
+        <div className="sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
+          <div className="flex">
+            <div className="w-80 flex-shrink-0 px-3 py-2 text-[10px] font-bold text-slate-500 uppercase border-r border-slate-200">Activity</div>
+            <div className="flex-1 relative h-8 min-w-[600px]">
+              {months.map((m, i) => (
+                <div key={i} className="absolute top-0 h-full flex items-center" style={{ left: `${m.left}%` }}>
+                  <div className="h-full border-l border-slate-300 border-dashed" />
+                  <span className="text-[9px] text-slate-400 ml-1 whitespace-nowrap">{m.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        {displayed.map((t: any, i: number) => {
+          const taskStart = t.act_start_date || t.early_start_date || t.target_start_date || ''
+          const taskEnd = t.early_end_date || t.act_end_date || t.target_end_date || ''
+          const float = parseFloat(t.total_float_hr_cnt || '0')
+          const isComplete = t.status_code === 'TK_Complete'
+          const barColor = isComplete ? 'bg-slate-400' : mode === 'driving' ? 'bg-blue-500' : float < 0 ? 'bg-red-500' : 'bg-amber-500'
+          const left = getLeft(taskStart)
+          const width = getWidth(taskStart, taskEnd)
+          const pct = parseFloat(t.phys_complete_pct || '0')
+
+          return (
+            <div key={i} className={`flex border-b border-slate-100 hover:bg-blue-50/30 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
+              <div className="w-80 flex-shrink-0 px-3 py-2 border-r border-slate-100 flex items-center gap-2">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-mono font-bold text-slate-800 truncate">{t.task_code}</div>
+                  <div className="text-[10px] text-slate-500 truncate">{t.task_name}</div>
+                </div>
+                <div className={`ml-auto text-[10px] font-bold flex-shrink-0 ${float < 0 ? 'text-red-600' : float === 0 ? 'text-amber-600' : 'text-green-600'}`}>
+                  {Math.round(float / 8)}d
+                </div>
+              </div>
+              <div className="flex-1 relative py-2 min-w-[600px] h-10">
+                <div className="absolute inset-y-0 flex items-center" style={{ left: `${left}%`, width: `${width}%`, minWidth: '4px' }}>
+                  <div className={`relative h-5 w-full rounded-sm ${barColor} opacity-80 overflow-hidden`}>
+                    <div className="absolute inset-y-0 left-0 bg-black/20 rounded-l-sm" style={{ width: `${pct}%` }} />
+                    {width > 8 && (
+                      <div className="absolute inset-0 flex items-center px-1">
+                        <span className="text-[9px] text-white font-semibold truncate">{shortDate(taskEnd)}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+        {acts.length > 100 && (
+          <div className="text-center py-3 text-xs text-slate-400 border-t border-slate-200">
+            Showing first 100 of {acts.length} activities
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (mode === 'none') {
+    return (
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
+        <div className="flex gap-3 items-start">
+          <div className="text-2xl">⚠️</div>
+          <div>
+            <div className="font-bold text-amber-900 mb-1">Gantt chart cannot be displayed</div>
+            <div className="text-sm text-amber-800 leading-relaxed mb-3">
+              ProjectLens could not find any activities with driving path or float data in this schedule.
+              This usually means the schedule has not been calculated in P6, or the XER was exported before
+              a schedule calculation was run.
+            </div>
+            <div className="text-xs font-bold text-amber-700 mb-1">What to do:</div>
+            <div className="text-xs text-amber-700 leading-relaxed">
+              Open the schedule in Primavera P6, run Schedule (F9), then re-export the XER and upload again.
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (mode === 'driving') {
+    return (
+      <div className="space-y-4">
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
+          <div className="flex gap-3 items-start">
+            <div className="text-2xl">ℹ️</div>
+            <div>
+              <div className="font-bold text-blue-900 mb-1">Critical path is showing positive float — here is why</div>
+              <div className="text-sm text-blue-800 leading-relaxed mb-3">
+                All activities in this schedule carry positive total float — meaning no activity is technically "late" according to the schedule calculation. This is usually caused by:
+              </div>
+              <div className="space-y-2 text-sm text-blue-800">
+                <div className="flex gap-2"><span className="font-bold flex-shrink-0">1.</span><span><span className="font-semibold">No "Must Finish By" constraint on the completion milestone.</span> If the project finish milestone has no hard constraint date, P6 calculates float against an open-ended horizon.</span></div>
+                <div className="flex gap-2"><span className="font-bold flex-shrink-0">2.</span><span><span className="font-semibold">Schedule calculated without a project deadline.</span> The scheduler may not have set the contract completion date as a constraint in P6.</span></div>
+                <div className="flex gap-2"><span className="font-bold flex-shrink-0">3.</span><span><span className="font-semibold">Float type set to "Finish Float" instead of "Total Float."</span></span></div>
+              </div>
+              <div className="mt-4 p-3 bg-blue-100 rounded-lg text-xs text-blue-900 leading-relaxed">
+                <span className="font-bold">What this means operationally:</span> The schedule is showing a longest path but not a true critical path with float enforcement. The PM should verify in P6 that a "Must Finish By" constraint is set on the contract completion milestone.
+              </div>
+              <div className="mt-3 text-xs text-blue-700 font-semibold">
+                ProjectLens is showing the Longest Path (driving path flag = Y) as the best available substitute:
+              </div>
+            </div>
+          </div>
+        </div>
+        {renderGantt(displayActivities)}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-4 text-xs">
+        <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-red-500" /><span className="text-slate-600">Negative float (behind schedule)</span></div>
+        <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-amber-500" /><span className="text-slate-600">Zero float (on the critical path)</span></div>
+        <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-slate-400" /><span className="text-slate-600">Complete</span></div>
+        <div className="ml-auto text-slate-400">{activities.length} activities · sorted by early finish date</div>
+      </div>
+      {renderGantt(displayActivities)}
+    </div>
+  )
 }
 
-export default function ProjectLensPage() {
+
+export default function ProjectLensAnalysisPage() {
   const [analysis, setAnalysis] = useState<any>(null)
-  const [rfis, setRfis] = useState<any[]>([])
   const [project, setProject] = useState<any>(null)
+  const [activeTab, setActiveTab] = useState('gantt')
 
   useEffect(() => {
     refresh()
@@ -24,153 +190,38 @@ export default function ProjectLensPage() {
   function refresh() {
     setProject(getActiveProject())
     setAnalysis(getActiveAnalysis())
-    setRfis(getActiveProjectRFIs())
   }
 
-  function shortDate(d?: string) {
-    if (!d) return '—'
-    return d.slice(0, 10)
+  function fmtFloat(hours: string | number) {
+    const h = typeof hours === 'string' ? parseFloat(hours || '0') : hours
+    if (isNaN(h)) return '—'
+    return Math.round(h / 8) + 'd'
   }
 
-  // Auto-detect risks from XER findings
-  function detectRisks(a: any): RiskItem[] {
-    if (!a) return []
-    const risks: RiskItem[] = []
-
-    if (a.delayDays > 30) {
-      risks.push({
-        category: 'TIA',
-        title: `Project ${a.delayDays} days behind contract — TIA territory`,
-        detail: 'Begin documenting delay events and supporting evidence immediately.',
-        severity: 'critical',
-      })
-    }
-
-    if (a.negativeFloat > 50) {
-      risks.push({
-        category: 'Critical Path',
-        title: `${a.negativeFloat} activities on negative float`,
-        detail: 'Critical path is compromised across multiple work fronts.',
-        severity: 'critical',
-      })
-    } else if (a.negativeFloat > 0) {
-      risks.push({
-        category: 'Critical Path',
-        title: `${a.negativeFloat} activities running behind`,
-        detail: 'Schedule has activities with negative float requiring intervention.',
-        severity: 'high',
-      })
-    }
-
-    const longLeadAtRisk = (a.longLeadItems || []).filter((t: any) => t.floatDays < 0).length
-    if (longLeadAtRisk > 0) {
-      risks.push({
-        category: 'Procurement',
-        title: `${longLeadAtRisk} long lead items with negative float`,
-        detail: 'Procurement delays threatening project completion.',
-        severity: 'critical',
-      })
-    }
-
-    if (a.outOfSequence?.length > 20) {
-      risks.push({
-        category: 'Logic Integrity',
-        title: `${a.outOfSequence.length} out-of-sequence violations`,
-        detail: 'Schedule logic integrity compromised — work being performed out of planned order.',
-        severity: 'high',
-      })
-    } else if (a.outOfSequence?.length > 5) {
-      risks.push({
-        category: 'Logic Integrity',
-        title: `${a.outOfSequence.length} out-of-sequence violations`,
-        detail: 'Some activities running out of planned sequence.',
-        severity: 'medium',
-      })
-    }
-
-    if (a.noTies?.length > 10) {
-      risks.push({
-        category: 'Schedule Quality',
-        title: `${a.noTies.length} activities with no logic ties`,
-        detail: 'Schedule quality issues — activities missing predecessors or successors.',
-        severity: 'high',
-      })
-    }
-
-    // Major milestone risk — look for milestones in critical drivers
-    const milestones = (a.criticalDrivers || []).filter((t: any) =>
-      t.task_type === 'TT_FinMile' || t.task_type === 'TT_Mile' ||
-      (t.task_name || '').toUpperCase().includes('MILESTONE') ||
-      (t.task_name || '').toUpperCase().includes('SUBSTANTIAL') ||
-      (t.task_name || '').toUpperCase().includes('COMPLETION')
-    )
-    if (milestones.length > 0) {
-      risks.push({
-        category: 'Milestones',
-        title: `Major milestones at risk`,
-        detail: `${milestones.length} contractual milestone(s) on critical path.`,
-        severity: 'critical',
-      })
-    }
-
-    if (a.healthScore < 40) {
-      risks.push({
-        category: 'Overall Health',
-        title: 'Project in recovery condition',
-        detail: 'Health score below 40 — comprehensive recovery plan required.',
-        severity: 'critical',
-      })
-    }
-
-    return risks
+  function conditionColor(cond: string) {
+    if (cond === 'Recovery Required') return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-900' }
+    if (cond === 'Attention Needed') return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-900' }
+    if (cond === 'Monitor Closely') return { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-900' }
+    return { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-900' }
   }
 
-  const risks = detectRisks(analysis)
-  const criticalRisks = risks.filter(r => r.severity === 'critical')
-  const topLongLead = (analysis?.longLeadItems || []).slice(0, 10)
-  const topCritical = (analysis?.criticalDrivers || []).slice(0, 8)
-  const submittalCount = (analysis?.longLeadItems?.length || 0) + (analysis?.shortLeadItems?.length || 0)
-  
-  // RFI summary
-  const scheduleImpactingRfis = rfis.filter(r => r.evaluation?.classification === 'SCHEDULE_IMPACTING')
-  const potentialRfis = rfis.filter(r => r.evaluation?.classification === 'POTENTIALLY_IMPACTING')
-  const infoRfis = rfis.filter(r => r.evaluation?.classification === 'INFORMATIONAL')
-
-  // Change orders — manual entry not yet built
-  const changeOrders: any[] = []
-
-  function conditionColor(c?: string) {
-    if (c === 'Recovery Required') return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', dot: 'bg-red-500' }
-    if (c === 'Attention Needed') return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', dot: 'bg-amber-500' }
-    if (c === 'Monitor Closely') return { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-700', dot: 'bg-yellow-500' }
-    return { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-700', dot: 'bg-green-500' }
-  }
-
-  function severityColor(s: string) {
-    if (s === 'critical') return 'bg-red-100 text-red-700 border-red-200'
-    if (s === 'high') return 'bg-amber-100 text-amber-700 border-amber-200'
-    return 'bg-yellow-100 text-yellow-700 border-yellow-200'
-  }
-
-  if (!analysis) {
+  // No active project or no analysis
+  if (!analysis || !project) {
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center flex-shrink-0">
           <div>
-            <span className="font-bold text-slate-900 text-base">Project Lens</span>
-            <span className="text-slate-400 text-sm ml-2">· Executive Summary</span>
+            <span className="font-bold text-slate-900 text-base">ProjectLens Analysis</span>
+            <span className="text-slate-400 text-sm ml-2">· No active project</span>
           </div>
         </div>
         <div className="flex-1 flex items-center justify-center bg-slate-50">
           <div className="text-center max-w-md">
             <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 rounded-2xl flex items-center justify-center">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2">
-                <circle cx="11" cy="11" r="4"/><circle cx="11" cy="11" r="8.5"/>
-                <line x1="2.5" y1="11" x2="5" y2="11"/><line x1="17" y1="11" x2="19.5" y2="11"/>
-              </svg>
+              <span className="text-3xl">🔍</span>
             </div>
-            <div className="text-lg font-bold text-slate-700 mb-2">No project analyzed yet</div>
-            <div className="text-sm text-slate-500 mb-6">Upload a schedule to see your project executive summary here.</div>
+            <div className="text-lg font-bold text-slate-700 mb-2">No analysis available</div>
+            <div className="text-sm text-slate-500 mb-6">Upload a schedule to see the full 7-tab analysis here. Once analyzed, this page shows the complete breakdown of your active project.</div>
             <Link href="/dashboard/upload"
               className="inline-block bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors">
               Upload Schedule →
@@ -181,282 +232,276 @@ export default function ProjectLensPage() {
     )
   }
 
-  const col = conditionColor(analysis.condition)
+  const a = analysis
+  const condColor = conditionColor(a.condition)
+  const aiNarrative = project?.versions?.[0]?.aiNarrative || ''
 
   return (
     <div className="flex flex-col h-full">
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0 no-print">
         <div>
-          <span className="font-bold text-slate-900 text-base">Project Lens</span>
-          <span className="text-slate-400 text-sm ml-2">· Executive Summary</span>
+          <span className="font-bold text-slate-900 text-base">ProjectLens Analysis</span>
+          <span className="text-slate-400 text-sm ml-2">· {project.name}</span>
         </div>
         <div className="ml-auto flex gap-2">
-          <Link href="/dashboard/upload" className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400 hover:text-blue-600 font-semibold transition-colors">
-            ⬆ Upload New Schedule
-          </Link>
-          <button onClick={() => window.print()} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg font-semibold hover:bg-blue-700 transition-colors">
+          <button onClick={() => window.print()} className="text-xs border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg hover:border-slate-400 transition-colors font-semibold flex items-center gap-1.5">
             🖨 Print / Save PDF
           </button>
+          <Link href="/dashboard/upload" className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400 hover:text-blue-600 transition-colors font-semibold">
+            ⬆ Upload New Version
+          </Link>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-5 bg-slate-50">
-        <div className="max-w-6xl mx-auto space-y-4">
-
-          {/* HEADER BANNER */}
-          <div className={`${col.bg} ${col.border} border rounded-2xl p-5 flex items-start gap-4`}>
-            <div className={`w-3 h-3 rounded-full ${col.dot} animate-pulse mt-2 flex-shrink-0`} />
-            <div className="flex-1">
-              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Active Schedule</div>
-              <div className="text-2xl font-extrabold text-slate-900 mb-1">{project?.name || analysis.projectName || 'Untitled Schedule'}</div>
-              {project?.projectId && <div className="text-[10px] font-mono text-blue-600 mb-1">{project.projectId}</div>}
-              <div className="text-xs text-slate-500">
-                {analysis.fileType || 'Primavera P6'} · Data Date: {shortDate(analysis.dataDate)} ·
-                {' '}Contract: {shortDate(analysis.contractEnd)} ·
-                {' '}Projected: {shortDate(analysis.projectedEnd)}
-              </div>
-              <div className={`mt-3 inline-flex items-center gap-2 ${col.text} font-bold text-sm`}>
-                <span>{analysis.condition || 'Stable'}</span>
-                {analysis.delayDays > 0 && <span>· {analysis.delayDays} days behind contract</span>}
-              </div>
+      <div className="flex-1 overflow-y-auto p-5 space-y-3">
+        {/* Header */}
+        <div className="bg-white border border-slate-200 rounded-xl p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-base font-bold text-slate-900">{project.name}</div>
+              {project.projectId && <div className="text-[10px] font-mono text-blue-600 mt-0.5">{project.projectId}</div>}
+              <div className="text-xs text-slate-500 mt-0.5">{a.fileType || 'Primavera P6 XER'} · Data date: {a.dataDate?.slice(0,10) || 'N/A'}</div>
             </div>
-            <div className="text-right flex-shrink-0">
-              <div className="text-5xl font-extrabold text-slate-900">{analysis.healthScore || 0}</div>
-              <div className="text-[10px] text-slate-500 uppercase tracking-widest">Health Score / 100</div>
+            <div className="text-right">
+              <div className="text-xs text-slate-500">Contract completion</div>
+              <div className="text-sm font-bold text-red-600">{a.contractEnd?.slice(0,10) || 'N/A'} <span className="text-xs font-normal text-slate-500">· Projected {a.projectedEnd?.slice(0,10) || 'N/A'}</span></div>
             </div>
           </div>
+        </div>
 
-          {/* KPI STRIP */}
-          <div className="grid grid-cols-4 gap-3">
-            <div className="bg-white border border-slate-200 rounded-xl p-4">
-              <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Total Activities</div>
-              <div className="text-2xl font-extrabold text-slate-900">{analysis.totalActivities || 0}</div>
-              <div className="text-[10px] text-slate-400 mt-1">{analysis.complete || 0} complete · {analysis.inProgress || 0} active</div>
+        {/* Condition Banner */}
+        <div className={`${condColor.bg} ${condColor.border} border rounded-xl p-4 flex items-center gap-4`}>
+          <div className="text-3xl">{a.condition === 'Recovery Required' ? '🔴' : a.condition === 'Attention Needed' ? '⚠️' : '🟢'}</div>
+          <div className="flex-1">
+            <div className={`font-bold text-sm ${condColor.text}`}>
+              {a.condition?.toUpperCase()} {a.delayDays > 0 && `— PROJECT IS ${a.delayDays} DAYS BEHIND CONTRACT`}
             </div>
-            <div className="bg-white border border-red-200 rounded-xl p-4">
-              <div className="text-[10px] text-red-600 uppercase font-bold tracking-wider mb-1">Negative Float</div>
-              <div className="text-2xl font-extrabold text-red-600">{analysis.negativeFloat || 0}</div>
-              <div className="text-[10px] text-slate-400 mt-1">Activities behind schedule</div>
-            </div>
-            <div className="bg-white border border-amber-200 rounded-xl p-4">
-              <div className="text-[10px] text-amber-600 uppercase font-bold tracking-wider mb-1">Out-of-Sequence</div>
-              <div className="text-2xl font-extrabold text-amber-600">{analysis.outOfSequence?.length || 0}</div>
-              <div className="text-[10px] text-slate-400 mt-1">Logic violations</div>
-            </div>
-            <div className="bg-white border border-slate-200 rounded-xl p-4">
-              <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Days Behind</div>
-              <div className={`text-2xl font-extrabold ${analysis.delayDays > 30 ? 'text-red-600' : analysis.delayDays > 0 ? 'text-amber-600' : 'text-green-600'}`}>
-                {analysis.delayDays > 0 ? '+' : ''}{analysis.delayDays || 0}
-              </div>
-              <div className="text-[10px] text-slate-400 mt-1">vs contract completion</div>
+            <div className="text-xs mt-1 opacity-80">
+              {a.negativeFloat} of {a.totalActivities} activities carry negative float · {a.notStarted} activities not yet started · {a.outOfSequence?.length || 0} out-of-sequence
             </div>
           </div>
+          <div className="text-center flex-shrink-0">
+            <div className={`text-3xl font-extrabold ${condColor.text}`}>{a.healthScore}</div>
+            <div className="text-[10px] opacity-70">Health Score / 100</div>
+          </div>
+        </div>
 
-          {/* TWO COLUMN GRID */}
-          <div className="grid grid-cols-2 gap-4">
+        {/* KPI Grid */}
+        <div className="grid grid-cols-5 gap-2">
+          <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Total activities</div><div className="text-xl font-bold">{a.totalActivities}</div></div>
+          <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Complete</div><div className="text-xl font-bold text-green-600">{a.complete}</div></div>
+          <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">In progress</div><div className="text-xl font-bold text-amber-600">{a.inProgress}</div></div>
+          <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Negative float</div><div className="text-xl font-bold text-red-600">{a.negativeFloat}</div></div>
+          <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Out-of-sequence</div><div className="text-xl font-bold text-red-600">{a.outOfSequence?.length || 0}</div></div>
+        </div>
 
-            {/* RISKS CARD */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-5">
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-0.5">Risks</div>
-                  <div className="font-bold text-slate-900 text-base">
-                    {risks.length > 0
-                      ? `${risks.length} risk${risks.length > 1 ? 's' : ''} detected by ProjectLens`
-                      : 'No active risks detected'}
-                  </div>
-                </div>
-                <span className="text-2xl">⚠️</span>
+        {/* Tabs */}
+        <div className="bg-white border border-slate-200 rounded-xl">
+          <div className="tab-bar flex gap-0 border-b border-slate-100 overflow-x-auto no-print">
+            {[
+              { id: 'gantt', label: 'Gantt Chart', icon: '📊' },
+              { id: 'critical', label: 'Critical Path', icon: '🎯' },
+              { id: 'logic', label: 'Logic Check', icon: '🔧' },
+              { id: 'noties', label: 'No Logic Ties', icon: '⛓️' },
+              { id: 'longlead', label: 'Long Lead Items', icon: '📦' },
+              { id: 'field', label: 'Field Reality', icon: '👷' },
+              { id: 'plain', label: 'Plain Language', icon: '💬' },
+              { id: 'ai', label: 'Narrative', icon: '📝' },
+            ].map(t => (
+              <button key={t.id} onClick={() => setActiveTab(t.id)}
+                className={`px-4 py-3 text-xs font-semibold whitespace-nowrap transition-colors ${activeTab === t.id ? 'text-blue-600 border-b-2 border-blue-600 -mb-px' : 'text-slate-500 hover:text-slate-900'}`}>
+                {t.icon} {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="p-5">
+            {/* GANTT CHART */}
+            {activeTab === 'gantt' && (
+              <div>
+                <h3 className="text-sm font-bold mb-1">Critical Path Gantt — activities with 0 or negative float</h3>
+                <p className="text-xs text-slate-500 mb-4">Sorted by early finish date. Red = negative float, Orange = zero float, Gray = complete.</p>
+                <GanttChart activities={a.ganttActivities || []} drivingPath={a.criticalDrivers || []} dataDate={a.dataDate} projectedEnd={a.projectedEnd} />
               </div>
-              {risks.length > 0 ? (
-                <>
-                  <div className="text-xs text-slate-600 mb-3 leading-relaxed">
-                    Check the full detail in <Link href="/dashboard/risks" className="text-blue-600 font-semibold hover:underline">Risks Assessment →</Link>
-                  </div>
-                  <div className="space-y-2">
-                    {criticalRisks.slice(0, 2).map((r, i) => (
-                      <div key={i} className={`text-xs px-3 py-2 rounded-lg border ${severityColor(r.severity)}`}>
-                        <div className="font-bold">{r.title}</div>
-                      </div>
-                    ))}
-                    {risks.length > criticalRisks.slice(0, 2).length && (
-                      <div className="text-[10px] text-slate-400 text-center pt-1">
-                        + {risks.length - Math.min(2, criticalRisks.length)} more in Risks Assessment
-                      </div>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <div className="text-xs text-slate-500">Schedule is performing within tolerance.</div>
-              )}
-            </div>
+            )}
 
-            {/* RFI CARD */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-5">
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-0.5">RFIs</div>
-                  <div className="font-bold text-slate-900 text-base">
-                    {rfis.length === 0 ? 'No RFIs evaluated yet' : `${rfis.length} RFI${rfis.length > 1 ? 's' : ''} evaluated`}
-                  </div>
-                </div>
-                <span className="text-2xl">❓</span>
-              </div>
-              {rfis.length > 0 ? (
-                <>
-                  <div className="flex gap-2 text-[10px] font-bold mb-3">
-                    {scheduleImpactingRfis.length > 0 && (
-                      <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full">{scheduleImpactingRfis.length} Schedule Impact</span>
-                    )}
-                    {potentialRfis.length > 0 && (
-                      <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">{potentialRfis.length} Potential</span>
-                    )}
-                    {infoRfis.length > 0 && (
-                      <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-full">{infoRfis.length} Info Only</span>
-                    )}
-                  </div>
-                  <div className="space-y-1.5">
-                    {rfis.slice(0, 3).map((r, i) => (
-                      <div key={i} className="text-xs text-slate-700 flex gap-2">
-                        <span className="font-mono font-bold text-slate-500 flex-shrink-0">
-                          {r.evaluation?.rfi_number ? `#${r.evaluation.rfi_number}` : '—'}
-                        </span>
-                        <span className="truncate">{r.evaluation?.subject || 'Untitled RFI'}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <Link href="/dashboard/rfis" className="text-xs text-blue-600 font-semibold hover:underline mt-3 inline-block">
-                    View all RFI evaluations →
-                  </Link>
-                </>
-              ) : (
-                <Link href="/dashboard/rfis" className="text-xs text-blue-600 font-semibold hover:underline">
-                  Upload an RFI PDF to evaluate schedule impact →
-                </Link>
-              )}
-            </div>
-
-            {/* SUBMITTALS CARD */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-5">
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-0.5">Submittals</div>
-                  <div className="font-bold text-slate-900 text-base">
-                    {submittalCount > 0
-                      ? `${submittalCount} submittal${submittalCount > 1 ? 's' : ''} on schedule`
-                      : 'No submittals detected'}
-                  </div>
-                </div>
-                <span className="text-2xl">📋</span>
-              </div>
-              {submittalCount > 0 ? (
-                <>
-                  <div className="flex gap-2 text-[10px] font-bold mb-3">
-                    <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-full">{analysis.longLeadItems?.length || 0} Long Lead</span>
-                    <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">{analysis.shortLeadItems?.length || 0} Short Lead</span>
-                  </div>
-                  <div className="text-xs text-slate-600 leading-relaxed">
-                    {((analysis.longLeadItems || []).filter((t: any) => t.floatDays < 0).length)} on negative float — these need attention this week.
-                  </div>
-                  <Link href="/dashboard/submittals" className="text-xs text-blue-600 font-semibold hover:underline mt-3 inline-block">
-                    View submittal log →
-                  </Link>
-                </>
-              ) : (
-                <div className="text-xs text-slate-500">No procurement activities meeting the 20-day threshold in this schedule.</div>
-              )}
-            </div>
-
-            {/* CHANGE ORDERS CARD */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-5">
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-0.5">Change Orders</div>
-                  <div className="font-bold text-slate-900 text-base">
-                    {changeOrders.length === 0 ? '0 change orders logged' : `${changeOrders.length} change orders`}
-                  </div>
-                </div>
-                <span className="text-2xl">🔄</span>
-              </div>
-              {changeOrders.length > 0 ? (
-                <div className="space-y-1.5">
-                  {changeOrders.slice(0, 3).map((co, i) => (
-                    <div key={i} className="text-xs text-slate-700">{co.name}</div>
+            {/* CRITICAL PATH */}
+            {activeTab === 'critical' && (
+              <div className="tab-pane">
+                <h3 className="text-sm font-bold mb-3">Critical path drivers — what is driving project completion</h3>
+                <p className="text-xs text-slate-500 mb-4">The critical path is the chain of activities that controls when the project finishes. If any of these slips, the whole project slips by that same amount.</p>
+                <div className="space-y-2">
+                  {(a.criticalDrivers || []).slice(0, 12).map((t: any, i: number) => (
+                    <div key={i} className="flex items-center gap-3 py-2 border-b border-slate-100 last:border-0 text-xs">
+                      <div className="font-mono font-semibold text-slate-900 w-32 flex-shrink-0">{t.task_code}</div>
+                      <div className="flex-1 text-slate-700">{t.task_name}</div>
+                      <div className="text-red-600 font-bold w-14 text-right">{fmtFloat(t.total_float_hr_cnt)}</div>
+                      <div className="w-16 text-slate-500">{fmtFloat(t.remain_drtn_hr_cnt)}</div>
+                      <div className="w-20"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${t.status_code === 'TK_Complete' ? 'bg-green-100 text-green-700' : t.status_code === 'TK_Active' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{t.status_code === 'TK_Complete' ? 'Done' : t.status_code === 'TK_Active' ? `${t.phys_complete_pct}%` : 'Not started'}</span></div>
+                    </div>
                   ))}
                 </div>
-              ) : (
-                <Link href="/dashboard/changes" className="text-xs text-blue-600 font-semibold hover:underline">
-                  Log change orders →
-                </Link>
-              )}
-            </div>
-          </div>
+              </div>
+            )}
 
-          {/* TOP 10 LONG LEAD ITEMS */}
-          {topLongLead.length > 0 && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-5">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-0.5">Top 10 Long Lead Items</div>
-                  <div className="font-bold text-slate-900 text-base">By float — most critical first</div>
+            {/* LOGIC CHECK */}
+            {activeTab === 'logic' && (
+              <div>
+                <h3 className="text-sm font-bold mb-3">Schedule logic check — out-of-sequence work ({a.outOfSequence?.length || 0} violations)</h3>
+                <div className="bg-red-50 border-l-4 border-red-500 p-3 text-xs text-red-900 mb-4 leading-relaxed">
+                  Out-of-sequence means an activity started before its predecessor was finished. This makes float calculations unreliable and creates rework risk — if the review comes back with changes after fabrication has started, materials may need to be remade.
                 </div>
-                <Link href="/dashboard/submittals" className="text-xs text-blue-600 font-semibold hover:underline">
-                  View all →
-                </Link>
-              </div>
-              <div className="space-y-1">
-                {topLongLead.map((t: any, i: number) => (
-                  <div key={i} className="flex items-center gap-3 text-xs py-1.5 border-b border-slate-50 last:border-0">
-                    <span className="text-[10px] font-bold text-slate-300 w-5">{i + 1}</span>
-                    <span className="font-mono font-bold text-slate-700 w-24 truncate">{t.task_code}</span>
-                    <span className="flex-1 text-slate-700 truncate">{t.task_name}</span>
-                    <span className="text-[10px] text-slate-400">{t.durationDays}d</span>
-                    <span className={`font-bold w-12 text-right ${t.floatDays < 0 ? 'text-red-600' : t.floatDays === 0 ? 'text-amber-600' : 'text-green-600'}`}>
-                      {t.floatDays}d
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* TOP CRITICAL PATH */}
-          {topCritical.length > 0 && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-5">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-0.5">Top Critical Path Activities</div>
-                  <div className="font-bold text-slate-900 text-base">Driving completion — sorted by early finish</div>
-                </div>
-                <Link href="/dashboard/upload" className="text-xs text-blue-600 font-semibold hover:underline">
-                  View full critical path →
-                </Link>
-              </div>
-              <div className="space-y-1">
-                {topCritical.map((t: any, i: number) => {
-                  const float = Math.round(parseFloat(t.total_float_hr_cnt || '0') / 8)
-                  const pct = parseFloat(t.phys_complete_pct || '0')
+                {['Procurement', 'Pre-Construction', 'Other'].map(category => {
+                  const items = (a.outOfSequence || []).filter((o: any) => o.category === category)
+                  if (items.length === 0) return null
                   return (
-                    <div key={i} className="flex items-center gap-3 text-xs py-1.5 border-b border-slate-50 last:border-0">
-                      <span className="text-[10px] font-bold text-slate-300 w-5">{i + 1}</span>
-                      <span className="font-mono font-bold text-slate-700 w-24 truncate">{t.task_code}</span>
-                      <span className="flex-1 text-slate-700 truncate">{t.task_name}</span>
-                      <span className="text-[10px] text-slate-400 w-12 text-right">{pct}%</span>
-                      <span className={`font-bold w-12 text-right ${float < 0 ? 'text-red-600' : float === 0 ? 'text-amber-600' : 'text-green-600'}`}>
-                        {float}d
-                      </span>
+                    <div key={category} className="mb-4">
+                      <div className="text-xs font-bold mb-2 text-slate-700">{category} violations ({items.length})</div>
+                      {items.slice(0, 10).map((o: any, i: number) => (
+                        <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 text-xs">
+                          <div className="col-span-3 font-mono font-semibold">{o.task.task_code}</div>
+                          <div className="col-span-7 text-slate-600">{o.task.task_name} started before predecessor {o.pred.task_code} finished</div>
+                          <div className="col-span-2 text-right"><span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">Sequence error</span></div>
+                        </div>
+                      ))}
                     </div>
                   )
                 })}
               </div>
-            </div>
-          )}
+            )}
 
-          {/* FOOTER NOTE */}
-          <div className="text-center text-xs text-slate-400 py-4">
-            This summary supports your visibility — it does not replace your judgment.
-            <br />
-            All numbers are derived from the last uploaded XER file.
+            {/* NO TIES */}
+            {activeTab === 'noties' && (
+              <div>
+                <h3 className="text-sm font-bold mb-3">Activities with no logic ties ({a.noTies?.length || 0} found)</h3>
+                <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
+                  Every activity should be connected — at least one predecessor and one successor. Activities with no ties are "floating" in the schedule. Delays to them will not show up in the analysis. This is a schedule quality problem.
+                </div>
+                <div className="space-y-2">
+                  {(a.noTies || []).slice(0, 20).map((t: any, i: number) => (
+                    <div key={i} className="flex items-center gap-3 py-2 border-b border-slate-100 text-xs">
+                      <div className="font-mono font-semibold w-32 flex-shrink-0">{t.task_code}</div>
+                      <div className="flex-1 text-slate-700">{t.task_name}</div>
+                      <div className="text-red-600 font-bold w-14 text-right">{fmtFloat(t.total_float_hr_cnt)}</div>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">Logic gap</span>
+                    </div>
+                  ))}
+                  {(!a.noTies || a.noTies.length === 0) && (
+                    <div className="text-sm text-green-700 text-center py-6">✓ All activities have proper logic ties</div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* LONG LEAD */}
+            {activeTab === 'longlead' && (
+              <div>
+                <h3 className="text-sm font-bold mb-3">Long lead items ({a.longLeadItems?.length || 0} items, 35+ days duration)</h3>
+                <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
+                  Long lead items are materials or equipment requiring significant time to fabricate and deliver. These are the items that most commonly cause delays. ProjectLens sorts by float — most critical first.
+                </div>
+                <div className="space-y-2">
+                  {(a.longLeadItems || []).slice(0, 20).map((ll: any, i: number) => (
+                    <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 text-xs">
+                      <div className="col-span-2 font-mono font-semibold">{ll.task_code}</div>
+                      <div className="col-span-5 text-slate-700">{ll.task_name}</div>
+                      <div className="col-span-1 text-right">{ll.durationDays}d</div>
+                      <div className="col-span-1 text-right">{ll.remainingDays}d</div>
+                      <div className={`col-span-1 text-right font-bold ${ll.floatDays < 0 ? 'text-red-600' : ll.floatDays < 10 ? 'text-amber-600' : 'text-green-600'}`}>{ll.floatDays}d</div>
+                      <div className="col-span-2 text-right"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ll.status_code === 'TK_Complete' ? 'bg-green-100 text-green-700' : ll.status_code === 'TK_Active' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{ll.status_code === 'TK_Complete' ? 'Delivered' : ll.status_code === 'TK_Active' ? `${ll.phys_complete_pct}%` : 'Not ordered'}</span></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* FIELD REALITY */}
+            {activeTab === 'field' && (
+              <div>
+                <h3 className="text-sm font-bold mb-3">Field reality — activities in progress right now ({a.inProgress})</h3>
+                <div className="bg-amber-50 border-l-4 border-amber-500 p-3 text-xs text-amber-900 mb-4 leading-relaxed">
+                  These are activities the schedule says are being worked right now. Verify with your superintendent that progress matches what is physically happening on site.
+                </div>
+                <div className="space-y-2">
+                  {(a.inProgressActivities || []).slice(0, 25).map((t: any, i: number) => {
+                    const pct = parseFloat(t.phys_complete_pct || '0')
+                    const fl = parseFloat(t.total_float_hr_cnt || '0')
+                    return (
+                      <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 text-xs items-center">
+                        <div className="col-span-3 font-mono font-semibold">{t.task_code}</div>
+                        <div className="col-span-5 text-slate-700">{t.task_name}</div>
+                        <div className="col-span-2">
+                          <div className="flex items-center gap-2"><span className="font-bold w-8">{pct}%</span>
+                          <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden"><div className={`h-full rounded-full ${pct > 90 ? 'bg-green-500' : pct > 50 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${pct}%` }} /></div></div>
+                        </div>
+                        <div className="col-span-1 text-right text-slate-500">{fmtFloat(t.remain_drtn_hr_cnt)}</div>
+                        <div className={`col-span-1 text-right font-bold ${fl < 0 ? 'text-red-600' : 'text-green-600'}`}>{fmtFloat(t.total_float_hr_cnt)}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* PLAIN LANGUAGE */}
+            {activeTab === 'plain' && (
+              <div>
+                <h3 className="text-sm font-bold mb-3">Plain language summary</h3>
+                <div className="space-y-4 text-xs">
+                  {a.delayDays > 30 && (
+                    <div className="flex gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">🚨</div>
+                      <div>
+                        <div className="font-bold text-slate-900">The project is {a.delayDays} days behind contract</div>
+                        <div className="text-slate-600 mt-1 leading-relaxed">Contract completion was {a.contractEnd?.slice(0,10)}. Projected completion is now {a.projectedEnd?.slice(0,10)}. {a.negativeFloat} activities carry negative float, and {a.notStarted} have not yet started.</div>
+                      </div>
+                    </div>
+                  )}
+                  {a.outOfSequence?.length > 0 && (
+                    <div className="flex gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center flex-shrink-0">📦</div>
+                      <div>
+                        <div className="font-bold text-slate-900">{a.outOfSequence.length} activities started in the wrong order</div>
+                        <div className="text-slate-600 mt-1 leading-relaxed">In these cases, work began before its predecessor was finished. This usually means the contractor was trying to make up time — which is TIA evidence of schedule disruption from earlier delay events.</div>
+                      </div>
+                    </div>
+                  )}
+                  {(a.longLeadItems || []).filter((l: any) => l.status_code === 'TK_NotStart' && l.floatDays < 0).length > 0 && (
+                    <div className="flex gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">⚡</div>
+                      <div>
+                        <div className="font-bold text-slate-900">Critical long lead items not yet ordered</div>
+                        <div className="text-slate-600 mt-1 leading-relaxed">{(a.longLeadItems || []).filter((l: any) => l.status_code === 'TK_NotStart' && l.floatDays < 0).length} long lead items have negative float and have not been ordered yet. Each day they sit unordered adds another day to the delay.</div>
+                      </div>
+                    </div>
+                  )}
+                  {a.noTies?.length > 0 && (
+                    <div className="flex gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">⛓️</div>
+                      <div>
+                        <div className="font-bold text-slate-900">{a.noTies.length} activities have no logic ties</div>
+                        <div className="text-slate-600 mt-1 leading-relaxed">These activities are not properly connected to predecessors or successors. The float calculations for them are unreliable and they may not show up correctly in critical path analysis.</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* NARRATIVE */}
+            {activeTab === 'ai' && (
+              <div>
+                <h3 className="text-sm font-bold mb-1">Operational analysis — how to fix this</h3>
+                <p className="text-xs text-slate-500 mb-3">A direct read of what the schedule is telling you, what matters most, and what conversations to have this week.</p>
+                {aiNarrative ? (
+                  <div className="bg-slate-50 border-l-4 border-blue-500 rounded-r-lg p-4 text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
+                    {aiNarrative}
+                  </div>
+                ) : (
+                  <div className="text-xs text-slate-500 text-center py-8">No narrative available for this version. Upload a new version to generate the narrative.</div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

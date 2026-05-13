@@ -55,7 +55,7 @@ export default function Sidebar({ user }: SidebarProps) {
       group: 'Active Project',
       items: [
         { href: '/dashboard', icon: '⊞', label: 'Dashboard' },
-        { href: '/dashboard/lens', icon: '🔍', label: 'ProjectLens' },
+        { href: '/dashboard/lens', icon: '🔍', label: 'ProjectLens Analysis' },
       ]
     },
     {
