@@ -58,6 +58,7 @@ export interface XERAnalysis {
   criticalDrivers: Task[]
   ganttActivities: Task[]
   inProgressActivities: Task[]
+  milestones: Task[]
   healthScore: number
   condition: string
   delayDays: number
@@ -222,6 +223,24 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   longLeadItems.sort((a, b) => a.floatDays - b.floatDays)
   shortLeadItems.sort((a, b) => a.floatDays - b.floatDays)
 
+  // Milestones — extract from XER for dashboard display
+  const milestones = taskArr
+    .filter(t => {
+      const isMilestone = t.task_type === 'TT_FinMile' || t.task_type === 'TT_Mile'
+      const upper = (t.task_name || '').toUpperCase()
+      const looksMilestone = upper.includes('MILESTONE') || upper.includes('SUBSTANTIAL') ||
+                              upper.includes('COMPLETION') || upper.includes('TURNOVER') ||
+                              upper.includes('OCCUPANCY') || upper.includes('NTP') ||
+                              upper.includes('FINAL') || upper.includes('BENEFICIAL')
+      return (isMilestone || looksMilestone) && t.status_code !== 'TK_Complete'
+    })
+    .sort((a, b) => {
+      const fa = a.early_end_date || a.target_end_date || ''
+      const fb = b.early_end_date || b.target_end_date || ''
+      return fa.localeCompare(fb)
+    })
+    .slice(0, 10)
+
   // Critical drivers — sorted by early finish date ascending
   const criticalDrivers = taskArr
     .filter(t => {
@@ -277,6 +296,7 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     outOfSequence, noTies,
     longLeadItems, shortLeadItems,
     criticalDrivers, ganttActivities, inProgressActivities,
+    milestones,
     healthScore, condition, delayDays,
   }
 }
