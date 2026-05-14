@@ -234,12 +234,40 @@ export function compareXER(parsedA: ParsedXER, parsedB: ParsedXER): XERCompariso
     }
   }
 
-  // Detect fragnet WBS - look for tasks in WBS containing fragnet/schedule issue keywords
-  const fragnetKeywords = ['FRAG', 'SCHEDULE ISSUE', 'SCHEDULE-ISSUE', 'TIA', 'DELAY EVENT']
+  // Detect fragnet activities — look for activities with specific fragnet keywords
+  // AND verify they are NEW in fileB (not present in fileA)
+  // Use word-boundary matching to avoid false positives like "SubsTanTIAl"
+  const fragnetKeywordRegexes = [
+    /\bFRAG(NET)?\b/,           // FRAG or FRAGNET as whole word
+    /\bSCHEDULE\s+ISSUE\b/,     // SCHEDULE ISSUE
+    /\bSCHEDULE-ISSUE\b/,
+    /\bTIA\b/,                  // TIA as whole word (won't match "Substantial")
+    /\bDELAY\s+EVENT\b/,        // DELAY EVENT
+    /\bCHANGE\s+ORDER\b/,       // CHANGE ORDER
+    /\bCO[-\s]\d+\b/,           // CO-1, CO 2, etc.
+    /\bRFI\s+IMPACT\b/,         // RFI IMPACT
+    /\bDIRECTIVE\b/,            // DIRECTIVE
+  ]
+
+  // Build set of activity codes that exist in fileA (un-impacted baseline)
+  const codesInA = new Set(Object.values(parsedA.tasks).map(t => t.task_code))
+
   const detectedFragnetTasks: Task[] = []
   for (const t of Object.values(parsedB.tasks)) {
-    const upper = (t.task_name || '').toUpperCase() + ' ' + (t.task_code || '').toUpperCase()
-    if (fragnetKeywords.some(k => upper.includes(k))) {
+    const upper = ((t.task_name || '') + ' ' + (t.task_code || '')).toUpperCase()
+    const matchesKeyword = fragnetKeywordRegexes.some(rgx => rgx.test(upper))
+    if (!matchesKeyword) continue
+
+    // Skip milestones — fragnets are work activities, not milestone markers
+    if (t.task_type === 'TT_FinMile' || t.task_type === 'TT_Mile' || t.task_type === 'TT_StartMile') continue
+
+    // True fragnets are NEW activities (in B but not in A)
+    // OR existing activities with their description changed (low chance, but allow)
+    const isNew = !codesInA.has(t.task_code)
+
+    // Only include if it's new OR explicitly contains a strong fragnet keyword
+    const hasStrongKeyword = /\bFRAGNET\b|\bSCHEDULE\s+ISSUE\b|\bDELAY\s+EVENT\b/.test(upper)
+    if (isNew || hasStrongKeyword) {
       detectedFragnetTasks.push(t)
     }
   }
