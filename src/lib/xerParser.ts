@@ -290,6 +290,54 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   else if (healthScore < 60) condition = 'Attention Needed'
   else if (healthScore < 80) condition = 'Monitor Closely'
 
+  // KEY DATES — detect NTP, Substantial Completion, Final Completion
+  function findMilestoneByKeywords(keywords: string[]) {
+    return taskArr.find(t => {
+      const upper = (t.task_name || '').toUpperCase()
+      const isMilestone = t.task_type === 'TT_FinMile' || t.task_type === 'TT_Mile' || t.task_type === 'TT_StartMile'
+      return isMilestone && keywords.some(k => upper.includes(k))
+    })
+  }
+
+  // NTP / Project Start
+  const ntpMilestone = findMilestoneByKeywords(['NTP', 'NOTICE TO PROCEED', 'PROJECT START', 'START DATE'])
+  const projectStartDate = ntpMilestone?.early_start_date || ntpMilestone?.target_start_date ||
+    ntpMilestone?.act_start_date ||
+    // Fallback: earliest activity start
+    taskArr.reduce((earliest, t) => {
+      const start = t.early_start_date || t.target_start_date || t.act_start_date
+      if (!start) return earliest
+      if (!earliest) return start
+      return start < earliest ? start : earliest
+    }, '' as string)
+  const projectStartSource = ntpMilestone ? `NTP Milestone (${ntpMilestone.task_code})` : 'Earliest Activity'
+
+  // Substantial Completion
+  const substMilestone = findMilestoneByKeywords(['SUBSTANTIAL', 'BENEFICIAL', 'BOD', 'BENEFICIAL OCCUPANCY'])
+  const substantialDate = substMilestone?.early_end_date || substMilestone?.target_end_date
+
+  // Final Completion
+  const finalMilestone = findMilestoneByKeywords(['FINAL COMPLETION', 'PROJECT COMPLETE', 'TURNOVER', 'CLOSEOUT COMPLETE', 'FINAL ACCEPTANCE'])
+  const finalDate = finalMilestone?.early_end_date || finalMilestone?.target_end_date
+
+  // DURATIONS
+  let originalDurationDays = 0
+  let remainingDurationDays = 0
+  let actualDurationDays = 0
+  taskArr.forEach(t => {
+    const cal = calendars[t.clndr_id] || { hoursPerDay: 8 }
+    const targetHr = parseFloat(t.target_drtn_hr_cnt || '0')
+    const remainHr = parseFloat(t.remain_drtn_hr_cnt || '0')
+    const actualHr = parseFloat(t.act_drtn_hr_cnt || '0')
+    originalDurationDays += targetHr / cal.hoursPerDay
+    remainingDurationDays += remainHr / cal.hoursPerDay
+    actualDurationDays += actualHr / cal.hoursPerDay
+  })
+  originalDurationDays = Math.round(originalDurationDays)
+  remainingDurationDays = Math.round(remainingDurationDays)
+  actualDurationDays = Math.round(actualDurationDays)
+  const durationAtCompletion = actualDurationDays + remainingDurationDays
+
   return {
     totalActivities: taskArr.length,
     complete, inProgress, notStarted, negativeFloat,
@@ -298,5 +346,13 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     criticalDrivers, ganttActivities, inProgressActivities,
     milestones,
     healthScore, condition, delayDays,
+    // Key dates
+    projectStartDate, projectStartSource,
+    substantialCompletionDate: substantialDate,
+    substantialCompletionMilestone: substMilestone?.task_code,
+    finalCompletionDate: finalDate,
+    finalCompletionMilestone: finalMilestone?.task_code,
+    // Durations
+    originalDurationDays, remainingDurationDays, actualDurationDays, durationAtCompletion,
   }
 }

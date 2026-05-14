@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { getActiveProject, getActiveVersion, getActiveAnalysis, getActiveProjectRFIs } from '@/lib/projectStore'
+import { getActiveProject, getLatestVersion, getActiveProjectRFIs } from '@/lib/projectStore'
 
 export default function DashboardPage() {
   const [analysis, setAnalysis] = useState<any>(null)
@@ -18,7 +18,9 @@ export default function DashboardPage() {
   function refresh() {
     const p = getActiveProject()
     setProject(p)
-    setAnalysis(getActiveAnalysis())
+    // Always show the latest version
+    const latest = getLatestVersion(p)
+    setAnalysis(latest?.analysis || null)
     setRfis(getActiveProjectRFIs())
   }
 
@@ -114,6 +116,7 @@ export default function DashboardPage() {
       delta: delayDays > 30 ? '↓ TIA territory' : delayDays > 0 ? '↓ Recovery needed' : '✓ Healthy',
       color: delayDays > 30 ? 'text-red-600' : delayDays > 0 ? 'text-amber-600' : 'text-green-600',
       border: delayDays > 30 ? 'border-red-100' : delayDays > 0 ? 'border-amber-100' : 'border-green-100',
+      href: '/dashboard/tia',
     },
     {
       label: 'Work Complete',
@@ -122,6 +125,7 @@ export default function DashboardPage() {
       delta: completePct >= 75 ? '✓ Closeout phase' : completePct >= 40 ? '→ Construction active' : '→ Early phase',
       color: 'text-blue-600',
       border: 'border-blue-100',
+      href: '/dashboard/lens',
     },
     {
       label: 'Long Lead at Risk',
@@ -130,6 +134,7 @@ export default function DashboardPage() {
       delta: longLeadAtRisk > 0 ? '↓ Negative float' : '✓ All clear',
       color: longLeadAtRisk > 0 ? 'text-red-600' : 'text-green-600',
       border: longLeadAtRisk > 0 ? 'border-red-100' : 'border-green-100',
+      href: '/dashboard/submittals',
     },
     {
       label: 'Risks Detected',
@@ -138,6 +143,7 @@ export default function DashboardPage() {
       delta: risks.filter(r => r.severity === 'critical').length > 0 ? `${risks.filter(r => r.severity === 'critical').length} critical` : risks.length > 0 ? 'Review recommended' : '✓ No risks flagged',
       color: risks.filter(r => r.severity === 'critical').length > 0 ? 'text-red-600' : risks.length > 0 ? 'text-amber-600' : 'text-green-600',
       border: risks.filter(r => r.severity === 'critical').length > 0 ? 'border-red-100' : risks.length > 0 ? 'border-amber-100' : 'border-green-100',
+      href: '/dashboard/risks',
     },
   ]
 
@@ -161,7 +167,7 @@ export default function DashboardPage() {
       desc: `${negativeFloat} activities running behind. Critical path may be in compression — review float distribution and recovery options.`,
       badge: negativeFloat > 100 ? 'High Impact' : 'Medium Impact',
       badgeColor: negativeFloat > 100 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700',
-      href: '/dashboard/upload',
+      href: '/dashboard/risks',
     })
   }
   if (outOfSequence > 10) {
@@ -171,7 +177,7 @@ export default function DashboardPage() {
       desc: `${outOfSequence} activities started before their predecessors completed. Schedule logic integrity issue — review with scheduler.`,
       badge: outOfSequence > 50 ? 'High Impact' : 'Medium Impact',
       badgeColor: outOfSequence > 50 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700',
-      href: '/dashboard/upload',
+      href: '/dashboard/risks',
     })
   }
   if (delayDays > 30) {
@@ -181,7 +187,7 @@ export default function DashboardPage() {
       desc: `Project is ${delayDays} days behind contract completion. Begin documenting delay events and prepare for time impact analysis.`,
       badge: 'High Impact',
       badgeColor: 'bg-red-100 text-red-700',
-      href: '/dashboard/tia',
+      href: '/dashboard/risks',
     })
   }
   if (noTies > 10) {
@@ -191,7 +197,7 @@ export default function DashboardPage() {
       desc: `${noTies} activities have no predecessor or successor relationships. Schedule integrity at risk — needs scheduler review.`,
       badge: 'Medium Impact',
       badgeColor: 'bg-amber-100 text-amber-700',
-      href: '/dashboard/upload',
+      href: '/dashboard/risks',
     })
   }
   // Default safe state
@@ -206,10 +212,19 @@ export default function DashboardPage() {
     })
   }
 
-  // UPCOMING MILESTONES — extracted from XER by the parser
-  const milestoneActivities = analysis.milestones || []
+  // UPCOMING MILESTONES — filter to next 14 calendar days
+  const now = new Date()
+  const twoWeeksFromNow = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000)
+  const milestoneActivities = (analysis.milestones || []).filter((m: any) => {
+    const dateStr = m.early_end_date || m.target_end_date
+    if (!dateStr) return false
+    try {
+      const d = new Date(dateStr.replace(' ', 'T'))
+      return d >= now && d <= twoWeeksFromNow
+    } catch { return false }
+  })
 
-  // Fallback if no real milestones — use top critical path items
+  // Fallback if no milestones in window — show top critical path items
   const milestonesDisplay = milestoneActivities.length > 0
     ? milestoneActivities.slice(0, 5)
     : (analysis.criticalDrivers || []).slice(0, 5)
@@ -310,15 +325,74 @@ export default function DashboardPage() {
           </Link>
         </div>
 
+        {/* Key Dates & Durations */}
+        <div className="bg-white border border-slate-200 rounded-xl p-4">
+          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Key Dates & Durations</div>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-3">
+            <div className="bg-slate-50 rounded-lg p-2.5">
+              <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Data Date</div>
+              <div className="text-sm font-bold text-slate-900 mt-0.5">{analysis.dataDate?.slice(0,10) || '—'}</div>
+              <div className="text-[9px] text-slate-400 mt-0.5">As of XER upload</div>
+            </div>
+            <div className="bg-blue-50 rounded-lg p-2.5">
+              <div className="text-[9px] font-bold text-blue-700 uppercase tracking-wider">Project Start / NTP</div>
+              <div className="text-sm font-bold text-blue-900 mt-0.5">{analysis.projectStartDate?.slice(0,10) || '—'}</div>
+              <div className="text-[9px] text-blue-600 mt-0.5">{analysis.projectStartSource || '—'}</div>
+            </div>
+            <div className="bg-amber-50 rounded-lg p-2.5">
+              <div className="text-[9px] font-bold text-amber-700 uppercase tracking-wider">Substantial Completion</div>
+              <div className="text-sm font-bold text-amber-900 mt-0.5">{analysis.substantialCompletionDate?.slice(0,10) || 'Not Defined'}</div>
+              <div className="text-[9px] text-amber-600 mt-0.5">{analysis.substantialCompletionMilestone || '—'}</div>
+            </div>
+            <div className="bg-red-50 rounded-lg p-2.5">
+              <div className="text-[9px] font-bold text-red-700 uppercase tracking-wider">Final Completion</div>
+              <div className="text-sm font-bold text-red-900 mt-0.5">{analysis.finalCompletionDate?.slice(0,10) || analysis.projectedEnd?.slice(0,10) || '—'}</div>
+              <div className="text-[9px] text-red-600 mt-0.5">{analysis.finalCompletionMilestone || (analysis.finalCompletionDate ? '' : 'From projected end')}</div>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-2.5">
+              <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Contract End</div>
+              <div className="text-sm font-bold text-slate-900 mt-0.5">{analysis.contractEnd?.slice(0,10) || '—'}</div>
+              <div className="text-[9px] text-slate-400 mt-0.5">Per contract</div>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-2.5">
+              <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Projected End</div>
+              <div className="text-sm font-bold text-slate-900 mt-0.5">{analysis.projectedEnd?.slice(0,10) || '—'}</div>
+              <div className="text-[9px] text-slate-400 mt-0.5">Per current schedule</div>
+            </div>
+          </div>
+
+          <div className="border-t border-slate-100 pt-3">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="text-center">
+                <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Original Duration</div>
+                <div className="text-lg font-bold text-slate-900 mt-0.5">{analysis.originalDurationDays || 0}<span className="text-xs font-normal text-slate-500 ml-1">days</span></div>
+              </div>
+              <div className="text-center">
+                <div className="text-[9px] font-bold text-blue-600 uppercase tracking-wider">Remaining Duration</div>
+                <div className="text-lg font-bold text-blue-700 mt-0.5">{analysis.remainingDurationDays || 0}<span className="text-xs font-normal text-blue-500 ml-1">days</span></div>
+              </div>
+              <div className="text-center">
+                <div className="text-[9px] font-bold text-red-600 uppercase tracking-wider">Duration at Completion</div>
+                <div className={`text-lg font-bold mt-0.5 ${(analysis.durationAtCompletion || 0) > (analysis.originalDurationDays || 0) ? 'text-red-700' : 'text-green-700'}`}>
+                  {analysis.durationAtCompletion || 0}<span className="text-xs font-normal text-slate-500 ml-1">days</span>
+                  {(analysis.durationAtCompletion || 0) > (analysis.originalDurationDays || 0) && (
+                    <span className="text-[10px] text-red-600 ml-2">(+{(analysis.durationAtCompletion || 0) - (analysis.originalDurationDays || 0)}d)</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Metrics */}
         <div className="grid grid-cols-4 gap-3">
           {metrics.map(m => (
-            <div key={m.label} className={`bg-white border ${m.border} rounded-xl p-4`}>
+            <Link key={m.label} href={m.href} className={`bg-white border ${m.border} rounded-xl p-4 hover:shadow-md hover:border-blue-300 transition-all cursor-pointer block`}>
               <div className="text-xs text-slate-500 font-medium mb-1">{m.label}</div>
               <div className={`text-2xl font-extrabold ${m.color}`}>{m.val}</div>
               <div className="text-xs text-slate-400 mt-1">{m.sub}</div>
               <div className={`text-xs font-semibold mt-1 ${m.color}`}>{m.delta}</div>
-            </div>
+            </Link>
           ))}
         </div>
 
@@ -341,9 +415,9 @@ export default function DashboardPage() {
           </div>
 
           <div className="bg-white border border-slate-200 rounded-xl p-4">
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Upcoming Milestones</div>
+            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">2 Weeks Lookahead</div>
             {milestonesDisplay.length === 0 ? (
-              <div className="text-xs text-slate-400 text-center py-6">No upcoming milestones detected in schedule</div>
+              <div className="text-xs text-slate-400 text-center py-6">No milestones scheduled in next 14 days</div>
             ) : (
               <>
                 <div className="grid grid-cols-4 text-[10px] text-slate-400 font-semibold uppercase mb-2 px-1">
