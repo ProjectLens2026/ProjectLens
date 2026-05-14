@@ -18,6 +18,8 @@ export default function ProjectsPage() {
   const [editName, setEditName] = useState('')
   const [editProjectId, setEditProjectId] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [confirmDeleteVersion, setConfirmDeleteVersion] = useState<string | null>(null)
+  const [confirmMoveTarget, setConfirmMoveTarget] = useState<{versionId: string, targetId: string} | null>(null)
 
   useEffect(() => {
     migrateLegacyData()
@@ -230,61 +232,108 @@ export default function ProjectsPage() {
                     {/* Version list */}
                     {isExpanded && (
                       <div className="space-y-1 mb-3 bg-slate-50 rounded-lg p-2 max-h-64 overflow-y-auto">
-                        {p.versions.map((v, i) => (
-                          <div key={v.id} className="flex items-center gap-2 text-[10px] py-1 px-2 hover:bg-white rounded relative">
-                            <span className="font-mono text-slate-400 flex-shrink-0">v{p.versions.length - i}</span>
-                            <div className="flex-1 min-w-0">
-                              <div className="font-semibold text-slate-700 truncate">{v.fileName || 'untitled.xer'}</div>
-                              <div className="text-slate-400 text-[9px]">{shortDate(v.uploadedAt)}</div>
-                            </div>
-                            <span className="text-slate-500 flex-shrink-0">{v.analysis?.totalActivities || 0} acts</span>
-                            {v.analysis?.condition && (
-                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold flex-shrink-0 ${conditionStyle(v.analysis.condition).bg} ${conditionStyle(v.analysis.condition).color}`}>
-                                {v.analysis.healthScore}/100
-                              </span>
-                            )}
-                            <button onClick={() => openProject(p.id, v.id)}
-                              className="text-blue-600 font-bold hover:underline flex-shrink-0">Open</button>
-                            {projects.length > 1 && (
-                              <button onClick={() => setMoveMenuFor(moveMenuFor === v.id ? null : v.id)}
-                                title="Move to different project"
-                                className="text-slate-400 hover:text-blue-600 font-bold px-1">⇄</button>
-                            )}
-                            {p.versions.length > 1 && (
-                              <button onClick={() => handleDeleteVersion(p.id, v.id)}
-                                title="Delete this version"
-                                className="text-slate-300 hover:text-red-500">×</button>
-                            )}
+                        {p.versions.map((v, i) => {
+                          const isDeletingVer = confirmDeleteVersion === v.id
+                          const isMovingVer = confirmMoveTarget?.versionId === v.id
+                          const targetProj = isMovingVer ? projects.find(pr => pr.id === confirmMoveTarget?.targetId) : null
 
-                            {/* Move To dropdown */}
-                            {moveMenuFor === v.id && (
-                              <div className="absolute right-0 top-6 z-20 bg-white border border-slate-300 rounded-lg shadow-lg py-1 min-w-[260px] max-h-64 overflow-y-auto">
-                                <div className="px-3 py-2 border-b border-slate-100">
-                                  <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Moving:</div>
-                                  <div className="text-[10px] font-semibold text-slate-700 truncate" title={v.fileName}>{v.fileName || 'untitled.xer'}</div>
+                          // Confirmation row — delete version
+                          if (isDeletingVer) {
+                            return (
+                              <div key={v.id} className="bg-red-50 border border-red-300 rounded-lg p-2">
+                                <div className="text-[10px] text-red-900 font-bold mb-1">Delete this version?</div>
+                                <div className="text-[9px] text-red-700 mb-2 truncate" title={v.fileName}>
+                                  {v.fileName || 'untitled.xer'} · {shortDate(v.uploadedAt)}
                                 </div>
-                                <div className="px-3 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">Move to project:</div>
-                                {projects.filter(target => target.id !== p.id).length === 0 ? (
-                                  <div className="px-3 py-2 text-[10px] text-slate-400">No other projects available</div>
-                                ) : (
-                                  projects.filter(target => target.id !== p.id).map(target => (
-                                    <button
-                                      key={target.id}
-                                      onClick={() => {
-                                        moveVersionToProject(p.id, v.id, target.id)
-                                        setMoveMenuFor(null)
-                                        refresh()
-                                      }}
-                                      className="w-full text-left px-3 py-1.5 hover:bg-blue-50 text-[10px] text-slate-700 hover:text-blue-700 flex items-center justify-between gap-2">
-                                      <span className="font-semibold truncate">{target.name}</span>
-                                      <span className="text-[9px] text-slate-400 flex-shrink-0">{target.versions.length}v</span>
-                                    </button>
-                                  ))
-                                )}
+                                <div className="text-[9px] text-red-700 mb-2">This will permanently remove the version and its analysis. This cannot be undone.</div>
+                                <div className="flex gap-2">
+                                  <button onClick={() => { handleDeleteVersion(p.id, v.id); setConfirmDeleteVersion(null); }}
+                                    className="text-[10px] bg-red-600 text-white px-3 py-1 rounded font-bold">Delete</button>
+                                  <button onClick={() => setConfirmDeleteVersion(null)}
+                                    className="text-[10px] bg-white border border-slate-200 text-slate-600 px-3 py-1 rounded font-bold">Cancel</button>
+                                </div>
                               </div>
-                            )}
-                          </div>
-                        ))}
+                            )
+                          }
+
+                          // Confirmation row — move version
+                          if (isMovingVer && targetProj) {
+                            return (
+                              <div key={v.id} className="bg-blue-50 border border-blue-300 rounded-lg p-2">
+                                <div className="text-[10px] text-blue-900 font-bold mb-1">Move this version?</div>
+                                <div className="text-[9px] text-blue-700 mb-2">
+                                  <div className="truncate"><span className="font-semibold">Moving:</span> {v.fileName || 'untitled.xer'}</div>
+                                  <div><span className="font-semibold">From:</span> {p.name}</div>
+                                  <div className="truncate"><span className="font-semibold">To:</span> {targetProj.name}</div>
+                                </div>
+                                <div className="flex gap-2">
+                                  <button onClick={() => {
+                                    moveVersionToProject(p.id, v.id, targetProj.id)
+                                    setConfirmMoveTarget(null)
+                                    refresh()
+                                  }} className="text-[10px] bg-blue-600 text-white px-3 py-1 rounded font-bold">Move</button>
+                                  <button onClick={() => setConfirmMoveTarget(null)}
+                                    className="text-[10px] bg-white border border-slate-200 text-slate-600 px-3 py-1 rounded font-bold">Cancel</button>
+                                </div>
+                              </div>
+                            )
+                          }
+
+                          return (
+                            <div key={v.id} className="flex items-center gap-2 text-[10px] py-1 px-2 hover:bg-white rounded relative">
+                              <span className="font-mono text-slate-400 flex-shrink-0">v{p.versions.length - i}</span>
+                              <div className="flex-1 min-w-0">
+                                <div className="font-semibold text-slate-700 truncate">{v.fileName || 'untitled.xer'}</div>
+                                <div className="text-slate-400 text-[9px]">{shortDate(v.uploadedAt)}</div>
+                              </div>
+                              <span className="text-slate-500 flex-shrink-0">{v.analysis?.totalActivities || 0} acts</span>
+                              {v.analysis?.condition && (
+                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold flex-shrink-0 ${conditionStyle(v.analysis.condition).bg} ${conditionStyle(v.analysis.condition).color}`}>
+                                  {v.analysis.healthScore}/100
+                                </span>
+                              )}
+                              <button onClick={() => openProject(p.id, v.id)}
+                                className="text-blue-600 font-bold hover:underline flex-shrink-0">Open</button>
+                              {projects.length > 1 && (
+                                <button onClick={() => setMoveMenuFor(moveMenuFor === v.id ? null : v.id)}
+                                  title="Move to different project"
+                                  className="text-slate-400 hover:text-blue-600 font-bold px-1">⇄</button>
+                              )}
+                              {p.versions.length > 1 && (
+                                <button onClick={() => setConfirmDeleteVersion(v.id)}
+                                  title="Delete this version"
+                                  className="text-slate-300 hover:text-red-500">×</button>
+                              )}
+
+                              {/* Move To dropdown */}
+                              {moveMenuFor === v.id && (
+                                <div className="absolute right-0 top-6 z-20 bg-white border border-slate-300 rounded-lg shadow-lg py-1 min-w-[260px] max-h-64 overflow-y-auto">
+                                  <div className="px-3 py-2 border-b border-slate-100">
+                                    <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Moving:</div>
+                                    <div className="text-[10px] font-semibold text-slate-700 truncate" title={v.fileName}>{v.fileName || 'untitled.xer'}</div>
+                                  </div>
+                                  <div className="px-3 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">Move to project:</div>
+                                  {projects.filter(target => target.id !== p.id).length === 0 ? (
+                                    <div className="px-3 py-2 text-[10px] text-slate-400">No other projects available</div>
+                                  ) : (
+                                    projects.filter(target => target.id !== p.id).map(target => (
+                                      <button
+                                        key={target.id}
+                                        onClick={() => {
+                                          setMoveMenuFor(null)
+                                          setConfirmMoveTarget({ versionId: v.id, targetId: target.id })
+                                        }}
+                                        className="w-full text-left px-3 py-1.5 hover:bg-blue-50 text-[10px] text-slate-700 hover:text-blue-700 flex items-center justify-between gap-2">
+                                        <span className="font-semibold truncate">{target.name}</span>
+                                        <span className="text-[9px] text-slate-400 flex-shrink-0">{target.versions.length}v</span>
+                                      </button>
+                                    ))
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
                       </div>
                     )}
 
