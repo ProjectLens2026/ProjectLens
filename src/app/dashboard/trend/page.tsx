@@ -1,10 +1,12 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { getActiveProject, Project } from '@/lib/projectStore'
+import { loadProjects, Project, ScheduleVersion, setActiveProjectId } from '@/lib/projectStore'
 import { analyzeProjectTrend, TrendAnalysisResult, VersionDataPoint } from '@/lib/trendAnalyzer'
 
-// Simple SVG line chart component
+type Step = 'select-project' | 'select-versions' | 'results'
+
+// Simple SVG line chart
 function MiniLineChart({ data, label, color, suffix = '' }: {
   data: { x: string; y: number }[]
   label: string
@@ -12,7 +14,6 @@ function MiniLineChart({ data, label, color, suffix = '' }: {
   suffix?: string
 }) {
   if (!data || data.length < 2) return null
-
   const values = data.map(d => d.y)
   const maxVal = Math.max(...values, 1)
   const minVal = Math.min(...values, 0)
@@ -20,7 +21,6 @@ function MiniLineChart({ data, label, color, suffix = '' }: {
   const width = 100
   const height = 50
 
-  // Generate path
   const points = data.map((d, i) => {
     const x = (i / (data.length - 1)) * width
     const y = height - ((d.y - minVal) / range) * height
@@ -28,8 +28,6 @@ function MiniLineChart({ data, label, color, suffix = '' }: {
   })
 
   const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
-
-  // Determine trend
   const first = points[0].val
   const last = points[points.length - 1].val
   const trend = last > first ? 'up' : last < first ? 'down' : 'flat'
@@ -43,13 +41,8 @@ function MiniLineChart({ data, label, color, suffix = '' }: {
         </div>
       </div>
       <svg viewBox={`0 0 ${width} ${height + 10}`} className="w-full" preserveAspectRatio="none" style={{ height: 80 }}>
-        {/* Background gridlines */}
         <line x1={0} y1={height / 2} x2={width} y2={height / 2} stroke="#e2e8f0" strokeDasharray="2,2" strokeWidth="0.3" />
-
-        {/* Trend line */}
         <path d={pathD} fill="none" stroke={color} strokeWidth="1.5" />
-
-        {/* Data points */}
         {points.map((p, i) => (
           <g key={i}>
             <circle cx={p.x} cy={p.y} r={1.5} fill={color} />
@@ -57,37 +50,78 @@ function MiniLineChart({ data, label, color, suffix = '' }: {
           </g>
         ))}
       </svg>
-      {/* X-axis labels */}
       <div className="flex justify-between mt-1">
         {points.map((p, i) => (
-          <div key={i} className="text-[9px] text-slate-400" style={{ width: `${100 / points.length}%`, textAlign: 'center' }}>
-            {p.label}
-          </div>
+          <div key={i} className="text-[9px] text-slate-400" style={{ width: `${100 / points.length}%`, textAlign: 'center' }}>{p.label}</div>
         ))}
       </div>
     </div>
   )
 }
 
+function conditionColor(c?: string) {
+  if (c === 'Recovery Required') return 'bg-red-100 text-red-700'
+  if (c === 'Attention Needed') return 'bg-amber-100 text-amber-700'
+  if (c === 'Monitor Closely') return 'bg-yellow-100 text-yellow-700'
+  return 'bg-green-100 text-green-700'
+}
+
+function shortDate(iso: string) {
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
 export default function TrendAnalysisPage() {
-  const [project, setProject] = useState<Project | null>(null)
+  const [step, setStep] = useState<Step>('select-project')
+  const [projects, setProjects] = useState<Project[]>([])
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null)
+  const [selectedVersionIds, setSelectedVersionIds] = useState<Set<string>>(new Set())
   const [trend, setTrend] = useState<TrendAnalysisResult | null>(null)
   const [downloading, setDownloading] = useState(false)
 
   useEffect(() => {
-    refresh()
-    const interval = setInterval(refresh, 1500)
-    return () => clearInterval(interval)
+    setProjects(loadProjects())
   }, [])
 
-  function refresh() {
-    const p = getActiveProject()
-    setProject(p)
-    if (p) {
-      setTrend(analyzeProjectTrend(p))
-    } else {
-      setTrend(null)
+  function pickProject(p: Project) {
+    setSelectedProject(p)
+    setSelectedVersionIds(new Set())  // empty by default — user picks
+    setStep('select-versions')
+  }
+
+  function toggleVersion(id: string) {
+    const next = new Set(selectedVersionIds)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setSelectedVersionIds(next)
+  }
+
+  function runAnalysis() {
+    if (!selectedProject) return
+    if (selectedVersionIds.size < 2) return
+
+    // Build a filtered project with only the selected versions
+    const filteredProject: Project = {
+      ...selectedProject,
+      versions: selectedProject.versions.filter(v => selectedVersionIds.has(v.id))
     }
+
+    const result = analyzeProjectTrend(filteredProject)
+    setTrend(result)
+    setActiveProjectId(selectedProject.id)
+    setStep('results')
+  }
+
+  function backToProjects() {
+    setSelectedProject(null)
+    setSelectedVersionIds(new Set())
+    setTrend(null)
+    setStep('select-project')
+    setProjects(loadProjects())  // Refresh
+  }
+
+  function backToVersions() {
+    setTrend(null)
+    setStep('select-versions')
   }
 
   async function downloadWordReport() {
@@ -114,258 +148,414 @@ export default function TrendAnalysisPage() {
     }
   }
 
-  // No project
-  if (!project) {
+  // ============================================
+  // STEP 1: PROJECT SELECTION
+  // ============================================
+  if (step === 'select-project') {
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center flex-shrink-0">
-          <span className="font-bold text-slate-900 text-base">Trend Analysis</span>
-          <span className="text-slate-400 text-sm ml-2">· No active project</span>
-        </div>
-        <div className="flex-1 flex items-center justify-center bg-slate-50">
-          <div className="text-center max-w-md">
-            <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 rounded-2xl flex items-center justify-center">
-              <span className="text-3xl">📈</span>
-            </div>
-            <div className="text-lg font-bold text-slate-700 mb-2">Select a project first</div>
-            <div className="text-sm text-slate-500 mb-6">Trend Analysis requires an active project with 2+ versions.</div>
-            <Link href="/dashboard/projects" className="inline-block bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors">
-              Go to Projects →
-            </Link>
+          <div>
+            <span className="font-bold text-slate-900 text-base">Trend Analysis</span>
+            <span className="text-slate-400 text-sm ml-2">· Choose a project to analyze</span>
           </div>
         </div>
-      </div>
-    )
-  }
 
-  // Only 1 version
-  if (!trend) {
-    return (
-      <div className="flex flex-col h-full">
-        <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center flex-shrink-0">
-          <span className="font-bold text-slate-900 text-base">Trend Analysis</span>
-          <span className="text-slate-400 text-sm ml-2">· {project.name}</span>
-        </div>
-        <div className="flex-1 flex items-center justify-center bg-slate-50">
-          <div className="text-center max-w-md">
-            <div className="w-16 h-16 mx-auto mb-4 bg-amber-100 rounded-2xl flex items-center justify-center">
-              <span className="text-3xl">📈</span>
-            </div>
-            <div className="text-lg font-bold text-slate-700 mb-2">Need 2+ versions for trend analysis</div>
-            <div className="text-sm text-slate-500 mb-6">
-              This project currently has {project.versions.length} version. Upload another schedule version to see how the project is trending over time.
-            </div>
-            <Link href="/dashboard/upload" className="inline-block bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors">
-              Upload New Version →
-            </Link>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // Recommendation styling
-  const recStyle = (() => {
-    if (trend.recommendation.type === 'HEALTHY') return { bg: 'bg-green-50', border: 'border-green-300', text: 'text-green-900', icon: '✅' }
-    if (trend.recommendation.type === 'SCHEDULE_UPDATE_REQUIRED') return { bg: 'bg-blue-50', border: 'border-blue-300', text: 'text-blue-900', icon: '🔄' }
-    if (trend.recommendation.type === 'REBASELINE_RECOMMENDED') return { bg: 'bg-amber-50', border: 'border-amber-300', text: 'text-amber-900', icon: '⚠️' }
-    return { bg: 'bg-red-50', border: 'border-red-300', text: 'text-red-900', icon: '🚨' }
-  })()
-
-  // Trend direction
-  const trendLabel = (() => {
-    if (trend.summary.trendDirection === 'IMPROVING') return { text: 'Improving', color: 'text-green-600', icon: '↗' }
-    if (trend.summary.trendDirection === 'STABLE') return { text: 'Stable', color: 'text-slate-600', icon: '→' }
-    if (trend.summary.trendDirection === 'DETERIORATING') return { text: 'Deteriorating', color: 'text-amber-600', icon: '↘' }
-    return { text: 'Severely Deteriorating', color: 'text-red-600', icon: '↓↓' }
-  })()
-
-  // Chart data
-  const chartData = (key: keyof VersionDataPoint) => trend.dataPoints.map(d => ({
-    x: d.versionLabel,
-    y: typeof d[key] === 'number' ? (d[key] as number) : 0,
-  }))
-
-  return (
-    <div className="flex flex-col h-full">
-      {/* Topbar */}
-      <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0 no-print">
-        <div>
-          <span className="font-bold text-slate-900 text-base">Trend Analysis</span>
-          <span className="text-slate-400 text-sm ml-2">· {project.name}</span>
-        </div>
-        <div className="ml-auto flex gap-2">
-          <button onClick={() => window.print()} className="text-xs border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg hover:border-slate-400 font-semibold">
-            🖨 Print / Save PDF
-          </button>
-          <button onClick={downloadWordReport} disabled={downloading} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 font-semibold disabled:opacity-50">
-            {downloading ? 'Generating...' : '📄 Download Word Report'}
-          </button>
-        </div>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-5 bg-slate-50">
-        <div className="max-w-6xl mx-auto space-y-4">
-
-          {/* Project Header */}
-          <div className="bg-white border border-slate-200 rounded-xl p-5 flex items-center justify-between">
-            <div>
-              <div className="text-2xl font-extrabold text-slate-900">{project.name}</div>
-              {project.projectId && <div className="text-[10px] font-mono text-blue-600 mt-0.5">{project.projectId}</div>}
-              <div className="text-xs text-slate-500 mt-1">
-                Analyzing {trend.versionsAnalyzed} versions · {trend.timeSpanDays} days of project history
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Overall Trend</div>
-              <div className={`text-xl font-extrabold ${trendLabel.color}`}>{trendLabel.icon} {trendLabel.text}</div>
-            </div>
-          </div>
-
-          {/* ProjectLens Recommendation — LEADS the page */}
-          <div className={`${recStyle.bg} ${recStyle.border} border-2 rounded-2xl p-6`}>
-            <div className="flex items-start gap-4 mb-3">
-              <div className="text-4xl flex-shrink-0">{recStyle.icon}</div>
-              <div className="flex-1">
-                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">ProjectLens Recommendation</div>
-                <div className={`text-2xl font-extrabold ${recStyle.text}`}>{trend.recommendation.title}</div>
-              </div>
-            </div>
-            <p className={`text-sm leading-relaxed ${recStyle.text} mb-4`}>
-              {trend.recommendation.summary}
-            </p>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+        <div className="flex-1 overflow-y-auto p-5 bg-slate-50">
+          <div className="max-w-6xl mx-auto">
+            {/* Intro */}
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5 flex items-start gap-3">
+              <span className="text-2xl">📈</span>
               <div>
-                <div className={`text-xs font-bold mb-2 ${recStyle.text}`}>WHY:</div>
-                <ul className="space-y-1">
-                  {trend.recommendation.reasoning.map((r, i) => (
-                    <li key={i} className={`text-xs ${recStyle.text} flex gap-2`}>
-                      <span>•</span><span>{r}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div>
-                <div className={`text-xs font-bold mb-2 ${recStyle.text}`}>WHAT TO DO:</div>
-                <ul className="space-y-1">
-                  {trend.recommendation.actions.map((a, i) => (
-                    <li key={i} className={`text-xs ${recStyle.text} flex gap-2`}>
-                      <span className="font-bold">{i + 1}.</span><span>{a}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </div>
-
-          {/* Trend Summary KPIs */}
-          <div className="grid grid-cols-4 gap-3">
-            <div className="bg-white border border-slate-200 rounded-xl p-3">
-              <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Delay Change</div>
-              <div className={`text-2xl font-extrabold ${trend.summary.overallDelayChange > 0 ? 'text-red-600' : trend.summary.overallDelayChange < 0 ? 'text-green-600' : 'text-slate-600'}`}>
-                {trend.summary.overallDelayChange > 0 ? '+' : ''}{trend.summary.overallDelayChange}d
-              </div>
-              <div className="text-[10px] text-slate-400 mt-0.5">vs. first version</div>
-            </div>
-            <div className="bg-white border border-slate-200 rounded-xl p-3">
-              <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Neg Float Change</div>
-              <div className={`text-2xl font-extrabold ${trend.summary.overallNegFloatChange > 0 ? 'text-red-600' : trend.summary.overallNegFloatChange < 0 ? 'text-green-600' : 'text-slate-600'}`}>
-                {trend.summary.overallNegFloatChange > 0 ? '+' : ''}{trend.summary.overallNegFloatChange}
-              </div>
-              <div className="text-[10px] text-slate-400 mt-0.5">activities</div>
-            </div>
-            <div className="bg-white border border-slate-200 rounded-xl p-3">
-              <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Health Change</div>
-              <div className={`text-2xl font-extrabold ${trend.summary.overallHealthChange < 0 ? 'text-red-600' : trend.summary.overallHealthChange > 0 ? 'text-green-600' : 'text-slate-600'}`}>
-                {trend.summary.overallHealthChange > 0 ? '+' : ''}{trend.summary.overallHealthChange}
-              </div>
-              <div className="text-[10px] text-slate-400 mt-0.5">points</div>
-            </div>
-            <div className="bg-white border border-slate-200 rounded-xl p-3">
-              <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Monthly Slip Rate</div>
-              <div className={`text-2xl font-extrabold ${trend.summary.averageMonthlyDelayGrowth > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                {trend.summary.averageMonthlyDelayGrowth > 0 ? '+' : ''}{trend.summary.averageMonthlyDelayGrowth}d
-              </div>
-              <div className="text-[10px] text-slate-400 mt-0.5">days/month</div>
-            </div>
-          </div>
-
-          {/* Charts */}
-          <div className="grid grid-cols-2 gap-3">
-            <MiniLineChart data={chartData('delayDays')} label="Days Behind Contract" color="#dc2626" suffix="d" />
-            <MiniLineChart data={chartData('negativeFloat')} label="Negative Float Activities" color="#dc2626" />
-            <MiniLineChart data={chartData('healthScore')} label="Health Score" color="#2563eb" />
-            <MiniLineChart data={chartData('completePct')} label="Work Complete %" color="#16a34a" suffix="%" />
-          </div>
-
-          {/* Version-by-version data */}
-          <div className="bg-white border border-slate-200 rounded-xl p-5">
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Version Data</div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b-2 border-slate-200">
-                    <th className="text-left py-2 px-2 font-bold text-slate-600">Version</th>
-                    <th className="text-left py-2 px-2 font-bold text-slate-600">Date</th>
-                    <th className="text-right py-2 px-2 font-bold text-slate-600">Activities</th>
-                    <th className="text-right py-2 px-2 font-bold text-slate-600">Complete</th>
-                    <th className="text-right py-2 px-2 font-bold text-slate-600">Neg Float</th>
-                    <th className="text-right py-2 px-2 font-bold text-slate-600">Days Behind</th>
-                    <th className="text-right py-2 px-2 font-bold text-slate-600">Health</th>
-                    <th className="text-left py-2 px-2 font-bold text-slate-600">Condition</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {trend.dataPoints.map((d, i) => (
-                    <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
-                      <td className="py-2 px-2 font-bold text-blue-600">{d.versionLabel}</td>
-                      <td className="py-2 px-2 text-slate-700">{new Date(d.uploadedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</td>
-                      <td className="py-2 px-2 text-right text-slate-700">{d.totalActivities}</td>
-                      <td className="py-2 px-2 text-right text-slate-700">{d.completePct}%</td>
-                      <td className={`py-2 px-2 text-right font-bold ${d.negativeFloat > 50 ? 'text-red-600' : d.negativeFloat > 0 ? 'text-amber-600' : 'text-green-600'}`}>{d.negativeFloat}</td>
-                      <td className={`py-2 px-2 text-right font-bold ${d.delayDays > 30 ? 'text-red-600' : d.delayDays > 0 ? 'text-amber-600' : 'text-green-600'}`}>
-                        {d.delayDays > 0 ? '+' : ''}{d.delayDays}d
-                      </td>
-                      <td className="py-2 px-2 text-right text-slate-700">{d.healthScore}/100</td>
-                      <td className="py-2 px-2 text-slate-700">{d.condition}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Major Changes */}
-          <div className="bg-white border border-slate-200 rounded-xl p-5">
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Major Changes Between Versions</div>
-            <div className="space-y-3">
-              {trend.changes.map((c, i) => (
-                <div key={i} className="border-l-4 border-blue-500 bg-blue-50/30 pl-3 py-2">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-bold text-blue-600">{c.fromVersion} → {c.toVersion}</span>
-                    <span className="text-[10px] text-slate-500">{c.daysBetween} days apart</span>
-                  </div>
-                  {c.majorChanges.length > 0 ? (
-                    <ul className="text-xs text-slate-700 space-y-0.5">
-                      {c.majorChanges.map((m, j) => (
-                        <li key={j} className="flex gap-2"><span>•</span><span>{m}</span></li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <div className="text-xs text-slate-500 italic">No major changes detected — schedule remained stable</div>
-                  )}
+                <div className="font-bold text-blue-900 text-sm">Pick a project to analyze trends</div>
+                <div className="text-xs text-blue-800 mt-0.5">
+                  Trend Analysis uses the schedule versions already saved in ProjectLens — no new uploads needed.
+                  Choose a project below to see how it has performed across all its updates.
                 </div>
-              ))}
+              </div>
             </div>
-          </div>
 
-          <div className="text-center text-xs text-slate-400 py-4">
-            All metrics derived from your uploaded XER files · ProjectLens does not replace your judgment
+            {projects.length === 0 ? (
+              <div className="text-center py-16">
+                <div className="w-16 h-16 mx-auto mb-4 bg-slate-200 rounded-2xl flex items-center justify-center">
+                  <span className="text-3xl">📊</span>
+                </div>
+                <div className="text-lg font-bold text-slate-700 mb-2">No projects yet</div>
+                <div className="text-sm text-slate-500 mb-6">Upload schedule versions first to enable trend analysis.</div>
+                <Link href="/dashboard/projects" className="inline-block bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-blue-700">
+                  Go to Projects →
+                </Link>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {projects.map(p => {
+                  const eligible = p.versions.length >= 2
+                  const latest = [...p.versions].sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime())[0]
+                  const analysis = latest?.analysis
+
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => eligible && pickProject(p)}
+                      disabled={!eligible}
+                      className={`text-left bg-white border-2 rounded-2xl p-5 transition-all ${
+                        eligible
+                          ? 'border-slate-200 hover:border-blue-400 hover:shadow-lg cursor-pointer'
+                          : 'border-slate-100 opacity-60 cursor-not-allowed'
+                      }`}>
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold text-slate-900 text-base truncate">{p.name}</div>
+                          {p.projectId && <div className="text-[10px] font-mono text-blue-600 mt-0.5">{p.projectId}</div>}
+                        </div>
+                        {eligible ? (
+                          <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                            {p.versions.length} versions
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
+                            Need another version
+                          </span>
+                        )}
+                      </div>
+
+                      {analysis ? (
+                        <>
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${conditionColor(analysis.condition)}`}>
+                              {analysis.condition}
+                            </span>
+                            <span className="text-[10px] text-slate-500">Health {analysis.healthScore}/100</span>
+                          </div>
+                          <div className="text-xs text-slate-500 mb-3">
+                            Latest version: {shortDate(latest.uploadedAt)}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-xs text-slate-400 mb-3">No analysis on latest version</div>
+                      )}
+
+                      {eligible && (
+                        <div className="text-xs font-bold text-blue-600">
+                          Analyze trends →
+                        </div>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
-    </div>
-  )
+    )
+  }
+
+  // ============================================
+  // STEP 2: VERSION SELECTION
+  // ============================================
+  if (step === 'select-versions' && selectedProject) {
+    const sortedVersions = [...selectedProject.versions].sort((a, b) =>
+      new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+    )
+
+    return (
+      <div className="flex flex-col h-full">
+        <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0">
+          <button onClick={backToProjects} className="text-xs text-slate-500 hover:text-blue-600 font-semibold">
+            ← Back to projects
+          </button>
+          <div>
+            <span className="font-bold text-slate-900 text-base">Trend Analysis</span>
+            <span className="text-slate-400 text-sm ml-2">· {selectedProject.name}</span>
+          </div>
+          <div className="ml-auto flex items-center gap-3">
+            <span className="text-xs text-slate-500">
+              {selectedVersionIds.size} of {sortedVersions.length} selected
+            </span>
+            <button
+              onClick={runAnalysis}
+              disabled={selectedVersionIds.size < 2}
+              className="text-xs bg-blue-600 text-white px-4 py-1.5 rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
+              Run Trend Analysis →
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 bg-slate-50">
+          <div className="max-w-4xl mx-auto">
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-5 flex items-start gap-3">
+              <span className="text-2xl">📋</span>
+              <div>
+                <div className="font-bold text-amber-900 text-sm">Select at least 2 versions to analyze</div>
+                <div className="text-xs text-amber-800 mt-0.5">
+                  Check the versions you want to include in the trend. Typically include all recent updates to see the full pattern.
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    if (selectedVersionIds.size === sortedVersions.length) {
+                      setSelectedVersionIds(new Set())
+                    } else {
+                      setSelectedVersionIds(new Set(sortedVersions.map(v => v.id)))
+                    }
+                  }}
+                  className="text-xs text-blue-600 font-semibold hover:underline">
+                  {selectedVersionIds.size === sortedVersions.length ? 'Deselect all' : 'Select all'}
+                </button>
+                <div className="text-xs text-slate-500 ml-auto">{sortedVersions.length} total versions</div>
+              </div>
+
+              {sortedVersions.map((v, i) => {
+                const isSelected = selectedVersionIds.has(v.id)
+                const analysis = v.analysis
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => toggleVersion(v.id)}
+                    className={`w-full flex items-center gap-3 px-4 py-3 border-b border-slate-100 text-left transition-colors ${
+                      isSelected ? 'bg-blue-50/50' : 'hover:bg-slate-50'
+                    }`}>
+                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 ${
+                      isSelected ? 'bg-blue-600 border-blue-600' : 'border-slate-300'
+                    }`}>
+                      {isSelected && <span className="text-white text-xs font-bold">✓</span>}
+                    </div>
+                    <div className="font-mono text-xs font-bold text-slate-500 w-12">v{sortedVersions.length - i}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-slate-800">{shortDate(v.uploadedAt)}</div>
+                      <div className="text-[10px] text-slate-500 truncate">{v.fileName}</div>
+                    </div>
+                    {analysis && (
+                      <>
+                        <div className="text-xs text-slate-600 w-20 text-right">
+                          {analysis.totalActivities} acts
+                        </div>
+                        <div className={`text-xs font-bold w-20 text-right ${
+                          analysis.delayDays > 30 ? 'text-red-600' :
+                          analysis.delayDays > 0 ? 'text-amber-600' : 'text-green-600'
+                        }`}>
+                          {analysis.delayDays > 0 ? '+' : ''}{analysis.delayDays}d
+                        </div>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${conditionColor(analysis.condition)}`}>
+                          {analysis.healthScore}/100
+                        </span>
+                      </>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+
+            {selectedVersionIds.size < 2 && (
+              <div className="mt-4 text-center text-xs text-amber-600 font-semibold">
+                Select at least 2 versions to run the analysis
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ============================================
+  // STEP 3: RESULTS
+  // ============================================
+  if (step === 'results' && trend) {
+    const recStyle = (() => {
+      if (trend.recommendation.type === 'HEALTHY') return { bg: 'bg-green-50', border: 'border-green-300', text: 'text-green-900', icon: '✅' }
+      if (trend.recommendation.type === 'SCHEDULE_UPDATE_REQUIRED') return { bg: 'bg-blue-50', border: 'border-blue-300', text: 'text-blue-900', icon: '🔄' }
+      if (trend.recommendation.type === 'REBASELINE_RECOMMENDED') return { bg: 'bg-amber-50', border: 'border-amber-300', text: 'text-amber-900', icon: '⚠️' }
+      return { bg: 'bg-red-50', border: 'border-red-300', text: 'text-red-900', icon: '🚨' }
+    })()
+
+    const trendLabel = (() => {
+      if (trend.summary.trendDirection === 'IMPROVING') return { text: 'Improving', color: 'text-green-600', icon: '↗' }
+      if (trend.summary.trendDirection === 'STABLE') return { text: 'Stable', color: 'text-slate-600', icon: '→' }
+      if (trend.summary.trendDirection === 'DETERIORATING') return { text: 'Deteriorating', color: 'text-amber-600', icon: '↘' }
+      return { text: 'Severely Deteriorating', color: 'text-red-600', icon: '↓↓' }
+    })()
+
+    const chartData = (key: keyof VersionDataPoint) => trend.dataPoints.map(d => ({
+      x: d.versionLabel,
+      y: typeof d[key] === 'number' ? (d[key] as number) : 0,
+    }))
+
+    return (
+      <div className="flex flex-col h-full">
+        <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0 no-print">
+          <button onClick={backToProjects} className="text-xs text-slate-500 hover:text-blue-600 font-semibold">
+            ← Switch Project
+          </button>
+          <button onClick={backToVersions} className="text-xs text-slate-500 hover:text-blue-600 font-semibold">
+            ⚙ Change Versions
+          </button>
+          <div>
+            <span className="font-bold text-slate-900 text-base">Trend Analysis</span>
+            <span className="text-slate-400 text-sm ml-2">· {trend.projectName}</span>
+          </div>
+          <div className="ml-auto flex gap-2">
+            <button onClick={() => window.print()} className="text-xs border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg hover:border-slate-400 font-semibold">
+              🖨 Print
+            </button>
+            <button onClick={downloadWordReport} disabled={downloading} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 font-semibold disabled:opacity-50">
+              {downloading ? 'Generating...' : '📄 Download Word Report'}
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 bg-slate-50">
+          <div className="max-w-6xl mx-auto space-y-4">
+
+            <div className="bg-white border border-slate-200 rounded-xl p-5 flex items-center justify-between">
+              <div>
+                <div className="text-2xl font-extrabold text-slate-900">{trend.projectName}</div>
+                {trend.projectId && <div className="text-[10px] font-mono text-blue-600 mt-0.5">{trend.projectId}</div>}
+                <div className="text-xs text-slate-500 mt-1">
+                  Analyzing {trend.versionsAnalyzed} versions · {trend.timeSpanDays} days of project history
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Overall Trend</div>
+                <div className={`text-xl font-extrabold ${trendLabel.color}`}>{trendLabel.icon} {trendLabel.text}</div>
+              </div>
+            </div>
+
+            <div className={`${recStyle.bg} ${recStyle.border} border-2 rounded-2xl p-6`}>
+              <div className="flex items-start gap-4 mb-3">
+                <div className="text-4xl flex-shrink-0">{recStyle.icon}</div>
+                <div className="flex-1">
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">ProjectLens Recommendation</div>
+                  <div className={`text-2xl font-extrabold ${recStyle.text}`}>{trend.recommendation.title}</div>
+                </div>
+              </div>
+              <p className={`text-sm leading-relaxed ${recStyle.text} mb-4`}>{trend.recommendation.summary}</p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                <div>
+                  <div className={`text-xs font-bold mb-2 ${recStyle.text}`}>WHY:</div>
+                  <ul className="space-y-1">
+                    {trend.recommendation.reasoning.map((r, i) => (
+                      <li key={i} className={`text-xs ${recStyle.text} flex gap-2`}><span>•</span><span>{r}</span></li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <div className={`text-xs font-bold mb-2 ${recStyle.text}`}>WHAT TO DO:</div>
+                  <ul className="space-y-1">
+                    {trend.recommendation.actions.map((a, i) => (
+                      <li key={i} className={`text-xs ${recStyle.text} flex gap-2`}><span className="font-bold">{i + 1}.</span><span>{a}</span></li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-4 gap-3">
+              <div className="bg-white border border-slate-200 rounded-xl p-3">
+                <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Delay Change</div>
+                <div className={`text-2xl font-extrabold ${trend.summary.overallDelayChange > 0 ? 'text-red-600' : trend.summary.overallDelayChange < 0 ? 'text-green-600' : 'text-slate-600'}`}>
+                  {trend.summary.overallDelayChange > 0 ? '+' : ''}{trend.summary.overallDelayChange}d
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">vs. first version</div>
+              </div>
+              <div className="bg-white border border-slate-200 rounded-xl p-3">
+                <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Neg Float Change</div>
+                <div className={`text-2xl font-extrabold ${trend.summary.overallNegFloatChange > 0 ? 'text-red-600' : trend.summary.overallNegFloatChange < 0 ? 'text-green-600' : 'text-slate-600'}`}>
+                  {trend.summary.overallNegFloatChange > 0 ? '+' : ''}{trend.summary.overallNegFloatChange}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">activities</div>
+              </div>
+              <div className="bg-white border border-slate-200 rounded-xl p-3">
+                <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Health Change</div>
+                <div className={`text-2xl font-extrabold ${trend.summary.overallHealthChange < 0 ? 'text-red-600' : trend.summary.overallHealthChange > 0 ? 'text-green-600' : 'text-slate-600'}`}>
+                  {trend.summary.overallHealthChange > 0 ? '+' : ''}{trend.summary.overallHealthChange}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">points</div>
+              </div>
+              <div className="bg-white border border-slate-200 rounded-xl p-3">
+                <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Monthly Slip Rate</div>
+                <div className={`text-2xl font-extrabold ${trend.summary.averageMonthlyDelayGrowth > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                  {trend.summary.averageMonthlyDelayGrowth > 0 ? '+' : ''}{trend.summary.averageMonthlyDelayGrowth}d
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">days/month</div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <MiniLineChart data={chartData('delayDays')} label="Days Behind Contract" color="#dc2626" suffix="d" />
+              <MiniLineChart data={chartData('negativeFloat')} label="Negative Float Activities" color="#dc2626" />
+              <MiniLineChart data={chartData('healthScore')} label="Health Score" color="#2563eb" />
+              <MiniLineChart data={chartData('completePct')} label="Work Complete %" color="#16a34a" suffix="%" />
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-xl p-5">
+              <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Version Data</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b-2 border-slate-200">
+                      <th className="text-left py-2 px-2 font-bold text-slate-600">Version</th>
+                      <th className="text-left py-2 px-2 font-bold text-slate-600">Date</th>
+                      <th className="text-right py-2 px-2 font-bold text-slate-600">Activities</th>
+                      <th className="text-right py-2 px-2 font-bold text-slate-600">Complete</th>
+                      <th className="text-right py-2 px-2 font-bold text-slate-600">Neg Float</th>
+                      <th className="text-right py-2 px-2 font-bold text-slate-600">Days Behind</th>
+                      <th className="text-right py-2 px-2 font-bold text-slate-600">Health</th>
+                      <th className="text-left py-2 px-2 font-bold text-slate-600">Condition</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {trend.dataPoints.map((d, i) => (
+                      <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
+                        <td className="py-2 px-2 font-bold text-blue-600">{d.versionLabel}</td>
+                        <td className="py-2 px-2 text-slate-700">{shortDate(d.uploadedAt)}</td>
+                        <td className="py-2 px-2 text-right text-slate-700">{d.totalActivities}</td>
+                        <td className="py-2 px-2 text-right text-slate-700">{d.completePct}%</td>
+                        <td className={`py-2 px-2 text-right font-bold ${d.negativeFloat > 50 ? 'text-red-600' : d.negativeFloat > 0 ? 'text-amber-600' : 'text-green-600'}`}>{d.negativeFloat}</td>
+                        <td className={`py-2 px-2 text-right font-bold ${d.delayDays > 30 ? 'text-red-600' : d.delayDays > 0 ? 'text-amber-600' : 'text-green-600'}`}>{d.delayDays > 0 ? '+' : ''}{d.delayDays}d</td>
+                        <td className="py-2 px-2 text-right text-slate-700">{d.healthScore}/100</td>
+                        <td className="py-2 px-2 text-slate-700">{d.condition}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-xl p-5">
+              <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Major Changes Between Versions</div>
+              <div className="space-y-3">
+                {trend.changes.map((c, i) => (
+                  <div key={i} className="border-l-4 border-blue-500 bg-blue-50/30 pl-3 py-2">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-bold text-blue-600">{c.fromVersion} → {c.toVersion}</span>
+                      <span className="text-[10px] text-slate-500">{c.daysBetween} days apart</span>
+                    </div>
+                    {c.majorChanges.length > 0 ? (
+                      <ul className="text-xs text-slate-700 space-y-0.5">
+                        {c.majorChanges.map((m, j) => <li key={j} className="flex gap-2"><span>•</span><span>{m}</span></li>)}
+                      </ul>
+                    ) : (
+                      <div className="text-xs text-slate-500 italic">No major changes detected — schedule remained stable</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="text-center text-xs text-slate-400 py-4">
+              All metrics derived from your saved XER files · ProjectLens does not replace your judgment
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return null
 }
