@@ -56,6 +56,9 @@ export interface XERAnalysis {
   noTies: Task[]
   longLeadItems: LongLeadItem[]
   shortLeadItems: LongLeadItem[]
+  submittals?: Task[]
+  changeOrders?: Task[]
+  twoWeekLookahead?: Task[]
   criticalDrivers: Task[]
   ganttActivities: Task[]
   inProgressActivities: Task[]
@@ -359,11 +362,57 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   // Duration at Completion = Project Start to Projected End (total expected)
   const durationAtCompletion = daysBetween(projectStartDate, parsed.projectedEnd)
 
+  // SUBMITTALS — keyword-based detection (review/approval tasks)
+  const SUBMITTAL_KEYWORDS = ['SUBMIT', 'SUBMITTAL', 'SHOP DRAWING', 'REVIEW', 'APPROVE', 'APPROVAL', 'O&M', 'COORDINATION DRAWING']
+  const submittals = taskArr.filter(t => {
+    const upper = (t.task_name || '').toUpperCase()
+    return SUBMITTAL_KEYWORDS.some(k => upper.includes(k)) && t.status_code !== 'TK_Complete'
+  }).sort((a, b) => {
+    const fa = parseFloat(a.total_float_hr_cnt || '0')
+    const fb = parseFloat(b.total_float_hr_cnt || '0')
+    return fa - fb
+  })
+
+  // CHANGE ORDERS — keyword-based detection (changes/modifications)
+  const CHANGE_KEYWORDS = ['CHANGE', 'CO-', 'DESIGN CHANGE', 'FIELD CHANGE', 'MODIFICATION', 'AMENDMENT', 'REVISION', 'PO-', 'PURCHASE ORDER']
+  const changeOrders = taskArr.filter(t => {
+    const upper = (t.task_name || '').toUpperCase()
+    const code = (t.task_code || '').toUpperCase()
+    return CHANGE_KEYWORDS.some(k => upper.includes(k) || code.includes(k))
+  }).sort((a, b) => {
+    const sa = a.early_start_date || a.target_start_date || ''
+    const sb = b.early_start_date || b.target_start_date || ''
+    return sa.localeCompare(sb)
+  })
+
+  // 2 WEEK LOOKAHEAD — activities starting OR finishing within 14 days after data date
+  const dataDateObj = parsed.dataDate ? new Date(parsed.dataDate.replace(' ', 'T')) : null
+  const twoWeeksOut = dataDateObj ? new Date(dataDateObj.getTime() + 14 * 24 * 60 * 60 * 1000) : null
+
+  const twoWeekLookahead = (dataDateObj && twoWeeksOut) ? taskArr.filter(t => {
+    if (t.status_code === 'TK_Complete') return false
+    const startStr = t.early_start_date || t.target_start_date
+    const endStr = t.early_end_date || t.target_end_date
+    try {
+      const start = startStr ? new Date(startStr.replace(' ', 'T')) : null
+      const end = endStr ? new Date(endStr.replace(' ', 'T')) : null
+      const startInWindow = start && start >= dataDateObj && start <= twoWeeksOut
+      const endInWindow = end && end >= dataDateObj && end <= twoWeeksOut
+      const ongoing = start && end && start <= dataDateObj && end >= dataDateObj
+      return startInWindow || endInWindow || ongoing
+    } catch { return false }
+  }).sort((a, b) => {
+    const sa = a.early_start_date || a.target_start_date || ''
+    const sb = b.early_start_date || b.target_start_date || ''
+    return sa.localeCompare(sb)
+  }) : []
+
   return {
     totalActivities: taskArr.length,
     complete, inProgress, notStarted, negativeFloat,
     outOfSequence, noTies,
     longLeadItems, shortLeadItems,
+    submittals, changeOrders, twoWeekLookahead,
     criticalDrivers, ganttActivities, inProgressActivities,
     milestones,
     healthScore, condition, delayDays,

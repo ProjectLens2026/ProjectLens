@@ -61,7 +61,6 @@ export default function Sidebar({ user }: SidebarProps) {
     {
       group: 'Project Controls',
       items: [
-        { href: '/dashboard/schedule', icon: '📅', label: 'Schedule' },
         { href: '/dashboard/risks', icon: '⚠', label: 'Risks & Issues' },
         { href: '/dashboard/procurement', icon: '🚚', label: 'Procurement' },
         { href: '/dashboard/rfis', icon: '❓', label: 'RFIs', badge: activeProject.rfis.length > 0 ? String(activeProject.rfis.length) : null },

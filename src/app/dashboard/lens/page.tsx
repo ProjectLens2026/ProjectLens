@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { getActiveProject, getActiveAnalysis } from '@/lib/projectStore'
+import { getActiveProject, getLatestVersion } from '@/lib/projectStore'
 
 // Gantt Chart Component
 function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
@@ -188,8 +188,11 @@ export default function ProjectLensAnalysisPage() {
   }, [])
 
   function refresh() {
-    setProject(getActiveProject())
-    setAnalysis(getActiveAnalysis())
+    const p = getActiveProject()
+    setProject(p)
+    // Always show the LATEST version on ProjectLens Analysis page
+    const latest = getLatestVersion(p)
+    setAnalysis(latest?.analysis || null)
   }
 
   function fmtFloat(hours: string | number) {
@@ -301,6 +304,7 @@ export default function ProjectLensAnalysisPage() {
             {[
               { id: 'gantt', label: 'Gantt Chart', icon: '📊' },
               { id: 'critical', label: 'Critical Path', icon: '🎯' },
+              { id: 'lookahead', label: '2 Week Lookahead', icon: '📅' },
               { id: 'logic', label: 'Logic Check', icon: '🔧' },
               { id: 'noties', label: 'No Logic Ties', icon: '⛓️' },
               { id: 'longlead', label: 'Long Lead Items', icon: '📦' },
@@ -341,6 +345,50 @@ export default function ProjectLensAnalysisPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* 2 WEEK LOOKAHEAD */}
+            {activeTab === 'lookahead' && (
+              <div className="tab-pane">
+                <h3 className="text-sm font-bold mb-3">2 Week Lookahead — activities within 14 days of data date</h3>
+                <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
+                  Activities scheduled to START or FINISH in the next 14 calendar days after the data date ({a.dataDate?.slice(0,10) || 'N/A'}).
+                  Use this for weekly coordination meetings with field super and trades.
+                </div>
+                {(!a.twoWeekLookahead || a.twoWeekLookahead.length === 0) ? (
+                  <div className="text-center py-8 text-slate-400 text-xs">No activities scheduled in next 14 days. Upload a fresh XER if you expect lookahead data.</div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-500 uppercase border-b border-slate-200 pb-2">
+                      <div className="col-span-1">Code</div>
+                      <div className="col-span-5">Activity</div>
+                      <div className="col-span-2 text-right">Start</div>
+                      <div className="col-span-2 text-right">Finish</div>
+                      <div className="col-span-1 text-right">% Done</div>
+                      <div className="col-span-1 text-right">Float</div>
+                    </div>
+                    {a.twoWeekLookahead.slice(0, 30).map((t: any, i: number) => {
+                      const float = Math.round(parseFloat(t.total_float_hr_cnt || '0') / 8)
+                      const pct = parseFloat(t.phys_complete_pct || '0')
+                      return (
+                        <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 last:border-0 text-xs items-center">
+                          <div className="col-span-1 font-mono font-semibold text-slate-800 truncate">{t.task_code}</div>
+                          <div className="col-span-5 text-slate-700 truncate">{t.task_name}</div>
+                          <div className="col-span-2 text-right text-slate-600">{(t.early_start_date || t.target_start_date || '').slice(0,10)}</div>
+                          <div className="col-span-2 text-right text-slate-600 font-semibold">{(t.early_end_date || t.target_end_date || '').slice(0,10)}</div>
+                          <div className="col-span-1 text-right text-slate-600">{pct}%</div>
+                          <div className={`col-span-1 text-right font-bold ${float < 0 ? 'text-red-600' : float <= 14 ? 'text-amber-600' : 'text-green-600'}`}>{float}d</div>
+                        </div>
+                      )
+                    })}
+                    {a.twoWeekLookahead.length > 30 && (
+                      <div className="text-center text-[10px] text-slate-400 pt-3">
+                        Showing first 30 of {a.twoWeekLookahead.length} activities
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
