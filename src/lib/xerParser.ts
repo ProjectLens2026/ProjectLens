@@ -63,6 +63,18 @@ export interface XERAnalysis {
   healthScore: number
   condition: string
   delayDays: number
+  // Key dates
+  projectStartDate?: string
+  projectStartSource?: string
+  substantialCompletionDate?: string
+  substantialCompletionMilestone?: string
+  finalCompletionDate?: string
+  finalCompletionMilestone?: string
+  // Durations
+  originalDurationDays?: number
+  remainingDurationDays?: number
+  actualDurationDays?: number
+  durationAtCompletion?: number
 }
 
 export interface OutOfSequence {
