@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   loadProjects, deleteProject, renameProject, deleteVersion,
+  moveVersionToProject,
   setActiveProjectId, setActiveVersionId, getLatestVersion,
   migrateLegacyData, Project
 } from '@/lib/projectStore'
@@ -13,6 +14,7 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [moveMenuFor, setMoveMenuFor] = useState<string | null>(null)  // versionId for which menu is open
   const [editName, setEditName] = useState('')
   const [editProjectId, setEditProjectId] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
@@ -227,9 +229,9 @@ export default function ProjectsPage() {
 
                     {/* Version list */}
                     {isExpanded && (
-                      <div className="space-y-1 mb-3 bg-slate-50 rounded-lg p-2 max-h-48 overflow-y-auto">
+                      <div className="space-y-1 mb-3 bg-slate-50 rounded-lg p-2 max-h-64 overflow-y-auto">
                         {p.versions.map((v, i) => (
-                          <div key={v.id} className="flex items-center gap-2 text-[10px] py-1 px-2 hover:bg-white rounded">
+                          <div key={v.id} className="flex items-center gap-2 text-[10px] py-1 px-2 hover:bg-white rounded relative">
                             <span className="font-mono text-slate-400">v{p.versions.length - i}</span>
                             <span className="flex-1 truncate font-semibold text-slate-700">{shortDate(v.uploadedAt)}</span>
                             <span className="text-slate-500">{v.analysis?.totalActivities || 0} acts</span>
@@ -240,10 +242,39 @@ export default function ProjectsPage() {
                             )}
                             <button onClick={() => openProject(p.id, v.id)}
                               className="text-blue-600 font-bold hover:underline">Open</button>
+                            {projects.length > 1 && (
+                              <button onClick={() => setMoveMenuFor(moveMenuFor === v.id ? null : v.id)}
+                                title="Move to different project"
+                                className="text-slate-400 hover:text-blue-600 font-bold px-1">⇄</button>
+                            )}
                             {p.versions.length > 1 && (
                               <button onClick={() => handleDeleteVersion(p.id, v.id)}
                                 title="Delete this version"
                                 className="text-slate-300 hover:text-red-500">×</button>
+                            )}
+
+                            {/* Move To dropdown */}
+                            {moveMenuFor === v.id && (
+                              <div className="absolute right-0 top-6 z-20 bg-white border border-slate-300 rounded-lg shadow-lg py-1 min-w-[220px] max-h-64 overflow-y-auto">
+                                <div className="px-3 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">Move to project:</div>
+                                {projects.filter(target => target.id !== p.id).length === 0 ? (
+                                  <div className="px-3 py-2 text-[10px] text-slate-400">No other projects available</div>
+                                ) : (
+                                  projects.filter(target => target.id !== p.id).map(target => (
+                                    <button
+                                      key={target.id}
+                                      onClick={() => {
+                                        moveVersionToProject(p.id, v.id, target.id)
+                                        setMoveMenuFor(null)
+                                        refresh()
+                                      }}
+                                      className="w-full text-left px-3 py-1.5 hover:bg-blue-50 text-[10px] text-slate-700 hover:text-blue-700 flex items-center justify-between gap-2">
+                                      <span className="font-semibold truncate">{target.name}</span>
+                                      <span className="text-[9px] text-slate-400 flex-shrink-0">{target.versions.length}v</span>
+                                    </button>
+                                  ))
+                                )}
+                              </div>
                             )}
                           </div>
                         ))}

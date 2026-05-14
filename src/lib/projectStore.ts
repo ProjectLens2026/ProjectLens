@@ -201,6 +201,35 @@ export function deleteVersion(projectId: string, versionId: string) {
   }
 }
 
+// Move a version from one project to another (P6 EPS-style)
+export function moveVersionToProject(sourceProjectId: string, versionId: string, targetProjectId: string): boolean {
+  const projects = loadProjects()
+  const sourceIdx = projects.findIndex(p => p.id === sourceProjectId)
+  const targetIdx = projects.findIndex(p => p.id === targetProjectId)
+  if (sourceIdx === -1 || targetIdx === -1) return false
+  if (sourceProjectId === targetProjectId) return false
+
+  const versionIdx = projects[sourceIdx].versions.findIndex(v => v.id === versionId)
+  if (versionIdx === -1) return false
+
+  // Pull version out of source
+  const [movedVersion] = projects[sourceIdx].versions.splice(versionIdx, 1)
+  projects[sourceIdx].updatedAt = new Date().toISOString()
+
+  // Add to target (at top so it becomes most recent)
+  projects[targetIdx].versions.unshift(movedVersion)
+  projects[targetIdx].updatedAt = new Date().toISOString()
+
+  saveProjects(projects)
+
+  // If the moved version was the active version, reset source's active to latest remaining
+  if (getActiveVersionId() === versionId) {
+    setActiveVersionId(null)  // will fall back to latest of whichever project is active
+  }
+
+  return true
+}
+
 export function renameProject(id: string, newName: string, projectId?: string) {
   const projects = loadProjects()
   const idx = projects.findIndex(p => p.id === id)
