@@ -236,15 +236,23 @@ export default function UploadPage() {
   const [newProjectId, setNewProjectId] = useState<string>('')
 
   useEffect(() => {
+    // Run on mount AND when navigating to this page
+    refreshProjectsList()
+  }, [])
+
+  function refreshProjectsList() {
     const all = loadProjects()
     setExistingProjects(all)
-    // Default to existing project if there's an active one
+    // Always sync to currently active project from sidebar
     const activeId = getActiveProjectId()
     if (activeId && all.find(p => p.id === activeId)) {
       setSelectedProjectId(activeId)
       setProjectMode('existing')
+    } else if (all.length === 0) {
+      setSelectedProjectId('')
+      setProjectMode('new')
     }
-  }, [])
+  }
 
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -254,12 +262,20 @@ export default function UploadPage() {
   function onDrop(e: React.DragEvent) {
     e.preventDefault(); setDragging(false)
     const f = e.dataTransfer.files[0]
-    if (f) { setFile(f); setStep('context') }
+    if (f) {
+      setFile(f)
+      refreshProjectsList()  // Re-sync with current active project
+      setStep('context')
+    }
   }
 
   function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
-    if (f) { setFile(f); setStep('context') }
+    if (f) {
+      setFile(f)
+      refreshProjectsList()  // Re-sync with current active project
+      setStep('context')
+    }
   }
 
   async function runAnalysis() {
@@ -283,35 +299,50 @@ export default function UploadPage() {
       const data = await res.json()
       setResult(data)
 
+      // Read raw XER text for TIA comparison from saved versions
+      let rawXER: string | undefined = undefined
+      if (file && file.name.toLowerCase().endsWith('.xer')) {
+        try {
+          rawXER = await file.text()
+        } catch (e) {
+          console.warn('Could not read raw XER text:', e)
+        }
+      }
+
       // Save as a project version based on user selection
       try {
         const version: ScheduleVersion = {
-          id: 'ver_' + Date.now().toString(36),
+          id: 'ver_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
           uploadedAt: new Date().toISOString(),
           fileName: file?.name || 'schedule.xer',
           analysis: data.analysis,
           aiNarrative: data.aiNarrative,
           context: ctx,
+          rawXER,
         }
+
+        console.log('[ProjectLens] Saving version', { projectMode, selectedProjectId, versionId: version.id })
 
         if (projectMode === 'existing' && selectedProjectId) {
           // Add as new version to existing project
-          addVersionToProject(selectedProjectId, version)
+          const updated = addVersionToProject(selectedProjectId, version)
+          console.log('[ProjectLens] Added version to existing project', { success: !!updated, totalVersions: updated?.versions.length })
         } else {
           // Create a new project
-          const projectName = ctx.projectName || data.analysis?.projectName || file?.name?.replace('.xer', '') || 'Untitled Project'
-          createProject({
+          const projectName = ctx.projectName || data.analysis?.projectName || file?.name?.replace(/\.[a-z]+$/i, '') || 'Untitled Project'
+          const newProj = createProject({
             name: projectName,
             projectId: newProjectId.trim() || undefined,
             owner: ctx.owner,
             version,
           })
+          console.log('[ProjectLens] Created new project', { id: newProj.id, name: newProj.name })
         }
 
         // Keep legacy keys for backward compat
         localStorage.setItem('pl_last_analysis', JSON.stringify(data.analysis))
       } catch (err) {
-        console.error('Failed to save project:', err)
+        console.error('[ProjectLens] Failed to save project:', err)
       }
 
       setTimeout(() => setStep('done'), 500)

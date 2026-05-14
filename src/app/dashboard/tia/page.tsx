@@ -1,7 +1,13 @@
 'use client'
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import Link from 'next/link'
+import {
+  getActiveProject, getLatestVersion, addVersionToProject,
+  Project, ScheduleVersion
+} from '@/lib/projectStore'
 
-type Step = 'upload' | 'analyzing' | 'review' | 'categorize' | 'generating'
+type Step = 'mode-select' | 'upload' | 'analyzing' | 'review' | 'categorize' | 'generating'
+type TIAMode = 'project' | 'quick'
 
 interface FragnetCategorization {
   category: string
@@ -9,7 +15,12 @@ interface FragnetCategorization {
 }
 
 export default function TIAPage() {
-  const [step, setStep] = useState<Step>('upload')
+  const [step, setStep] = useState<Step>('mode-select')
+  const [mode, setMode] = useState<TIAMode>('project')
+  const [activeProject, setActiveProject] = useState<Project | null>(null)
+  const [selectedBaselineId, setSelectedBaselineId] = useState<string>('')
+  const [fragnetFile, setFragnetFile] = useState<File | null>(null)
+  const [delayDescription, setDelayDescription] = useState<string>('')
   const [fileA, setFileA] = useState<File | null>(null)
   const [fileB, setFileB] = useState<File | null>(null)
   const [comparison, setComparison] = useState<any>(null)
@@ -23,6 +34,22 @@ export default function TIAPage() {
     preparedBy: '',
     contractCompletionDate: '',
   })
+
+  useEffect(() => {
+    const p = getActiveProject()
+    setActiveProject(p)
+    if (p) {
+      const latest = getLatestVersion(p)
+      if (latest) setSelectedBaselineId(latest.id)
+      setCtx(prev => ({ ...prev, projectName: p.name, projectNumber: p.projectId || '' }))
+      // If active project has 2+ versions, default to project mode
+      setMode(p.versions.length >= 1 ? 'project' : 'quick')
+    } else {
+      setMode('quick')
+    }
+  }, [])
+
+  const fragnetRef = useRef<HTMLInputElement>(null)
 
   const fileARef = useRef<HTMLInputElement>(null)
   const fileBRef = useRef<HTMLInputElement>(null)
@@ -42,15 +69,45 @@ export default function TIAPage() {
   }
 
   async function runComparison() {
-    if (!fileA || !fileB) return
     setStep('analyzing')
     setProgress(0)
     const prog = setInterval(() => setProgress(p => p < 85 ? p + Math.random() * 8 : p), 400)
 
     try {
       const fd = new FormData()
-      fd.append('fileA', fileA)
-      fd.append('fileB', fileB)
+
+      if (mode === 'project') {
+        // PROJECT TIA: pull un-impacted from saved baseline + uploaded fragnet
+        if (!activeProject || !selectedBaselineId || !fragnetFile) {
+          clearInterval(prog)
+          alert('Pick a baseline and upload a fragnet XER')
+          setStep('upload')
+          return
+        }
+        const baseline = activeProject.versions.find(v => v.id === selectedBaselineId)
+        if (!baseline?.rawXER) {
+          clearInterval(prog)
+          alert('Saved baseline does not have raw XER data. Please re-upload the baseline version OR use Quick TIA mode.')
+          setStep('upload')
+          return
+        }
+        // Convert raw XER text to a File-like Blob
+        const baselineBlob = new Blob([baseline.rawXER], { type: 'text/plain' })
+        const baselineFile = new File([baselineBlob], baseline.fileName, { type: 'text/plain' })
+        fd.append('fileA', baselineFile)
+        fd.append('fileB', fragnetFile)
+      } else {
+        // QUICK TIA: both files uploaded
+        if (!fileA || !fileB) {
+          clearInterval(prog)
+          alert('Upload both schedules')
+          setStep('upload')
+          return
+        }
+        fd.append('fileA', fileA)
+        fd.append('fileB', fileB)
+      }
+
       fd.append('mode', 'compare')
       const res = await fetch('/api/compare', { method: 'POST', body: fd })
       clearInterval(prog)
@@ -75,13 +132,26 @@ export default function TIAPage() {
   }
 
   async function generateReport() {
-    if (!fileA || !fileB || !comparison) return
+    if (!comparison) return
     setStep('generating')
 
     try {
       const fd = new FormData()
-      fd.append('fileA', fileA)
-      fd.append('fileB', fileB)
+
+      if (mode === 'project') {
+        if (!activeProject || !selectedBaselineId || !fragnetFile) return
+        const baseline = activeProject.versions.find(v => v.id === selectedBaselineId)
+        if (!baseline?.rawXER) return
+        const baselineBlob = new Blob([baseline.rawXER], { type: 'text/plain' })
+        const baselineFile = new File([baselineBlob], baseline.fileName, { type: 'text/plain' })
+        fd.append('fileA', baselineFile)
+        fd.append('fileB', fragnetFile)
+      } else {
+        if (!fileA || !fileB) return
+        fd.append('fileA', fileA)
+        fd.append('fileB', fileB)
+      }
+
       fd.append('mode', 'tia')
       fd.append('context', JSON.stringify(ctx))
       fd.append('fragnetCategorizations', JSON.stringify(categorizations))
@@ -98,6 +168,26 @@ export default function TIAPage() {
       a.click()
       a.remove()
       URL.revokeObjectURL(url)
+
+      // PROJECT TIA: Save fragnet to project history as new version
+      if (mode === 'project' && activeProject && fragnetFile) {
+        try {
+          const rawXER = await fragnetFile.text()
+          const fragnetVersion: ScheduleVersion = {
+            id: 'ver_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+            uploadedAt: new Date().toISOString(),
+            fileName: fragnetFile.name,
+            analysis: comparison.analysisB || {},
+            context: ctx,
+            rawXER,
+            versionLabel: `TIA Fragnet: ${delayDescription || 'delay event'}`,
+          }
+          addVersionToProject(activeProject.id, fragnetVersion)
+        } catch (e) {
+          console.warn('Could not save fragnet to project:', e)
+        }
+      }
+
       setStep('review')
     } catch (err: any) {
       alert('Failed: ' + err.message)
@@ -105,79 +195,242 @@ export default function TIAPage() {
     }
   }
 
-  // ===== UPLOAD STEP =====
-  if (step === 'upload') {
+  // ===== MODE SELECT STEP =====
+  if (step === 'mode-select') {
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center">
           <span className="font-bold text-slate-900 text-base">TIA Comparison</span>
-          <span className="text-slate-400 text-sm ml-2">· Compare two schedules · Generate Time Impact Analysis</span>
+          <span className="text-slate-400 text-sm ml-2">· Choose TIA mode</span>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
+          <div className="max-w-4xl mx-auto">
+            <h2 className="text-xl font-extrabold text-slate-900 mb-1">How do you want to run this TIA?</h2>
+            <p className="text-slate-500 text-sm mb-6">
+              Pick the mode that matches your situation.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              {/* Project TIA */}
+              <button
+                onClick={() => { setMode('project'); setStep('upload') }}
+                disabled={!activeProject}
+                className={`text-left p-5 rounded-2xl border-2 transition-all ${activeProject ? 'bg-white border-blue-300 hover:border-blue-500 hover:shadow-lg cursor-pointer' : 'bg-slate-100 border-slate-200 opacity-50 cursor-not-allowed'}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-2xl">📁</span>
+                  <span className="text-xs font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full uppercase tracking-wider">Recommended</span>
+                </div>
+                <div className="font-bold text-slate-900 text-base mb-1">Project TIA</div>
+                <div className="text-xs text-slate-600 mb-3 leading-relaxed">
+                  Use a saved version as your un-impacted baseline. Upload only the fragnet XER (impacted schedule). Fragnet auto-saves to project history.
+                </div>
+                {activeProject ? (
+                  <div className="text-[10px] text-blue-700 font-semibold">
+                    Active project: {activeProject.name} ({activeProject.versions.length} version{activeProject.versions.length !== 1 ? 's' : ''})
+                  </div>
+                ) : (
+                  <div className="text-[10px] text-slate-500">No active project — select one first</div>
+                )}
+              </button>
+
+              {/* Quick TIA */}
+              <button
+                onClick={() => { setMode('quick'); setStep('upload') }}
+                className="text-left p-5 rounded-2xl border-2 border-slate-300 bg-white hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-2xl">⚡</span>
+                  <span className="text-xs font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full uppercase tracking-wider">One-off</span>
+                </div>
+                <div className="font-bold text-slate-900 text-base mb-1">Quick TIA</div>
+                <div className="text-xs text-slate-600 mb-3 leading-relaxed">
+                  Compare any TWO XER files. Upload un-impacted and impacted schedules. Not saved to project history. Use for one-time comparisons.
+                </div>
+                <div className="text-[10px] text-slate-500">No project context required</div>
+              </button>
+            </div>
+
+            {!activeProject && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-900">
+                💡 <strong>Tip:</strong> Open a project from the Projects page to enable Project TIA mode.
+                Project TIA pulls your un-impacted baseline from saved versions — you only upload the fragnet.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ===== UPLOAD STEP =====
+  if (step === 'upload') {
+    const isProjectMode = mode === 'project'
+    const baselineVersion = activeProject?.versions.find(v => v.id === selectedBaselineId)
+    const canRun = isProjectMode
+      ? !!(activeProject && selectedBaselineId && fragnetFile && baselineVersion?.rawXER)
+      : !!(fileA && fileB)
+
+    return (
+      <div className="flex flex-col h-full">
+        <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4">
+          <button onClick={() => setStep('mode-select')} className="text-xs text-slate-500 hover:text-blue-600 font-semibold">
+            ← Change mode
+          </button>
+          <span className="font-bold text-slate-900 text-base">TIA Comparison</span>
+          <span className="text-slate-400 text-sm ml-2">
+            · {isProjectMode ? `Project TIA · ${activeProject?.name || ''}` : 'Quick TIA · One-off comparison'}
+          </span>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">
           <div className="max-w-4xl mx-auto">
-            <h2 className="text-xl font-extrabold text-slate-900 mb-1">Compare Two Schedules</h2>
-            <p className="text-slate-500 text-sm mb-6">
-              Upload an un-impacted current schedule (without fragnet) and an impacted current schedule (with fragnet WBS inserted).
-              ProjectLens will analyze the differences and generate a TIA report.
-            </p>
+            {isProjectMode ? (
+              <>
+                <h2 className="text-xl font-extrabold text-slate-900 mb-1">Project TIA: {activeProject?.name}</h2>
+                <p className="text-slate-500 text-sm mb-6">
+                  Pick the un-impacted baseline from saved versions, then upload your fragnet XER (the impacted schedule).
+                </p>
 
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              {/* Schedule A */}
-              <div className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-6 hover:border-blue-400 transition-colors cursor-pointer"
-                onClick={() => fileARef.current?.click()}>
-                <input ref={fileARef} type="file" accept=".xer" className="hidden"
-                  onChange={e => setFileA(e.target.files?.[0] || null)} />
-                <div className="text-center">
-                  <div className="text-3xl mb-2">📋</div>
-                  <div className="font-bold text-slate-700 text-sm">Schedule A</div>
-                  <div className="text-xs text-slate-500 mb-3">Un-Impacted Current Schedule</div>
-                  {fileA ? (
-                    <div className="text-xs bg-green-50 text-green-700 px-3 py-2 rounded-lg font-semibold">
-                      ✓ {fileA.name}
+                {/* Step 1: Pick baseline */}
+                <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
+                  <div className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-2">Step 1 — Un-Impacted Baseline</div>
+                  <div className="text-xs text-slate-500 mb-3">
+                    Pick the saved version that was current BEFORE the delay event (Method 4 TIA standard).
+                    Defaults to latest version.
+                  </div>
+                  <select
+                    value={selectedBaselineId}
+                    onChange={e => setSelectedBaselineId(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-500">
+                    {activeProject?.versions.map((v, i) => {
+                      const versionNum = (activeProject?.versions.length || 1) - i
+                      const hasRaw = !!v.rawXER
+                      return (
+                        <option key={v.id} value={v.id} disabled={!hasRaw}>
+                          v{versionNum} · {v.fileName} · {shortDate(v.uploadedAt)}{!hasRaw ? ' (re-upload required for TIA)' : ''}
+                        </option>
+                      )
+                    })}
+                  </select>
+                  {baselineVersion && !baselineVersion.rawXER && (
+                    <div className="mt-2 text-[10px] bg-amber-50 border border-amber-200 rounded p-2 text-amber-900">
+                      ⚠️ This version was uploaded before TIA-from-saved was supported. The raw XER text isn't available.
+                      <br />Either re-upload this version to enable Project TIA, or switch to Quick TIA mode.
                     </div>
-                  ) : (
-                    <div className="text-xs text-slate-400">Click to upload .xer file</div>
                   )}
                 </div>
-              </div>
 
-              {/* Schedule B */}
-              <div className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-6 hover:border-blue-400 transition-colors cursor-pointer"
-                onClick={() => fileBRef.current?.click()}>
-                <input ref={fileBRef} type="file" accept=".xer" className="hidden"
-                  onChange={e => setFileB(e.target.files?.[0] || null)} />
-                <div className="text-center">
-                  <div className="text-3xl mb-2">📊</div>
-                  <div className="font-bold text-slate-700 text-sm">Schedule B</div>
-                  <div className="text-xs text-slate-500 mb-3">Impacted Current Schedule (with Fragnet)</div>
-                  {fileB ? (
-                    <div className="text-xs bg-green-50 text-green-700 px-3 py-2 rounded-lg font-semibold">
-                      ✓ {fileB.name}
-                    </div>
-                  ) : (
-                    <div className="text-xs text-slate-400">Click to upload .xer file</div>
-                  )}
+                {/* Step 2: Upload fragnet */}
+                <div className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-6 mb-4 hover:border-blue-400 transition-colors">
+                  <div className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-2">Step 2 — Fragnet XER (Impacted)</div>
+                  <div className="text-xs text-slate-500 mb-3">
+                    Upload the impacted schedule — un-impacted with the fragnet (delay event) inserted.
+                  </div>
+                  <input ref={fragnetRef} type="file" accept=".xer" className="hidden"
+                    onChange={e => setFragnetFile(e.target.files?.[0] || null)} />
+                  <div onClick={() => fragnetRef.current?.click()} className="text-center cursor-pointer py-4">
+                    <div className="text-3xl mb-2">📊</div>
+                    {fragnetFile ? (
+                      <div className="text-xs bg-green-50 text-green-700 px-3 py-2 rounded-lg font-semibold inline-block">
+                        ✓ {fragnetFile.name}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-slate-400">Click to upload fragnet .xer file</div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </div>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6">
-              <div className="text-xs font-bold text-slate-600 mb-3">PROJECT INFORMATION (for the TIA report)</div>
-              <div className="grid grid-cols-2 gap-3">
-                <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Project Name"
-                  value={ctx.projectName} onChange={e => setCtx({...ctx, projectName: e.target.value})} />
-                <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Project / Contract Number"
-                  value={ctx.projectNumber} onChange={e => setCtx({...ctx, projectNumber: e.target.value})} />
-                <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Owner (e.g. USACE, DGS, GSA)"
-                  value={ctx.owner} onChange={e => setCtx({...ctx, owner: e.target.value})} />
-                <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Prepared By (your name)"
-                  value={ctx.preparedBy} onChange={e => setCtx({...ctx, preparedBy: e.target.value})} />
-              </div>
-            </div>
+                {/* Step 3: Delay description */}
+                <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
+                  <div className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-2">Step 3 — Delay Event Description</div>
+                  <input
+                    value={delayDescription}
+                    onChange={e => setDelayDescription(e.target.value)}
+                    placeholder='e.g. "HVAC owner directive change" or "Differing site conditions"'
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
+                  <div className="text-[10px] text-slate-400 mt-1">
+                    The fragnet will be saved to project history with this label.
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
+                  <div className="text-xs font-bold text-slate-600 mb-3">PROJECT INFORMATION (for the TIA report)</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Project Name"
+                      value={ctx.projectName} onChange={e => setCtx({...ctx, projectName: e.target.value})} />
+                    <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Project / Contract Number"
+                      value={ctx.projectNumber} onChange={e => setCtx({...ctx, projectNumber: e.target.value})} />
+                    <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Owner (e.g. USACE, DGS, GSA)"
+                      value={ctx.owner} onChange={e => setCtx({...ctx, owner: e.target.value})} />
+                    <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Prepared By (your name)"
+                      value={ctx.preparedBy} onChange={e => setCtx({...ctx, preparedBy: e.target.value})} />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 className="text-xl font-extrabold text-slate-900 mb-1">Quick TIA — Compare Two Schedules</h2>
+                <p className="text-slate-500 text-sm mb-6">
+                  Upload an un-impacted current schedule and an impacted current schedule (with fragnet WBS inserted).
+                  This mode does not save to project history.
+                </p>
+
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-6 hover:border-blue-400 transition-colors cursor-pointer"
+                    onClick={() => fileARef.current?.click()}>
+                    <input ref={fileARef} type="file" accept=".xer" className="hidden"
+                      onChange={e => setFileA(e.target.files?.[0] || null)} />
+                    <div className="text-center">
+                      <div className="text-3xl mb-2">📋</div>
+                      <div className="font-bold text-slate-700 text-sm">Schedule A</div>
+                      <div className="text-xs text-slate-500 mb-3">Un-Impacted Current Schedule</div>
+                      {fileA ? (
+                        <div className="text-xs bg-green-50 text-green-700 px-3 py-2 rounded-lg font-semibold">
+                          ✓ {fileA.name}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-slate-400">Click to upload .xer file</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-6 hover:border-blue-400 transition-colors cursor-pointer"
+                    onClick={() => fileBRef.current?.click()}>
+                    <input ref={fileBRef} type="file" accept=".xer" className="hidden"
+                      onChange={e => setFileB(e.target.files?.[0] || null)} />
+                    <div className="text-center">
+                      <div className="text-3xl mb-2">📊</div>
+                      <div className="font-bold text-slate-700 text-sm">Schedule B</div>
+                      <div className="text-xs text-slate-500 mb-3">Impacted Current Schedule (with Fragnet)</div>
+                      {fileB ? (
+                        <div className="text-xs bg-green-50 text-green-700 px-3 py-2 rounded-lg font-semibold">
+                          ✓ {fileB.name}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-slate-400">Click to upload .xer file</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
+                  <div className="text-xs font-bold text-slate-600 mb-3">PROJECT INFORMATION (for the TIA report)</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Project Name"
+                      value={ctx.projectName} onChange={e => setCtx({...ctx, projectName: e.target.value})} />
+                    <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Project / Contract Number"
+                      value={ctx.projectNumber} onChange={e => setCtx({...ctx, projectNumber: e.target.value})} />
+                    <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Owner (e.g. USACE, DGS, GSA)"
+                      value={ctx.owner} onChange={e => setCtx({...ctx, owner: e.target.value})} />
+                    <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Prepared By (your name)"
+                      value={ctx.preparedBy} onChange={e => setCtx({...ctx, preparedBy: e.target.value})} />
+                  </div>
+                </div>
+              </>
+            )}
 
             <button
-              disabled={!fileA || !fileB}
+              disabled={!canRun}
               onClick={runComparison}
               className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold disabled:bg-slate-200 disabled:text-slate-400 hover:bg-blue-700 transition-colors">
               🔍 Compare Schedules →

@@ -8,6 +8,7 @@ export interface ScheduleVersion {
   aiNarrative?: string
   context?: any
   versionLabel?: string  // e.g. "May 2026 Update"
+  rawXER?: string  // Raw XER text content — used for TIA comparison from saved version
 }
 
 export interface Project {
