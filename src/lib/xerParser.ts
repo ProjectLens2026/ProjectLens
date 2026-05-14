@@ -8,6 +8,7 @@ export interface Task {
   total_float_hr_cnt: string
   remain_drtn_hr_cnt: string
   target_drtn_hr_cnt: string
+  act_drtn_hr_cnt?: string
   driving_path_flag: string
   early_start_date: string
   early_end_date: string
@@ -328,7 +329,8 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     const cal = calendars[t.clndr_id] || { hoursPerDay: 8 }
     const targetHr = parseFloat(t.target_drtn_hr_cnt || '0')
     const remainHr = parseFloat(t.remain_drtn_hr_cnt || '0')
-    const actualHr = parseFloat(t.act_drtn_hr_cnt || '0')
+    // Actual = Target - Remaining (standard P6 calculation)
+    const actualHr = Math.max(0, targetHr - remainHr)
     originalDurationDays += targetHr / cal.hoursPerDay
     remainingDurationDays += remainHr / cal.hoursPerDay
     actualDurationDays += actualHr / cal.hoursPerDay
