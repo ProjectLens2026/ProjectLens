@@ -333,25 +333,31 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   const finalMilestone = findMilestoneByKeywords(['FINAL COMPLETION', 'PROJECT COMPLETE', 'TURNOVER', 'CLOSEOUT COMPLETE', 'FINAL ACCEPTANCE'])
   const finalDate = finalMilestone?.early_end_date || finalMilestone?.target_end_date
 
-  // DURATIONS
-  let originalDurationDays = 0
-  let remainingDurationDays = 0
-  let actualDurationDays = 0
-  taskArr.forEach(t => {
-    const cal = calendars[t.clndr_id]
-    const hoursPerDay = cal ? parseFloat(cal.day_hr_cnt || '8') : 8
-    const targetHr = parseFloat(t.target_drtn_hr_cnt || '0')
-    const remainHr = parseFloat(t.remain_drtn_hr_cnt || '0')
-    // Actual = Target - Remaining (standard P6 calculation)
-    const actualHr = Math.max(0, targetHr - remainHr)
-    originalDurationDays += targetHr / hoursPerDay
-    remainingDurationDays += remainHr / hoursPerDay
-    actualDurationDays += actualHr / hoursPerDay
-  })
-  originalDurationDays = Math.round(originalDurationDays)
-  remainingDurationDays = Math.round(remainingDurationDays)
-  actualDurationDays = Math.round(actualDurationDays)
-  const durationAtCompletion = actualDurationDays + remainingDurationDays
+  // DURATIONS — calendar days between key dates (P6 standard approach)
+  // Activities run in PARALLEL, so summing durations is wrong.
+  // Use date math instead.
+
+  function daysBetween(startStr?: string, endStr?: string): number {
+    if (!startStr || !endStr) return 0
+    try {
+      const start = new Date(startStr.replace(' ', 'T'))
+      const end = new Date(endStr.replace(' ', 'T'))
+      const diff = end.getTime() - start.getTime()
+      return Math.max(0, Math.round(diff / (1000 * 60 * 60 * 24)))
+    } catch { return 0 }
+  }
+
+  // Original Duration = Project Start to Contract End (planned)
+  const originalDurationDays = daysBetween(projectStartDate, parsed.contractEnd)
+
+  // Remaining Duration = Data Date to Projected End (how much is left)
+  const remainingDurationDays = daysBetween(parsed.dataDate, parsed.projectedEnd)
+
+  // Actual Duration so far = Project Start to Data Date (what's been completed)
+  const actualDurationDays = daysBetween(projectStartDate, parsed.dataDate)
+
+  // Duration at Completion = Project Start to Projected End (total expected)
+  const durationAtCompletion = daysBetween(projectStartDate, parsed.projectedEnd)
 
   return {
     totalActivities: taskArr.length,
