@@ -73,6 +73,7 @@ export default function Sidebar({ user }: SidebarProps) {
       group: 'Schedule Tools',
       items: [
         { href: '/dashboard/upload', icon: '⬆', label: 'Upload New Version' },
+        { href: '/dashboard/trend', icon: '📈', label: 'Trend Analysis' },
         { href: '/dashboard/tia', icon: '📑', label: 'TIA Comparison' },
       ]
     },
