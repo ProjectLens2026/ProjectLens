@@ -300,10 +300,31 @@ export default function UploadPage() {
       setResult(data)
 
       // Read raw XER text for TIA comparison from saved versions
+      // Auto-detect UTF-8 vs UTF-16 (Primavera often exports as UTF-16LE)
       let rawXER: string | undefined = undefined
       if (file && file.name.toLowerCase().endsWith('.xer')) {
         try {
-          rawXER = await file.text()
+          const buffer = await file.arrayBuffer()
+          const bytes = new Uint8Array(buffer)
+          if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
+            // UTF-16 Little Endian (with BOM)
+            rawXER = new TextDecoder('utf-16le').decode(bytes.slice(2))
+          } else if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
+            // UTF-16 Big Endian (with BOM)
+            rawXER = new TextDecoder('utf-16be').decode(bytes.slice(2))
+          } else {
+            // Check for UTF-16LE without BOM (every other byte zero)
+            let zeroByteCount = 0
+            const sampleSize = Math.min(200, bytes.length)
+            for (let i = 1; i < sampleSize; i += 2) {
+              if (bytes[i] === 0x00) zeroByteCount++
+            }
+            if (zeroByteCount > sampleSize / 4) {
+              rawXER = new TextDecoder('utf-16le').decode(bytes)
+            } else {
+              rawXER = new TextDecoder('utf-8').decode(bytes)
+            }
+          }
         } catch (e) {
           console.warn('Could not read raw XER text:', e)
         }

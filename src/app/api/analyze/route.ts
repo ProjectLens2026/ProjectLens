@@ -23,7 +23,34 @@ export async function POST(req: NextRequest) {
     let fileType = ext?.toUpperCase() || 'UNKNOWN'
 
     if (ext === 'xer') {
-      const text = buffer.toString('utf-8')
+      // Auto-detect encoding: UTF-16LE (BOM FF FE), UTF-16BE (BOM FE FF), or UTF-8
+      let text: string
+      if (buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE) {
+        // UTF-16 Little Endian (Primavera P6 default export)
+        text = buffer.toString('utf16le', 2)
+      } else if (buffer.length >= 2 && buffer[0] === 0xFE && buffer[1] === 0xFF) {
+        // UTF-16 Big Endian — swap bytes then read as utf16le
+        const swapped = Buffer.alloc(buffer.length - 2)
+        for (let i = 2; i < buffer.length; i += 2) {
+          swapped[i - 2] = buffer[i + 1]
+          swapped[i - 1] = buffer[i]
+        }
+        text = swapped.toString('utf16le')
+      } else {
+        // Check if it looks like UTF-16 without BOM (every other byte is 0x00)
+        let zeroByteCount = 0
+        const sampleSize = Math.min(200, buffer.length)
+        for (let i = 1; i < sampleSize; i += 2) {
+          if (buffer[i] === 0x00) zeroByteCount++
+        }
+        if (zeroByteCount > sampleSize / 4) {
+          // Looks like UTF-16LE without BOM
+          text = buffer.toString('utf16le')
+        } else {
+          // Standard UTF-8
+          text = buffer.toString('utf-8')
+        }
+      }
       const parsed = parseXER(text)
       const result = analyzeXER(parsed)
       analysis = {
