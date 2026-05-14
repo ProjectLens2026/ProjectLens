@@ -156,13 +156,19 @@ function generateRecommendation(dataPoints: VersionDataPoint[], changes: Version
   const totalActivitiesAdded = changes.reduce((s, c) => s + c.activitiesAdded, 0)
   const flatlinedUpdates = changes.filter(c => c.majorChanges.some(m => m.includes('flatlined'))).length
 
+  // Is the trend actually improving?
+  const isImproving = overallDelayChange < -5 || (overallDelayChange <= 0 && overallNegFloatChange < 0)
+  const isStable = Math.abs(overallDelayChange) <= 5 && Math.abs(overallNegFloatChange) <= 10
+  const isDeteriorating = overallDelayChange > 15 || overallNegFloatChange > 30
+  const isSeverelyDeteriorating = overallDelayChange > 60
+
   const reasoning: string[] = []
 
   // TIA AND CONTRACT AMENDMENT — most severe
-  // Trigger: > 30 days behind contract AND not improving over 2+ updates
-  if (latest.delayDays > 30 && overallDelayChange >= 0 && changes.length >= 2) {
+  // Trigger: serious delay AND deteriorating trend
+  if (latest.delayDays > 30 && isSeverelyDeteriorating && changes.length >= 2) {
     reasoning.push(`Project is ${latest.delayDays} days behind contract completion`)
-    reasoning.push(`Delay has ${overallDelayChange === 0 ? 'not improved' : `grown by ${overallDelayChange} days`} over ${changes.length} updates`)
+    reasoning.push(`Delay has grown by ${overallDelayChange} days over ${changes.length} updates`)
     if (flatlinedUpdates > 0) reasoning.push(`Progress flatlined in ${flatlinedUpdates} update(s) — recovery is not happening`)
     if (latest.healthScore < 40) reasoning.push(`Health score at ${latest.healthScore}/100 indicates recovery condition`)
 
@@ -183,11 +189,12 @@ function generateRecommendation(dataPoints: VersionDataPoint[], changes: Version
   }
 
   // REBASELINE RECOMMENDED
-  // Trigger: > 30 days negative float / behind AND scope hasn't changed dramatically
-  if ((latest.delayDays > 30 || latest.negativeFloat > 50) && totalActivitiesAdded < 20) {
+  // Trigger: serious delay AND deteriorating AND no scope additions
+  if (latest.delayDays > 30 && isDeteriorating && totalActivitiesAdded < 20) {
     reasoning.push(`Schedule is ${latest.delayDays} days behind plan`)
     reasoning.push(`${latest.negativeFloat} activities currently on negative float`)
-    reasoning.push(`No major scope additions (only ${totalActivitiesAdded} activities added across ${changes.length} updates)`)
+    reasoning.push(`Delay has grown by ${overallDelayChange} days across ${changes.length} updates without recovery`)
+    if (totalActivitiesAdded < 5) reasoning.push(`No major scope additions detected (${totalActivitiesAdded} activities added)`)
     reasoning.push('Schedule no longer represents a realistic approach to completion')
 
     return {
@@ -229,10 +236,17 @@ function generateRecommendation(dataPoints: VersionDataPoint[], changes: Version
     }
   }
 
-  // HEALTHY
+  // HEALTHY (default)
   reasoning.push(`Schedule remains stable across ${changes.length + 1} versions`)
-  if (overallDelayChange <= 0) reasoning.push(`Delay condition has ${overallDelayChange === 0 ? 'remained stable' : `improved by ${Math.abs(overallDelayChange)} days`}`)
-  reasoning.push(`Health score: ${latest.healthScore}/100`)
+  if (isImproving) {
+    reasoning.push(`Trend is improving — delay reduced by ${Math.abs(overallDelayChange)} days`)
+  } else if (isStable) {
+    reasoning.push('Schedule indicators are stable across versions')
+  }
+  if (overallNegFloatChange < 0) {
+    reasoning.push(`Negative float reduced by ${Math.abs(overallNegFloatChange)} activities`)
+  }
+  reasoning.push(`Current health score: ${latest.healthScore}/100`)
 
   return {
     type: 'HEALTHY',
