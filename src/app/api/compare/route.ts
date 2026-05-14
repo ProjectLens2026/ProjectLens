@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Auto-detect encoding (UTF-8 or UTF-16LE/BE) — P6 often exports as UTF-16
-    function decodeBuffer(buffer: Buffer): string {
+    const decodeBuffer = (buffer: Buffer): string => {
       if (buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE) {
         return buffer.toString('utf16le', 2)
       } else if (buffer.length >= 2 && buffer[0] === 0xFE && buffer[1] === 0xFF) {
