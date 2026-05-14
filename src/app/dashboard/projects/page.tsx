@@ -232,16 +232,19 @@ export default function ProjectsPage() {
                       <div className="space-y-1 mb-3 bg-slate-50 rounded-lg p-2 max-h-64 overflow-y-auto">
                         {p.versions.map((v, i) => (
                           <div key={v.id} className="flex items-center gap-2 text-[10px] py-1 px-2 hover:bg-white rounded relative">
-                            <span className="font-mono text-slate-400">v{p.versions.length - i}</span>
-                            <span className="flex-1 truncate font-semibold text-slate-700">{shortDate(v.uploadedAt)}</span>
-                            <span className="text-slate-500">{v.analysis?.totalActivities || 0} acts</span>
+                            <span className="font-mono text-slate-400 flex-shrink-0">v{p.versions.length - i}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-semibold text-slate-700 truncate">{v.fileName || 'untitled.xer'}</div>
+                              <div className="text-slate-400 text-[9px]">{shortDate(v.uploadedAt)}</div>
+                            </div>
+                            <span className="text-slate-500 flex-shrink-0">{v.analysis?.totalActivities || 0} acts</span>
                             {v.analysis?.condition && (
-                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${conditionStyle(v.analysis.condition).bg} ${conditionStyle(v.analysis.condition).color}`}>
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold flex-shrink-0 ${conditionStyle(v.analysis.condition).bg} ${conditionStyle(v.analysis.condition).color}`}>
                                 {v.analysis.healthScore}/100
                               </span>
                             )}
                             <button onClick={() => openProject(p.id, v.id)}
-                              className="text-blue-600 font-bold hover:underline">Open</button>
+                              className="text-blue-600 font-bold hover:underline flex-shrink-0">Open</button>
                             {projects.length > 1 && (
                               <button onClick={() => setMoveMenuFor(moveMenuFor === v.id ? null : v.id)}
                                 title="Move to different project"
@@ -255,7 +258,11 @@ export default function ProjectsPage() {
 
                             {/* Move To dropdown */}
                             {moveMenuFor === v.id && (
-                              <div className="absolute right-0 top-6 z-20 bg-white border border-slate-300 rounded-lg shadow-lg py-1 min-w-[220px] max-h-64 overflow-y-auto">
+                              <div className="absolute right-0 top-6 z-20 bg-white border border-slate-300 rounded-lg shadow-lg py-1 min-w-[260px] max-h-64 overflow-y-auto">
+                                <div className="px-3 py-2 border-b border-slate-100">
+                                  <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Moving:</div>
+                                  <div className="text-[10px] font-semibold text-slate-700 truncate" title={v.fileName}>{v.fileName || 'untitled.xer'}</div>
+                                </div>
                                 <div className="px-3 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">Move to project:</div>
                                 {projects.filter(target => target.id !== p.id).length === 0 ? (
                                   <div className="px-3 py-2 text-[10px] text-slate-400">No other projects available</div>
