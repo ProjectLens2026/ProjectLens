@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
@@ -14,7 +14,7 @@ const ROLES = [
   'CEO / Executive',
 ]
 
-export default function LoginPage() {
+function LoginInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [mode, setMode] = useState<'login' | 'signup'>('login')
@@ -239,5 +239,16 @@ export default function LoginPage() {
         </p>
       </div>
     </div>
+  )
+}
+
+// Next.js 14 requires useSearchParams() to be inside a Suspense boundary.
+// Wrap the actual login UI in Suspense; the fallback matches the dark login
+// background so there's no flash of unstyled content.
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900" />}>
+      <LoginInner />
+    </Suspense>
   )
 }

@@ -1,10 +1,10 @@
 'use client'
-import { useState } from 'react'
+import { useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 
-export default function CheckEmailPage() {
+function CheckEmailInner() {
   const searchParams = useSearchParams()
   const email = searchParams.get('email') || 'your email'
   const [resending, setResending] = useState(false)
@@ -94,5 +94,14 @@ export default function CheckEmailPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+// Next.js 14 requires useSearchParams() to be inside a Suspense boundary.
+export default function CheckEmailPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900" />}>
+      <CheckEmailInner />
+    </Suspense>
   )
 }
