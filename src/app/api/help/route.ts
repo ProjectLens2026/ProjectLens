@@ -85,13 +85,18 @@ export async function POST(req: NextRequest) {
 
     const assistantText = response.content
       .filter((block: any) => block.type === 'text')
-      .map((block: any) => block.text)
+      .map((block: any) => (block as any).text)
       .join('\n')
+
+    if (!assistantText) {
+      return NextResponse.json({ success: true, reply: "I didn't get a response. Try rephrasing your question?" })
+    }
 
     return NextResponse.json({ success: true, reply: assistantText })
 
   } catch (error: any) {
     console.error('Help API error:', error)
-    return NextResponse.json({ error: error.message || 'Failed to generate response' }, { status: 500 })
+    const errMsg = error?.message || 'Unknown error'
+    return NextResponse.json({ error: errMsg }, { status: 500 })
   }
 }

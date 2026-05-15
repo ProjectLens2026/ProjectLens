@@ -97,19 +97,22 @@ export default function HelpWidget() {
         }),
       })
 
-      if (!res.ok) throw new Error('Failed to get response')
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ error: 'Unknown server error' }))
+        throw new Error(errData.error || `HTTP ${res.status}`)
+      }
 
       const data = await res.json()
       const assistantMessage: ChatMessage = {
         role: 'assistant',
-        content: data.reply,
+        content: data.reply || 'No response received.',
         timestamp: Date.now(),
       }
       setMessages([...newMessages, assistantMessage])
     } catch (err: any) {
       const errorMessage: ChatMessage = {
         role: 'assistant',
-        content: 'Sorry — I had trouble responding. Please try again.',
+        content: `Sorry — I had trouble responding. Error: ${err.message || 'unknown'}. Please try again.`,
         timestamp: Date.now(),
       }
       setMessages([...newMessages, errorMessage])
