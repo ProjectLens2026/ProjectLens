@@ -149,7 +149,7 @@ function LoginInner() {
                   <input
                     type="text"
                     required
-                    placeholder="Ahmed Al-Rashidi"
+                    placeholder="Full name"
                     value={form.name}
                     onChange={e => setForm({ ...form, name: e.target.value })}
                     className="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50"
@@ -160,7 +160,7 @@ function LoginInner() {
                   <input
                     type="text"
                     required
-                    placeholder="Nobel Construction"
+                    placeholder="Company name"
                     value={form.company}
                     onChange={e => setForm({ ...form, company: e.target.value })}
                     className="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50"
