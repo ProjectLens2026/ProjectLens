@@ -46,7 +46,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <circle cx="11" cy="11" r="4"/><circle cx="11" cy="11" r="8.5"/>
           </svg>
         </div>
-        <div className="text-white/40 text-sm">Loading ProjectLens...</div>
+        <div className="text-white/40 text-sm">Loading NobelPM...</div>
       </div>
     </div>
   )

@@ -123,7 +123,7 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
           <div>
             <div className="font-bold text-amber-900 mb-1">Gantt chart cannot be displayed</div>
             <div className="text-sm text-amber-800 leading-relaxed mb-3">
-              ProjectLens could not find any activities with driving path or float data in this schedule.
+              NobelPM could not find any activities with driving path or float data in this schedule.
               This usually means the schedule has not been calculated in P6, or the XER was exported before
               a schedule calculation was run.
             </div>
@@ -173,7 +173,7 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
                 This is an important finding to discuss with the project scheduler and document in the schedule narrative.
               </div>
               <div className="mt-3 text-xs text-blue-700 font-semibold">
-                ProjectLens is showing the Longest Path (driving path flag = Y) as the best available substitute:
+                NobelPM is showing the Longest Path (driving path flag = Y) as the best available substitute:
               </div>
             </div>
           </div>
@@ -342,12 +342,12 @@ export default function UploadPage() {
           rawXER,
         }
 
-        console.log('[ProjectLens] Saving version', { projectMode, selectedProjectId, versionId: version.id })
+        console.log('[NobelPM] Saving version', { projectMode, selectedProjectId, versionId: version.id })
 
         if (projectMode === 'existing' && selectedProjectId) {
           // Add as new version to existing project
           const updated = addVersionToProject(selectedProjectId, version)
-          console.log('[ProjectLens] Added version to existing project', { success: !!updated, totalVersions: updated?.versions.length })
+          console.log('[NobelPM] Added version to existing project', { success: !!updated, totalVersions: updated?.versions.length })
         } else {
           // Create a new project
           const projectName = ctx.projectName || data.analysis?.projectName || file?.name?.replace(/\.[a-z]+$/i, '') || 'Untitled Project'
@@ -357,13 +357,13 @@ export default function UploadPage() {
             owner: ctx.owner,
             version,
           })
-          console.log('[ProjectLens] Created new project', { id: newProj.id, name: newProj.name })
+          console.log('[NobelPM] Created new project', { id: newProj.id, name: newProj.name })
         }
 
         // Keep legacy keys for backward compat
         localStorage.setItem('pl_last_analysis', JSON.stringify(data.analysis))
       } catch (err) {
-        console.error('[ProjectLens] Failed to save project:', err)
+        console.error('[NobelPM] Failed to save project:', err)
       }
 
       setTimeout(() => setStep('done'), 500)
@@ -405,7 +405,7 @@ export default function UploadPage() {
         
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0 no-print">
           <div>
-            <span className="font-bold text-slate-900 text-base">ProjectLens Analysis</span>
+            <span className="font-bold text-slate-900 text-base">NobelPM Analysis</span>
             <span className="text-slate-400 text-sm ml-2">· {a.projectName}</span>
           </div>
           <div className="ml-auto flex gap-2">
@@ -565,7 +565,7 @@ export default function UploadPage() {
                 <div>
                   <h3 className="text-sm font-bold mb-3">Long lead items ({a.longLeadItems?.length || 0} items, 20+ days duration)</h3>
                   <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                    Long lead items are materials or equipment requiring significant time to fabricate and deliver. These are the items that most commonly cause delays. ProjectLens sorts by float — most critical first.
+                    Long lead items are materials or equipment requiring significant time to fabricate and deliver. These are the items that most commonly cause delays. NobelPM sorts by float — most critical first.
                   </div>
                   <div className="space-y-2">
                     {(a.longLeadItems || []).slice(0, 20).map((ll: any, i: number) => (
@@ -686,7 +686,7 @@ export default function UploadPage() {
             </button>
             <button onClick={() => router.push('/dashboard/lens')} className="bg-white border border-slate-200 rounded-xl p-4 text-left hover:border-blue-300 transition-colors">
               <div className="text-lg mb-1">🔍</div>
-              <div className="text-xs font-bold">Save to Project Lens</div>
+              <div className="text-xs font-bold">Save to NobelPM</div>
               <div className="text-[10px] text-slate-500 mt-0.5">Add to project record</div>
             </button>
           </div>
@@ -700,7 +700,7 @@ export default function UploadPage() {
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0">
         <div>
           <span className="font-bold text-slate-900 text-base">Upload Schedule</span>
-          <span className="text-slate-400 text-sm ml-2">· ProjectLens Analysis</span>
+          <span className="text-slate-400 text-sm ml-2">· NobelPM Analysis</span>
         </div>
         <div className="ml-auto">
           <div className="flex items-center gap-2 text-xs">
@@ -724,7 +724,7 @@ export default function UploadPage() {
         {step === 'upload' && (
           <div className="max-w-2xl mx-auto">
             <h2 className="text-xl font-extrabold text-slate-900 mb-1">Upload your project schedule</h2>
-            <p className="text-slate-500 text-sm mb-6">ProjectLens reads Primavera P6 XER files and interprets them like an experienced project controls advisor — including logic checks, long lead detection, and TIA evidence.</p>
+            <p className="text-slate-500 text-sm mb-6">NobelPM reads Primavera P6 XER files and interprets them like an experienced project controls advisor — including logic checks, long lead detection, and TIA evidence.</p>
 
             <div
               className={`upload-zone ${dragging ? 'dragging' : ''}`}
@@ -744,7 +744,7 @@ export default function UploadPage() {
             </div>
 
             <div className="mt-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
-              <div className="text-xs font-bold text-slate-500 mb-2">WHAT PROJECTLENS WILL ANALYZE</div>
+              <div className="text-xs font-bold text-slate-500 mb-2">WHAT NOBELPM WILL ANALYZE</div>
               <div className="space-y-1.5 text-xs text-slate-600">
                 <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Critical path drivers and float condition</div>
                 <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Logic violations and out-of-sequence work</div>
@@ -764,7 +764,7 @@ export default function UploadPage() {
               <span className="text-2xl">✅</span>
               <div>
                 <div className="font-bold text-green-800 text-sm">File ready: {file?.name}</div>
-                <div className="text-green-600 text-xs mt-0.5">{file ? (file.size / 1024).toFixed(0) + ' KB' : ''} · Now tell ProjectLens about your project</div>
+                <div className="text-green-600 text-xs mt-0.5">{file ? (file.size / 1024).toFixed(0) + ' KB' : ''} · Now tell NobelPM about your project</div>
               </div>
             </div>
 
@@ -887,7 +887,7 @@ export default function UploadPage() {
                 </button>
                 <button onClick={runAnalysis}
                   className="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-bold hover:bg-blue-700 transition-colors">
-                  🔍 Run ProjectLens Analysis →
+                  🔍 Run NobelPM Analysis →
                 </button>
               </div>
             </div>
@@ -897,7 +897,7 @@ export default function UploadPage() {
         {step === 'analyzing' && (
           <div className="max-w-2xl mx-auto text-center py-16">
             <div className="text-6xl mb-6 animate-pulse">🔍</div>
-            <h2 className="text-xl font-extrabold text-slate-900 mb-2">ProjectLens is reading your schedule</h2>
+            <h2 className="text-xl font-extrabold text-slate-900 mb-2">NobelPM is reading your schedule</h2>
             <p className="text-slate-500 text-sm mb-8">Parsing activities, relationships, logic, and critical path...</p>
             <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
               <div className="bg-slate-100 rounded-full h-2 overflow-hidden mb-3">

@@ -17,14 +17,13 @@ export default function HomePage() {
       {/* Nav */}
       <nav className="flex items-center justify-between px-8 py-4 border-b border-slate-100 sticky top-0 bg-white/95 backdrop-blur-sm z-50">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-              <circle cx="11" cy="11" r="4"/><circle cx="11" cy="11" r="8.5"/>
-              <line x1="2.5" y1="11" x2="5" y2="11"/><line x1="17" y1="11" x2="19.5" y2="11"/>
-              <line x1="11" y1="2.5" x2="11" y2="5"/><line x1="11" y1="17" x2="11" y2="19.5"/>
-            </svg>
-          </div>
-          <span className="text-lg font-bold text-slate-900">ProjectLens</span>
+          <svg width="28" height="20" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" aria-label="NobelPM mark">
+            <rect x="0" y="0" width="32" height="5" rx="1" fill="#2563eb"/>
+            <rect x="0" y="9" width="44" height="5" rx="1" fill="#dc2626"/>
+            <rect x="0" y="18" width="26" height="5" rx="1" fill="#16a34a"/>
+            <rect x="0" y="27" width="36" height="5" rx="1" fill="#1f2937"/>
+          </svg>
+          <span className="text-lg font-bold text-slate-900">NobelPM</span>
         </div>
         <div className="flex items-center gap-6 text-sm text-slate-600">
           <a href="#features" className="hover:text-blue-600 transition-colors hidden md:inline">Features</a>
@@ -47,7 +46,7 @@ export default function HomePage() {
           <span className="text-blue-600">a 20-year scheduler would.</span>
         </h1>
         <p className="text-xl text-slate-500 max-w-2xl mx-auto mb-10 leading-relaxed">
-          Upload your Primavera P6 XER file. ProjectLens finds your critical path drivers,
+          Upload your Primavera P6 XER file. NobelPM finds your critical path drivers,
           logic violations, long lead risks, and delay evidence — in 30 seconds. No training. No setup.
         </p>
         <div className="flex items-center justify-center gap-4 flex-wrap">
@@ -68,7 +67,7 @@ export default function HomePage() {
             <div className="w-3 h-3 rounded-full bg-red-400"/><div className="w-3 h-3 rounded-full bg-yellow-400"/>
             <div className="w-3 h-3 rounded-full bg-green-400"/>
             <div className="ml-4 flex-1 bg-slate-700 rounded-md h-6 flex items-center px-3">
-              <span className="text-slate-400 text-xs">project-lens-sigma.vercel.app/dashboard/upload</span>
+              <span className="text-slate-400 text-xs">app.nobelpm.org/dashboard/upload</span>
             </div>
           </div>
           <div className="bg-slate-900 p-6">
@@ -103,10 +102,10 @@ export default function HomePage() {
       <section id="how" className="bg-slate-50 py-20">
         <div className="max-w-5xl mx-auto px-8">
           <h2 className="text-3xl font-extrabold text-slate-900 text-center mb-3">Upload. Analyze. Act.</h2>
-          <p className="text-slate-500 text-center mb-12 max-w-xl mx-auto">No training required. No complicated setup. Just upload your XER and ProjectLens does the hard work.</p>
+          <p className="text-slate-500 text-center mb-12 max-w-xl mx-auto">No training required. No complicated setup. Just upload your XER and NobelPM does the hard work.</p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {[
-              { step: '01', title: 'Upload your XER', body: 'Drag and drop your Primavera P6 schedule. ProjectLens parses 500+ activities and 800+ relationships in seconds.', icon: '📁' },
+              { step: '01', title: 'Upload your XER', body: 'Drag and drop your Primavera P6 schedule. NobelPM parses 500+ activities and 800+ relationships in seconds.', icon: '📁' },
               { step: '02', title: 'See what matters', body: 'Critical path drivers, logic check, long lead items, no-tie activities, field reality — all in 7 organized tabs.', icon: '🔍' },
               { step: '03', title: 'Generate the report', body: 'Print, save as PDF, or for TIA work — compare two schedules and generate a full Word document.', icon: '📄' },
             ].map(s => (
@@ -127,12 +126,12 @@ export default function HomePage() {
         <p className="text-slate-500 text-center mb-12">Every feature designed from 18 years of construction PM experience on federal and commercial projects.</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {[
-            { title: 'Critical Path Analysis', body: 'See exactly what is driving project completion. ProjectLens identifies driving activities, float condition, and where the path can break.', icon: '🎯' },
+            { title: 'Critical Path Analysis', body: 'See exactly what is driving project completion. NobelPM identifies driving activities, float condition, and where the path can break.', icon: '🎯' },
             { title: 'Schedule Logic Check', body: 'Catches out-of-sequence work, fabricated-before-approval procurement, and review-before-submit violations. TIA evidence ready.', icon: '🔧' },
             { title: 'Long Lead Item Tracker', body: 'Every 20+ day procurement item, sorted by float. Know which vendor calls to make today vs which can wait until next week.', icon: '📦' },
             { title: 'No Logic Ties Detection', body: 'Finds activities missing predecessors or successors — the schedule quality issues that hide real risk.', icon: '⛓️' },
             { title: 'Field Reality Check', body: 'Compares in-progress activities against expected sequencing. Flags drywall going up before inspections, painting before drywall is closed.', icon: '👷' },
-            { title: 'TIA Comparison & Word Report', body: 'Upload two schedules — un-impacted and impacted. ProjectLens detects fragnets, runs trend analysis, and generates a full TIA Word document ready for owner submission.', icon: '📑' },
+            { title: 'TIA Comparison & Word Report', body: 'Upload two schedules — un-impacted and impacted. NobelPM detects fragnets, runs trend analysis, and generates a full TIA Word document ready for owner submission.', icon: '📑' },
           ].map(f => (
             <div key={f.title} className="flex gap-4 p-5 rounded-xl border border-slate-200 hover:border-blue-200 hover:bg-blue-50/30 transition-all">
               <div className="text-2xl flex-shrink-0">{f.icon}</div>
@@ -208,7 +207,7 @@ export default function HomePage() {
         <div className="max-w-3xl mx-auto px-8">
           <div className="bg-white rounded-2xl border border-slate-200 p-8">
             <div className="text-xs font-bold text-blue-600 mb-2 uppercase tracking-wider">A note from the founder</div>
-            <h3 className="text-2xl font-extrabold text-slate-900 mb-4">Why I built ProjectLens</h3>
+            <h3 className="text-2xl font-extrabold text-slate-900 mb-4">Why I built NobelPM</h3>
             <p className="text-slate-600 text-sm leading-relaxed mb-3">
               I've spent 18 years managing federal and commercial construction projects — USACE, DGS, GSA, healthcare, K-12.
               I'm PMP-certified, a daily Primavera P6 user, and I've prepared more TIAs than I can count.
@@ -219,7 +218,7 @@ export default function HomePage() {
               nobody flagged them in time. And when delays hit, the TIA work took weeks of manual P6 effort.
             </p>
             <p className="text-slate-600 text-sm leading-relaxed">
-              ProjectLens is what I always wished I had — a tool that reads the schedule the way an experienced
+              NobelPM is what I always wished I had — a tool that reads the schedule the way an experienced
               scheduler would, and tells you what matters in plain language. It's not another PM tool. It's the
               visibility layer that helps you see what your schedule is really trying to say.
             </p>
@@ -233,7 +232,7 @@ export default function HomePage() {
         <h2 className="text-3xl font-extrabold text-slate-900 mb-4">See your schedule clearly.</h2>
         <p className="text-slate-500 mb-8 max-w-xl mx-auto">Upload your XER. Get the analysis. Make the call. All in 30 seconds.</p>
         <Link href="/login" className="bg-blue-600 text-white px-8 py-4 rounded-xl font-bold text-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200 inline-block">
-          Try ProjectLens Free →
+          Try NobelPM Free →
         </Link>
         <p className="text-xs text-slate-400 mt-4">No credit card required.</p>
       </section>
@@ -241,14 +240,16 @@ export default function HomePage() {
       {/* Footer */}
       <footer className="border-t border-slate-100 py-8 text-center text-xs text-slate-400">
         <div className="flex items-center justify-center gap-2 mb-2">
-          <div className="w-5 h-5 bg-blue-600 rounded flex items-center justify-center">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
-              <circle cx="11" cy="11" r="4"/><circle cx="11" cy="11" r="8.5"/>
-            </svg>
-          </div>
-          <span className="font-bold text-slate-600">ProjectLens</span>
+          <svg width="18" height="13" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" aria-label="NobelPM mark">
+            <rect x="0" y="0" width="32" height="5" rx="1" fill="#2563eb"/>
+            <rect x="0" y="9" width="44" height="5" rx="1" fill="#dc2626"/>
+            <rect x="0" y="18" width="26" height="5" rx="1" fill="#16a34a"/>
+            <rect x="0" y="27" width="36" height="5" rx="1" fill="#1f2937"/>
+          </svg>
+          <span className="font-bold text-slate-600">NobelPM</span>
         </div>
-        <p>Visibility. Insight. Control. © 2026 ProjectLens. All rights reserved.</p>
+        <p>Visibility. Insight. Control. © 2026 NobelPM. All rights reserved.</p>
+        <p className="mt-1 text-slate-400">Built by Nobel Project Management Services, LLC</p>
       </footer>
     </div>
   )

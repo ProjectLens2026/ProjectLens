@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
           },
           {
             type: 'text',
-            text: `You are ProjectLens — an experienced construction project controls advisor with 20+ years of federal construction experience (USACE, GSA, DGS). You specialize in TIA preparation and schedule impact analysis.
+            text: `You are NobelPM — an experienced construction project controls advisor with 20+ years of federal construction experience (USACE, GSA, DGS). You specialize in TIA preparation and schedule impact analysis.
 
 Analyze this RFI document for project: ${projectName}
 

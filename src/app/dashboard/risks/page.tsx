@@ -165,7 +165,7 @@ export default function RisksPage() {
         detail: 'Activities without logic ties "float" in the schedule. Their delays don\'t propagate through CPM analysis. The schedule cannot be trusted to predict completion accurately.',
         recommendation: 'Have scheduler review and add proper relationships. This is a fundamental schedule quality issue that should be resolved before relying on float analysis.',
         actionItems: [
-          'Generate list of activities with no ties (already in ProjectLens)',
+          'Generate list of activities with no ties (already in NobelPM)',
           'Have scheduler add proper predecessors and successors',
           'Re-run schedule calculation',
           'Verify critical path makes sense after corrections',
@@ -314,7 +314,7 @@ export default function RisksPage() {
             <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
               <div className="text-4xl mb-3">✅</div>
               <div className="text-lg font-bold text-slate-700">No risks detected in this category</div>
-              <div className="text-sm text-slate-500 mt-1">ProjectLens did not identify any matching issues in the schedule.</div>
+              <div className="text-sm text-slate-500 mt-1">NobelPM did not identify any matching issues in the schedule.</div>
             </div>
           ) : (
             filtered.map(risk => {
@@ -344,7 +344,7 @@ export default function RisksPage() {
                       </div>
 
                       <div className="mb-4">
-                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">ProjectLens Recommendation</div>
+                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">NobelPM Recommendation</div>
                         <div className={`text-sm font-medium ${style.text} bg-slate-50 border-l-4 ${style.border} p-3 rounded-r-lg leading-relaxed`}>
                           {risk.recommendation}
                         </div>
@@ -394,7 +394,7 @@ export default function RisksPage() {
             <div className="bg-green-50 border border-green-200 rounded-2xl p-8 text-center">
               <div className="text-4xl mb-3">✅</div>
               <div className="text-lg font-bold text-green-900">No risks detected</div>
-              <div className="text-sm text-green-700 mt-1">ProjectLens analyzed this schedule and did not identify any critical patterns.</div>
+              <div className="text-sm text-green-700 mt-1">NobelPM analyzed this schedule and did not identify any critical patterns.</div>
             </div>
           )}
         </div>

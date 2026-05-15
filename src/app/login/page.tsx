@@ -17,7 +17,7 @@ export default function LoginPage() {
     // Store user in localStorage for demo
     localStorage.setItem('pl_user', JSON.stringify({
       name: form.name || 'Name',
-      company: form.company || 'ProjectLens',
+      company: form.company || 'NobelPM',
       email: form.email,
       role: form.role || 'Project Manager',
       initials: (form.name || 'N').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
@@ -31,14 +31,13 @@ export default function LoginPage() {
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 mb-3">
-            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                <circle cx="11" cy="11" r="4"/><circle cx="11" cy="11" r="8.5"/>
-                <line x1="2.5" y1="11" x2="5" y2="11"/><line x1="17" y1="11" x2="19.5" y2="11"/>
-                <line x1="11" y1="2.5" x2="11" y2="5"/><line x1="11" y1="17" x2="11" y2="19.5"/>
-              </svg>
-            </div>
-            <span className="text-2xl font-extrabold text-white">ProjectLens</span>
+            <svg width="44" height="32" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" aria-label="NobelPM mark">
+              <rect x="0" y="0" width="32" height="5" rx="1" fill="#3b82f6"/>
+              <rect x="0" y="9" width="44" height="5" rx="1" fill="#ef4444"/>
+              <rect x="0" y="18" width="26" height="5" rx="1" fill="#22c55e"/>
+              <rect x="0" y="27" width="36" height="5" rx="1" fill="#94a3b8"/>
+            </svg>
+            <span className="text-2xl font-extrabold text-white">NobelPM</span>
           </div>
           <p className="text-slate-400 text-sm">Visibility. Insight. Control.</p>
         </div>
@@ -89,7 +88,7 @@ export default function LoginPage() {
             </div>
             <button type="submit" disabled={loading}
               className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors disabled:opacity-60 mt-2">
-              {loading ? 'Opening your workspace...' : mode === 'login' ? 'Sign In to ProjectLens' : 'Create My Account'}
+              {loading ? 'Opening your workspace...' : mode === 'login' ? 'Sign In to NobelPM' : 'Create My Account'}
             </button>
           </form>
 
@@ -101,7 +100,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-center text-slate-500 text-xs mt-6">
-          <Link href="/" className="hover:text-white transition-colors">← Back to projectlens.app</Link>
+          <Link href="/" className="hover:text-white transition-colors">← Back to nobelpm.org</Link>
         </p>
       </div>
     </div>

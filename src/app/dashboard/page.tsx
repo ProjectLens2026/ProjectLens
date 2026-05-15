@@ -54,7 +54,7 @@ export default function DashboardPage() {
             <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 rounded-2xl flex items-center justify-center">
               <span className="text-3xl">📊</span>
             </div>
-            <div className="text-lg font-bold text-slate-700 mb-2">Welcome to ProjectLens</div>
+            <div className="text-lg font-bold text-slate-700 mb-2">Welcome to NobelPM</div>
             <div className="text-sm text-slate-500 mb-6">Upload a schedule to see your executive dashboard come to life with real project intelligence.</div>
             <Link href="/dashboard/upload"
               className="inline-block bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors">
@@ -97,7 +97,7 @@ export default function DashboardPage() {
     return 'Project is performing within tolerance. Continue current management approach.'
   })()
 
-  // AUTO-DETECT RISKS (same logic as Project Lens page)
+  // AUTO-DETECT RISKS (same logic as NobelPM page)
   const risks: Array<{category: string, title: string, severity: string}> = []
   if (delayDays > 30) risks.push({ category: 'TIA', title: `Project ${delayDays} days behind contract`, severity: 'critical' })
   if (negativeFloat > 50) risks.push({ category: 'Critical Path', title: `${negativeFloat} activities on negative float`, severity: 'critical' })
@@ -139,7 +139,7 @@ export default function DashboardPage() {
     {
       label: 'Risks Detected',
       val: `${risks.length}`,
-      sub: 'Auto-detected by ProjectLens',
+      sub: 'Auto-detected by NobelPM',
       delta: risks.filter(r => r.severity === 'critical').length > 0 ? `${risks.filter(r => r.severity === 'critical').length} critical` : risks.length > 0 ? 'Review recommended' : '✓ No risks flagged',
       color: risks.filter(r => r.severity === 'critical').length > 0 ? 'text-red-600' : risks.length > 0 ? 'text-amber-600' : 'text-green-600',
       border: risks.filter(r => r.severity === 'critical').length > 0 ? 'border-red-100' : risks.length > 0 ? 'border-amber-100' : 'border-green-100',
@@ -205,7 +205,7 @@ export default function DashboardPage() {
     attention.push({
       icon: '✅',
       title: 'No Immediate Concerns',
-      desc: 'ProjectLens did not detect any critical patterns in this schedule. Continue normal monitoring.',
+      desc: 'NobelPM did not detect any critical patterns in this schedule. Continue normal monitoring.',
       badge: 'Stable',
       badgeColor: 'bg-green-100 text-green-700',
       href: '/dashboard/lens',
@@ -306,7 +306,7 @@ export default function DashboardPage() {
         </div>
         <div className="ml-auto flex items-center gap-2">
           <span className="text-xs text-slate-400 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg">Last updated: {lastUpdatedLabel()}</span>
-          <Link href="/dashboard/lens" className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400 hover:text-blue-600 transition-colors">🔍 Project Lens</Link>
+          <Link href="/dashboard/lens" className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400 hover:text-blue-600 transition-colors">🔍 NobelPM Analysis</Link>
           <Link href="/dashboard/upload" className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition-colors font-semibold">+ Upload Schedule</Link>
         </div>
       </div>

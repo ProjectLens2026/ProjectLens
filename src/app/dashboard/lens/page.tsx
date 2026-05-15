@@ -118,7 +118,7 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
           <div>
             <div className="font-bold text-amber-900 mb-1">Gantt chart cannot be displayed</div>
             <div className="text-sm text-amber-800 leading-relaxed mb-3">
-              ProjectLens could not find any activities with driving path or float data in this schedule.
+              NobelPM could not find any activities with driving path or float data in this schedule.
               This usually means the schedule has not been calculated in P6, or the XER was exported before
               a schedule calculation was run.
             </div>
@@ -152,7 +152,7 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
                 <span className="font-bold">What this means operationally:</span> The schedule is showing a longest path but not a true critical path with float enforcement. The PM should verify in P6 that a "Must Finish By" constraint is set on the contract completion milestone.
               </div>
               <div className="mt-3 text-xs text-blue-700 font-semibold">
-                ProjectLens is showing the Longest Path (driving path flag = Y) as the best available substitute:
+                NobelPM is showing the Longest Path (driving path flag = Y) as the best available substitute:
               </div>
             </div>
           </div>
@@ -176,7 +176,7 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
 }
 
 
-export default function ProjectLensAnalysisPage() {
+export default function NobelPMAnalysisPage() {
   const [analysis, setAnalysis] = useState<any>(null)
   const [project, setProject] = useState<any>(null)
   const [activeTab, setActiveTab] = useState('gantt')
@@ -190,7 +190,7 @@ export default function ProjectLensAnalysisPage() {
   function refresh() {
     const p = getActiveProject()
     setProject(p)
-    // Always show the LATEST version on ProjectLens Analysis page
+    // Always show the LATEST version on NobelPM Analysis page
     const latest = getLatestVersion(p)
     setAnalysis(latest?.analysis || null)
   }
@@ -214,7 +214,7 @@ export default function ProjectLensAnalysisPage() {
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center flex-shrink-0">
           <div>
-            <span className="font-bold text-slate-900 text-base">ProjectLens Analysis</span>
+            <span className="font-bold text-slate-900 text-base">NobelPM Analysis</span>
             <span className="text-slate-400 text-sm ml-2">· No active project</span>
           </div>
         </div>
@@ -243,7 +243,7 @@ export default function ProjectLensAnalysisPage() {
     <div className="flex flex-col h-full">
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0 no-print">
         <div>
-          <span className="font-bold text-slate-900 text-base">ProjectLens Analysis</span>
+          <span className="font-bold text-slate-900 text-base">NobelPM Analysis</span>
           <span className="text-slate-400 text-sm ml-2">· {project.name}</span>
         </div>
         <div className="ml-auto flex gap-2">
@@ -446,7 +446,7 @@ export default function ProjectLensAnalysisPage() {
               <div>
                 <h3 className="text-sm font-bold mb-3">Long lead items ({a.longLeadItems?.length || 0} items, 35+ days duration)</h3>
                 <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                  Long lead items are materials or equipment requiring significant time to fabricate and deliver. These are the items that most commonly cause delays. ProjectLens sorts by float — most critical first.
+                  Long lead items are materials or equipment requiring significant time to fabricate and deliver. These are the items that most commonly cause delays. NobelPM sorts by float — most critical first.
                 </div>
                 <div className="space-y-2">
                   {(a.longLeadItems || []).slice(0, 20).map((ll: any, i: number) => (

@@ -169,7 +169,7 @@ export default function TrendAnalysisPage() {
               <div>
                 <div className="font-bold text-blue-900 text-sm">Pick a project to analyze trends</div>
                 <div className="text-xs text-blue-800 mt-0.5">
-                  Trend Analysis uses the schedule versions already saved in ProjectLens — no new uploads needed.
+                  Trend Analysis uses the schedule versions already saved in NobelPM — no new uploads needed.
                   Choose a project below to see how it has performed across all its updates.
                 </div>
               </div>
@@ -429,7 +429,7 @@ export default function TrendAnalysisPage() {
               <div className="flex items-start gap-4 mb-3">
                 <div className="text-4xl flex-shrink-0">{recStyle.icon}</div>
                 <div className="flex-1">
-                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">ProjectLens Recommendation</div>
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">NobelPM Recommendation</div>
                   <div className={`text-2xl font-extrabold ${recStyle.text}`}>{trend.recommendation.title}</div>
                 </div>
               </div>
@@ -549,7 +549,7 @@ export default function TrendAnalysisPage() {
             </div>
 
             <div className="text-center text-xs text-slate-400 py-4">
-              All metrics derived from your saved XER files · ProjectLens does not replace your judgment
+              All metrics derived from your saved XER files · NobelPM does not replace your judgment
             </div>
           </div>
         </div>

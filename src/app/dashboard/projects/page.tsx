@@ -99,7 +99,7 @@ export default function ProjectsPage() {
             <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 rounded-2xl flex items-center justify-center">
               <span className="text-3xl">🏗</span>
             </div>
-            <div className="text-lg font-bold text-slate-700 mb-2">Welcome to ProjectLens</div>
+            <div className="text-lg font-bold text-slate-700 mb-2">Welcome to NobelPM</div>
             <div className="text-sm text-slate-500 mb-6">Upload your first schedule to create a project. Every analysis, RFI, and TIA will be saved under it.</div>
             <Link href="/dashboard/upload"
               className="inline-block bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors">

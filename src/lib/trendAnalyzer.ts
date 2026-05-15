@@ -146,7 +146,7 @@ function computeChange(older: VersionDataPoint, newer: VersionDataPoint): Versio
   }
 }
 
-// Determine ProjectLens recommendation based on trend
+// Determine NobelPM recommendation based on trend
 function generateRecommendation(dataPoints: VersionDataPoint[], changes: VersionChange[]): TrendRecommendation {
   const latest = dataPoints[dataPoints.length - 1]
   const earliest = dataPoints[0]

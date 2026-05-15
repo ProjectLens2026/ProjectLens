@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
         const Anthropic = (await import('@anthropic-ai/sdk')).default
         const client = new Anthropic({ apiKey })
 
-        const prompt = `You are ProjectLens — an experienced construction project controls advisor with 20+ years of P6 scheduling, USACE/DGS workflow, and TIA preparation experience. Speak like a senior PM giving honest analysis to a colleague.
+        const prompt = `You are NobelPM — an experienced construction project controls advisor with 20+ years of P6 scheduling, USACE/DGS workflow, and TIA preparation experience. Speak like a senior PM giving honest analysis to a colleague.
 
 Project: ${analysis.projectName}
 File type: ${analysis.fileType}

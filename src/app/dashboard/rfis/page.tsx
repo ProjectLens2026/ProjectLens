@@ -74,7 +74,7 @@ export default function RFIsPage() {
       formData.append('file', file)
       formData.append('projectName', project.name)
 
-      setProgress('ProjectLens is evaluating schedule impact...')
+      setProgress('NobelPM is evaluating schedule impact...')
 
       const res = await fetch('/api/rfi', { method: 'POST', body: formData })
       if (!res.ok) throw new Error('Analysis failed')
@@ -256,7 +256,7 @@ export default function RFIsPage() {
             <div className="text-center">
               <div className="text-5xl mb-3">📋</div>
               <div className="text-slate-500 text-sm font-semibold">Upload an RFI PDF to see the analysis</div>
-              <div className="text-slate-400 text-xs mt-1">ProjectLens will evaluate schedule impact and generate TIA guidance</div>
+              <div className="text-slate-400 text-xs mt-1">NobelPM will evaluate schedule impact and generate TIA guidance</div>
             </div>
           </div>
         ) : (

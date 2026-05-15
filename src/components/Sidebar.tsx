@@ -55,7 +55,7 @@ export default function Sidebar({ user }: SidebarProps) {
       group: 'Active Project',
       items: [
         { href: '/dashboard', icon: '⊞', label: 'Dashboard' },
-        { href: '/dashboard/lens', icon: '🔍', label: 'ProjectLens Analysis' },
+        { href: '/dashboard/lens', icon: '🔍', label: 'NobelPM Analysis' },
       ]
     },
     {
@@ -83,14 +83,16 @@ export default function Sidebar({ user }: SidebarProps) {
       {/* Logo */}
       <div className="px-4 py-5 border-b border-white/10 flex-shrink-0">
         <Link href="/dashboard/projects" className="flex items-center gap-2.5">
-          <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
-              <circle cx="11" cy="11" r="4"/><circle cx="11" cy="11" r="8.5"/>
-              <line x1="2.5" y1="11" x2="5" y2="11"/><line x1="17" y1="11" x2="19.5" y2="11"/>
+          <div className="flex-shrink-0">
+            <svg width="24" height="18" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" aria-label="NobelPM mark">
+              <rect x="0" y="0" width="32" height="5" rx="1" fill="#3b82f6"/>
+              <rect x="0" y="9" width="44" height="5" rx="1" fill="#ef4444"/>
+              <rect x="0" y="18" width="26" height="5" rx="1" fill="#22c55e"/>
+              <rect x="0" y="27" width="36" height="5" rx="1" fill="#94a3b8"/>
             </svg>
           </div>
           <div>
-            <div className="text-white font-extrabold text-sm tracking-tight">ProjectLens</div>
+            <div className="text-white font-extrabold text-sm tracking-tight">NobelPM</div>
             <div className="text-white/30 text-[9px]">Construction Intelligence</div>
           </div>
         </Link>

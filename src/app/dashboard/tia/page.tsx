@@ -437,7 +437,7 @@ export default function TIAPage() {
             </button>
 
             <div className="mt-6 p-4 bg-blue-50 border-l-4 border-blue-500 rounded-r-lg text-xs text-blue-900 leading-relaxed">
-              <strong>How ProjectLens detects fragnets:</strong> The system looks for activities and WBS sections containing keywords like "Frag", "Schedule Issue", "TIA", or "Delay Event" in the impacted schedule. Make sure your fragnet WBS uses one of these naming conventions in P6.
+              <strong>How NobelPM detects fragnets:</strong> The system looks for activities and WBS sections containing keywords like "Frag", "Schedule Issue", "TIA", or "Delay Event" in the impacted schedule. Make sure your fragnet WBS uses one of these naming conventions in P6.
             </div>
           </div>
         </div>
