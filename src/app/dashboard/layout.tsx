@@ -4,48 +4,96 @@ import { useRouter, usePathname } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
 import HelpWidget from '@/components/HelpWidget'
 import { migrateLegacyData, loadProjects, getActiveProjectId, setActiveProjectId } from '@/lib/projectStore'
+import { createClient } from '@/lib/supabase/client'
+
+interface AppUser {
+  name: string
+  email: string
+  company: string
+  role: string
+  initials: string
+}
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<AppUser | null>(null)
   const [checking, setChecking] = useState(true)
 
   useEffect(() => {
-    // Auth check
-    const stored = localStorage.getItem('pl_user')
-    if (!stored) {
-      router.replace('/login')
-      return
-    }
-    try {
-      setUser(JSON.parse(stored))
-    } catch {
-      router.replace('/login')
-      return
+    const supabase = createClient()
+
+    async function checkAuth() {
+      const { data: { session } } = await supabase.auth.getSession()
+
+      if (!session) {
+        router.replace('/login')
+        return
+      }
+
+      // Email must be verified before they can access the dashboard
+      if (!session.user.email_confirmed_at) {
+        await supabase.auth.signOut()
+        router.replace('/login?error=email_not_verified')
+        return
+      }
+
+      // Load profile data (name, company, role) from the profiles table
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .single()
+
+      const name = profile?.name || session.user.email || 'User'
+      const initials = name
+        .split(' ')
+        .map((n: string) => n[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 2)
+
+      setUser({
+        name,
+        email: session.user.email || '',
+        company: profile?.company || '',
+        role: profile?.role || 'Project Manager',
+        initials,
+      })
+
+      // Local project data setup. Phase 3 will migrate these to Supabase.
+      migrateLegacyData()
+      const projects = loadProjects()
+      if (projects.length > 0 && !getActiveProjectId()) {
+        setActiveProjectId(projects[0].id)
+      }
+
+      setChecking(false)
     }
 
-    // Migrate any legacy data into project store
-    migrateLegacyData()
+    checkAuth()
 
-    // If user has projects but no active project ID, set first one
-    const projects = loadProjects()
-    if (projects.length > 0 && !getActiveProjectId()) {
-      setActiveProjectId(projects[0].id)
+    // React to sign-out from any tab
+    const { data: subscription } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        router.replace('/login')
+      }
+    })
+
+    return () => {
+      subscription.subscription.unsubscribe()
     }
-
-    setChecking(false)
   }, [router])
 
-  // Show loading state while checking auth
   if (checking || !user) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-900">
       <div className="flex flex-col items-center gap-3">
-        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center animate-pulse">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
-            <circle cx="11" cy="11" r="4"/><circle cx="11" cy="11" r="8.5"/>
-          </svg>
-        </div>
+        <svg width="44" height="32" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" className="animate-pulse" aria-label="NobelPM mark">
+          <rect x="0" y="0" width="32" height="5" rx="1" fill="#3b82f6"/>
+          <rect x="0" y="9" width="44" height="5" rx="1" fill="#ef4444"/>
+          <rect x="0" y="18" width="26" height="5" rx="1" fill="#22c55e"/>
+          <rect x="0" y="27" width="36" height="5" rx="1" fill="#94a3b8"/>
+        </svg>
         <div className="text-white/40 text-sm">Loading NobelPM...</div>
       </div>
     </div>

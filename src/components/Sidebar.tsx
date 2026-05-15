@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import clsx from 'clsx'
 import { getActiveProject, loadProjects, Project } from '@/lib/projectStore'
+import { createClient } from '@/lib/supabase/client'
 
 interface SidebarProps {
   user?: { name: string; role: string; initials: string; company: string }
@@ -28,8 +29,14 @@ export default function Sidebar({ user }: SidebarProps) {
     setTotalProjects(loadProjects().length)
   }
 
-  function handleSignOut() {
-    localStorage.removeItem('pl_user')
+  async function handleSignOut() {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    // Clear any local project data so the next user on this browser starts clean.
+    // Phase 3 (data migration to Supabase) will make this unnecessary.
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('pl_')) localStorage.removeItem(key)
+    })
     router.push('/login')
   }
 
