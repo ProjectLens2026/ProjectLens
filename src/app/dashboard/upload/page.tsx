@@ -405,7 +405,7 @@ export default function UploadPage() {
         
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0 no-print">
           <div>
-            <span className="font-bold text-slate-900 text-base">NobelPM Analysis</span>
+            <span className="font-bold text-slate-900 text-base">Full Analysis</span>
             <span className="text-slate-400 text-sm ml-2">· {a.projectName}</span>
           </div>
           <div className="ml-auto flex gap-2">
@@ -700,7 +700,7 @@ export default function UploadPage() {
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0">
         <div>
           <span className="font-bold text-slate-900 text-base">Upload Schedule</span>
-          <span className="text-slate-400 text-sm ml-2">· NobelPM Analysis</span>
+          <span className="text-slate-400 text-sm ml-2">· Full Analysis</span>
         </div>
         <div className="ml-auto">
           <div className="flex items-center gap-2 text-xs">
@@ -887,7 +887,7 @@ export default function UploadPage() {
                 </button>
                 <button onClick={runAnalysis}
                   className="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-bold hover:bg-blue-700 transition-colors">
-                  🔍 Run NobelPM Analysis →
+                  🔍 Run Full Analysis →
                 </button>
               </div>
             </div>

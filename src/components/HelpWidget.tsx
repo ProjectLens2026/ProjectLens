@@ -59,7 +59,7 @@ export default function HelpWidget() {
 
   function getCurrentPageContext(): string {
     if (!pathname) return 'Dashboard'
-    if (pathname.includes('/dashboard/lens')) return 'NobelPM Analysis'
+    if (pathname.includes('/dashboard/lens')) return 'Full Analysis'
     if (pathname.includes('/dashboard/risks')) return 'Risks & Issues'
     if (pathname.includes('/dashboard/procurement')) return 'Procurement'
     if (pathname.includes('/dashboard/submittals')) return 'Submittals'

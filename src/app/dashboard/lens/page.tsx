@@ -190,7 +190,7 @@ export default function NobelPMAnalysisPage() {
   function refresh() {
     const p = getActiveProject()
     setProject(p)
-    // Always show the LATEST version on NobelPM Analysis page
+    // Always show the LATEST version on Full Analysis page
     const latest = getLatestVersion(p)
     setAnalysis(latest?.analysis || null)
   }
@@ -214,7 +214,7 @@ export default function NobelPMAnalysisPage() {
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center flex-shrink-0">
           <div>
-            <span className="font-bold text-slate-900 text-base">NobelPM Analysis</span>
+            <span className="font-bold text-slate-900 text-base">Full Analysis</span>
             <span className="text-slate-400 text-sm ml-2">· No active project</span>
           </div>
         </div>
@@ -243,7 +243,7 @@ export default function NobelPMAnalysisPage() {
     <div className="flex flex-col h-full">
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0 no-print">
         <div>
-          <span className="font-bold text-slate-900 text-base">NobelPM Analysis</span>
+          <span className="font-bold text-slate-900 text-base">Full Analysis</span>
           <span className="text-slate-400 text-sm ml-2">· {project.name}</span>
         </div>
         <div className="ml-auto flex gap-2">

@@ -62,7 +62,7 @@ export default function Sidebar({ user }: SidebarProps) {
       group: 'Active Project',
       items: [
         { href: '/dashboard', icon: '⊞', label: 'Dashboard' },
-        { href: '/dashboard/lens', icon: '🔍', label: 'NobelPM Analysis' },
+        { href: '/dashboard/lens', icon: '🔍', label: 'Full Analysis' },
       ]
     },
     {

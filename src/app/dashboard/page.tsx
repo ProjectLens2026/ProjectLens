@@ -306,7 +306,7 @@ export default function DashboardPage() {
         </div>
         <div className="ml-auto flex items-center gap-2">
           <span className="text-xs text-slate-400 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg">Last updated: {lastUpdatedLabel()}</span>
-          <Link href="/dashboard/lens" className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400 hover:text-blue-600 transition-colors">🔍 NobelPM Analysis</Link>
+          <Link href="/dashboard/lens" className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400 hover:text-blue-600 transition-colors">🔍 Full Analysis</Link>
           <Link href="/dashboard/upload" className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition-colors font-semibold">+ Upload Schedule</Link>
         </div>
       </div>
@@ -321,7 +321,7 @@ export default function DashboardPage() {
             <div className={`text-sm mt-0.5 ${condStyle.subText}`}>{conditionMessage}</div>
           </div>
           <Link href="/dashboard/lens" className={`text-xs border ${condStyle.btnBorder} ${condStyle.btnText} px-3 py-2 rounded-lg ${condStyle.btnHover} transition-colors whitespace-nowrap font-medium`}>
-            Full Lens Analysis →
+            Full Analysis →
           </Link>
         </div>
 
@@ -480,7 +480,7 @@ export default function DashboardPage() {
             </div>
             <div className="space-y-2">
               <Link href="/dashboard/lens" className="w-full bg-blue-600 text-white text-xs font-semibold py-2.5 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-1.5">
-                🔍 Full Lens Analysis
+                🔍 Full Analysis
               </Link>
               <Link href="/dashboard/tia" className="w-full border border-slate-200 text-slate-600 text-xs font-semibold py-2 rounded-lg hover:border-blue-300 hover:text-blue-600 transition-colors flex items-center justify-center">
                 📑 TIA Comparison

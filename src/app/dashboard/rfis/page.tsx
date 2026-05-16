@@ -149,7 +149,7 @@ export default function RFIsPage() {
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center flex-shrink-0">
           <div>
-            <span className="font-bold text-slate-900 text-base">RFIs</span>
+            <span className="font-bold text-slate-900 text-base">RFIs <span className="text-slate-400 text-xs font-normal">— Requests for Information</span></span>
             <span className="text-slate-400 text-sm ml-2">· No active project</span>
           </div>
         </div>

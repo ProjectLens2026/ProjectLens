@@ -200,7 +200,7 @@ export default function TIAPage() {
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center">
-          <span className="font-bold text-slate-900 text-base">TIA Comparison</span>
+          <span className="font-bold text-slate-900 text-base">TIA Comparison <span className="text-slate-400 text-xs font-normal">— Time Impact Analysis</span></span>
           <span className="text-slate-400 text-sm ml-2">· Choose TIA mode</span>
         </div>
 
