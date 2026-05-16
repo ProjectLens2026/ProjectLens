@@ -14,6 +14,26 @@ const ROLES = [
   'CEO / Executive',
 ]
 
+// Account types — mandatory selection at signup.
+// Each maps to a different downstream onboarding flow once multi-tenancy ships:
+//   personal    → solo workspace, any email accepted, self-pay
+//   business    → company workspace, prefers company email, self-serve checkout
+//   government  → agency workspace, contact-sales path, compliance messaging
+const ACCOUNT_TYPES = [
+  { value: 'personal',   label: 'Personal',           desc: 'Solo work, any email' },
+  { value: 'business',   label: 'Business',           desc: 'Company use, team features' },
+  { value: 'government', label: 'Government Agency',  desc: 'Public sector, contact sales' },
+]
+
+// Common personal email providers. If a user picks Business or Government but
+// signs up with one of these domains, we show a non-blocking inline warning so
+// they can double-check their selection. They can still proceed if intentional.
+const PERSONAL_EMAIL_DOMAINS = [
+  'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com',
+  'icloud.com', 'aol.com', 'protonmail.com', 'live.com',
+  'msn.com', 'me.com', 'mac.com',
+]
+
 function LoginInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -26,7 +46,26 @@ function LoginInner() {
     email: '',
     password: '',
     role: 'Project Manager',
+    // account_type starts empty — user must explicitly choose at signup.
+    // Empty value blocks submission via the mandatory check in handleSubmit.
+    account_type: '',
   })
+
+  // Derived: should we show the company field?
+  // Personal users don't have a company to name. Business and Government do.
+  const showCompanyField = form.account_type === 'business' || form.account_type === 'government'
+
+  // Derived: should we show the soft email-domain warning?
+  // Only relevant during signup, only for Business/Government, only when the
+  // entered email domain matches a common personal-email provider. The user
+  // can still proceed — this is a gentle nudge, not a block.
+  const emailDomain = form.email.toLowerCase().split('@')[1] || ''
+  const usingPersonalEmail = PERSONAL_EMAIL_DOMAINS.includes(emailDomain)
+  const showEmailMismatchWarning =
+    mode === 'signup' &&
+    showCompanyField &&
+    emailDomain.length > 0 &&
+    usingPersonalEmail
 
   // Show error if redirected here with one (e.g. unverified email, failed callback)
   useEffect(() => {
@@ -48,8 +87,29 @@ function LoginInner() {
 
     try {
       if (mode === 'signup') {
+        // Account type is mandatory at signup. Empty string means the user
+        // hasn't picked Personal/Business/Government — block submission.
+        if (!form.account_type) {
+          setError('Please select an account type before signing up.')
+          setLoading(false)
+          return
+        }
+
         if (form.password.length < 8) {
           setError('Password must be at least 8 characters.')
+          setLoading(false)
+          return
+        }
+
+        // Business and Government accounts must provide a company/agency name.
+        // Personal accounts skip this entirely (field is hidden in the UI).
+        const requiresCompany = form.account_type === 'business' || form.account_type === 'government'
+        if (requiresCompany && !form.company.trim()) {
+          setError(
+            form.account_type === 'government'
+              ? 'Please enter your agency name.'
+              : 'Please enter your company name.'
+          )
           setLoading(false)
           return
         }
@@ -60,8 +120,14 @@ function LoginInner() {
           options: {
             data: {
               name: form.name,
-              company: form.company,
+              // For Personal accounts we deliberately store an empty company string
+              // rather than skipping the field — keeps the user_metadata shape stable.
+              company: requiresCompany ? form.company.trim() : '',
               role: form.role,
+              // account_type is stored on user_metadata so the profiles-table
+              // trigger (created in the Phase 2 auth setup) can pick it up.
+              // When multi-tenancy ships, this drives the org-creation flow.
+              account_type: form.account_type,
             },
             emailRedirectTo: `${window.location.origin}/auth/callback`,
           },
@@ -144,6 +210,27 @@ function LoginInner() {
           <form onSubmit={handleSubmit} className="space-y-4">
             {mode === 'signup' && (
               <>
+                {/* Account type — mandatory selection. Drives whether the Company
+                    field shows below, and (post multi-tenancy) which org flow
+                    the user lands in after verification. */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                    Sign up as <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    required
+                    value={form.account_type}
+                    onChange={e => setForm({ ...form, account_type: e.target.value })}
+                    className="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50 bg-white">
+                    <option value="" disabled>Select one...</option>
+                    {ACCOUNT_TYPES.map(t => (
+                      <option key={t.value} value={t.value}>
+                        {t.label} — {t.desc}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Full Name</label>
                   <input
@@ -155,17 +242,25 @@ function LoginInner() {
                     className="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Company</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Company name"
-                    value={form.company}
-                    onChange={e => setForm({ ...form, company: e.target.value })}
-                    className="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50"
-                  />
-                </div>
+
+                {/* Company / agency name — only required for Business and Government.
+                    Personal users skip this entirely (hidden, not just disabled). */}
+                {showCompanyField && (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                      {form.account_type === 'government' ? 'Agency Name' : 'Company'}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder={form.account_type === 'government' ? 'Agency or department name' : 'Company name'}
+                      value={form.company}
+                      onChange={e => setForm({ ...form, company: e.target.value })}
+                      className="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50"
+                    />
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Your Role</label>
                   <select
@@ -187,6 +282,17 @@ function LoginInner() {
                 onChange={e => setForm({ ...form, email: e.target.value })}
                 className="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50"
               />
+              {/* Soft warning — non-blocking. Surfaces when the user picked a
+                  Business/Government account type but entered a personal-domain
+                  email. They can still proceed if intentional (e.g. a consultant
+                  using personal email for client work). */}
+              {showEmailMismatchWarning && (
+                <p className="mt-1.5 text-[11px] text-amber-700 leading-relaxed">
+                  This looks like a personal email. {form.account_type === 'government'
+                    ? 'Government accounts usually use a .gov or .mil address.'
+                    : 'Business accounts usually use a company email.'} You can continue if this is what you meant.
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Password</label>
