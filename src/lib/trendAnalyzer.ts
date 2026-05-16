@@ -5,6 +5,13 @@ import { Project, ScheduleVersion } from './projectStore'
 export interface VersionDataPoint {
   versionLabel: string
   uploadedAt: string
+  // dataDate = schedule's actual "as-of" date from XER (preferred for sorting).
+  // Optional for backward compat with versions stored before this field existed.
+  dataDate?: string
+  // effectiveDate = dataDate when available, otherwise uploadedAt. This is what
+  // the UI should display as the "Version Date" and what the trend uses for
+  // chronological ordering. Always populated.
+  effectiveDate: string
   fileName: string
   totalActivities: number
   complete: number
@@ -73,13 +80,25 @@ function pct(value: number, total: number): number {
   return Math.round((value / total) * 100)
 }
 
+// Resolve a version's effective date for trend ordering.
+// Prefers explicit dataDate, falls back to analysis.dataDate (some early
+// stored versions had it nested), falls back to uploadedAt for true legacy
+// versions that pre-date the data date field entirely.
+function versionEffectiveDate(v: ScheduleVersion): string {
+  return v.dataDate || v.analysis?.dataDate || v.uploadedAt
+}
+
 // Convert a version into a data point
 function toDataPoint(v: ScheduleVersion, index: number, total: number): VersionDataPoint {
   const a = v.analysis || {}
   const versionLabel = `v${total - index}` // v1 is oldest, vN is newest
+  const dataDate = v.dataDate || a.dataDate || undefined
+  const effectiveDate = dataDate || v.uploadedAt
   return {
     versionLabel,
     uploadedAt: v.uploadedAt,
+    dataDate,
+    effectiveDate,
     fileName: v.fileName,
     totalActivities: a.totalActivities || 0,
     complete: a.complete || 0,
@@ -101,7 +120,9 @@ function toDataPoint(v: ScheduleVersion, index: number, total: number): VersionD
 
 // Compute changes between two consecutive versions
 function computeChange(older: VersionDataPoint, newer: VersionDataPoint): VersionChange {
-  const days = daysBetween(older.uploadedAt, newer.uploadedAt)
+  // Use effectiveDate (data date when available) so "days between" reflects
+  // the actual schedule progression, not how often the user uploaded.
+  const days = daysBetween(older.effectiveDate, newer.effectiveDate)
   const activitiesAdded = Math.max(0, newer.totalActivities - older.totalActivities)
   const activitiesRemoved = Math.max(0, older.totalActivities - newer.totalActivities)
   const delayDaysChange = newer.delayDays - older.delayDays
@@ -266,9 +287,13 @@ function generateRecommendation(dataPoints: VersionDataPoint[], changes: Version
 export function analyzeProjectTrend(project: Project): TrendAnalysisResult | null {
   if (!project || !project.versions || project.versions.length < 2) return null
 
-  // Sort versions oldest to newest
+  // Sort versions oldest to newest by their EFFECTIVE date (schedule data date
+  // when available, else upload time). This is what makes "v1 → v2 → v3"
+  // represent the schedule's actual chronological progression, regardless of
+  // the order in which the user happened to upload files.
   const sortedVersions = [...project.versions].sort((a, b) =>
-    new Date(a.uploadedAt).getTime() - new Date(b.uploadedAt).getTime()
+    new Date(versionEffectiveDate(a)).getTime() -
+    new Date(versionEffectiveDate(b)).getTime()
   )
 
   const total = sortedVersions.length
@@ -282,7 +307,8 @@ export function analyzeProjectTrend(project: Project): TrendAnalysisResult | nul
 
   const earliest = dataPoints[0]
   const latest = dataPoints[dataPoints.length - 1]
-  const timeSpan = daysBetween(earliest.uploadedAt, latest.uploadedAt)
+  // Time span is now schedule time, not upload time — far more meaningful
+  const timeSpan = daysBetween(earliest.effectiveDate, latest.effectiveDate)
 
   // Determine trend direction
   const delayChange = latest.delayDays - earliest.delayDays
@@ -299,8 +325,12 @@ export function analyzeProjectTrend(project: Project): TrendAnalysisResult | nul
     projectName: project.name,
     projectId: project.projectId,
     versionsAnalyzed: total,
-    firstUpload: earliest.uploadedAt,
-    latestUpload: latest.uploadedAt,
+    // firstUpload / latestUpload now reflect the schedule's date range
+    // (data dates when available, upload times for legacy versions).
+    // The field names are kept for backward compatibility, but they now
+    // represent the meaningful trend window, not the upload sequence.
+    firstUpload: earliest.effectiveDate,
+    latestUpload: latest.effectiveDate,
     timeSpanDays: timeSpan,
     dataPoints,
     changes,

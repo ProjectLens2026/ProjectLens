@@ -147,7 +147,8 @@ export async function POST(req: NextRequest) {
       tableHeader: true,
       children: [
         tableCell('Ver', { bold: true, bg: 'e2e8f0' }),
-        tableCell('Date', { bold: true, bg: 'e2e8f0' }),
+        tableCell('Data Date', { bold: true, bg: 'e2e8f0' }),
+        tableCell('Uploaded', { bold: true, bg: 'e2e8f0' }),
         tableCell('Activities', { bold: true, bg: 'e2e8f0' }),
         tableCell('Complete', { bold: true, bg: 'e2e8f0' }),
         tableCell('Neg Float', { bold: true, bg: 'e2e8f0' }),
@@ -158,10 +159,15 @@ export async function POST(req: NextRequest) {
     }))
 
     trend.dataPoints.forEach(d => {
+      // Data Date: real schedule date when available; mark fallback with parenthetical
+      const dataDateText = d.dataDate
+        ? shortDate(d.dataDate)
+        : `${shortDate(d.uploadedAt)} (from upload)`
       dataRows.push(new TableRow({
         children: [
           tableCell(d.versionLabel, { bold: true }),
-          tableCell(shortDate(d.uploadedAt)),
+          tableCell(dataDateText, { color: d.dataDate ? undefined : COLOR_AMBER }),
+          tableCell(shortDate(d.uploadedAt), { color: COLOR_GREY }),
           tableCell(String(d.totalActivities)),
           tableCell(`${d.completePct}%`),
           tableCell(String(d.negativeFloat), { color: d.negativeFloat > 50 ? COLOR_RED : undefined }),

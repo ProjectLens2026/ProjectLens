@@ -3,6 +3,11 @@
 export interface ScheduleVersion {
   id: string
   uploadedAt: string
+  // Data date — the schedule's actual "as-of" date pulled from the XER's
+  // PROJECT.last_recalc_date field. Optional because versions saved before
+  // this field was introduced will not have it. The trend analyzer falls
+  // back to uploadedAt when dataDate is missing.
+  dataDate?: string
   fileName: string
   analysis: any
   aiNarrative?: string
@@ -81,11 +86,19 @@ export function getActiveProject(): Project | null {
   return projects.find(p => p.id === id) || null
 }
 
-// Get latest version of project (sorted by uploadedAt descending)
+// Resolve a version's effective date for sorting/comparison.
+// Falls back through dataDate (best) → analysis.dataDate (some early versions) → uploadedAt (legacy)
+export function getVersionEffectiveDate(v: ScheduleVersion): string {
+  return v.dataDate || v.analysis?.dataDate || v.uploadedAt
+}
+
+// Get latest version of project (sorted by data date when available, falling
+// back to upload time for older versions that pre-date the data date field).
 export function getLatestVersion(project: Project | null): ScheduleVersion | null {
   if (!project || !project.versions || project.versions.length === 0) return null
   return [...project.versions].sort((a, b) =>
-    new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+    new Date(getVersionEffectiveDate(b)).getTime() -
+    new Date(getVersionEffectiveDate(a)).getTime()
   )[0]
 }
 

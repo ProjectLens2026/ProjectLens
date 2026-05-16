@@ -56,9 +56,6 @@ export interface XERAnalysis {
   noTies: Task[]
   longLeadItems: LongLeadItem[]
   shortLeadItems: LongLeadItem[]
-  submittals?: Task[]
-  changeOrders?: Task[]
-  twoWeekLookahead?: Task[]
   criticalDrivers: Task[]
   ganttActivities: Task[]
   inProgressActivities: Task[]
@@ -66,6 +63,10 @@ export interface XERAnalysis {
   healthScore: number
   condition: string
   delayDays: number
+  // Data date — the actual schedule "as-of" date pulled from the XER's
+  // PROJECT.last_recalc_date field. Used by the trend analyzer to order
+  // versions chronologically by their real schedule date, not by upload time.
+  dataDate?: string
   // Key dates
   projectStartDate?: string
   projectStartSource?: string
@@ -336,86 +337,38 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   const finalMilestone = findMilestoneByKeywords(['FINAL COMPLETION', 'PROJECT COMPLETE', 'TURNOVER', 'CLOSEOUT COMPLETE', 'FINAL ACCEPTANCE'])
   const finalDate = finalMilestone?.early_end_date || finalMilestone?.target_end_date
 
-  // DURATIONS — calendar days between key dates (P6 standard approach)
-  // Activities run in PARALLEL, so summing durations is wrong.
-  // Use date math instead.
-
-  function daysBetween(startStr?: string, endStr?: string): number {
-    if (!startStr || !endStr) return 0
-    try {
-      const start = new Date(startStr.replace(' ', 'T'))
-      const end = new Date(endStr.replace(' ', 'T'))
-      const diff = end.getTime() - start.getTime()
-      return Math.max(0, Math.round(diff / (1000 * 60 * 60 * 24)))
-    } catch { return 0 }
-  }
-
-  // Original Duration = Project Start to Contract End (planned)
-  const originalDurationDays = daysBetween(projectStartDate, parsed.contractEnd)
-
-  // Remaining Duration = Data Date to Projected End (how much is left)
-  const remainingDurationDays = daysBetween(parsed.dataDate, parsed.projectedEnd)
-
-  // Actual Duration so far = Project Start to Data Date (what's been completed)
-  const actualDurationDays = daysBetween(projectStartDate, parsed.dataDate)
-
-  // Duration at Completion = Project Start to Projected End (total expected)
-  const durationAtCompletion = daysBetween(projectStartDate, parsed.projectedEnd)
-
-  // SUBMITTALS — keyword-based detection (review/approval tasks)
-  const SUBMITTAL_KEYWORDS = ['SUBMIT', 'SUBMITTAL', 'SHOP DRAWING', 'REVIEW', 'APPROVE', 'APPROVAL', 'O&M', 'COORDINATION DRAWING']
-  const submittals = taskArr.filter(t => {
-    const upper = (t.task_name || '').toUpperCase()
-    return SUBMITTAL_KEYWORDS.some(k => upper.includes(k)) && t.status_code !== 'TK_Complete'
-  }).sort((a, b) => {
-    const fa = parseFloat(a.total_float_hr_cnt || '0')
-    const fb = parseFloat(b.total_float_hr_cnt || '0')
-    return fa - fb
+  // DURATIONS
+  let originalDurationDays = 0
+  let remainingDurationDays = 0
+  let actualDurationDays = 0
+  taskArr.forEach(t => {
+    const cal = calendars[t.clndr_id]
+    const hoursPerDay = cal ? parseFloat(cal.day_hr_cnt || '8') : 8
+    const targetHr = parseFloat(t.target_drtn_hr_cnt || '0')
+    const remainHr = parseFloat(t.remain_drtn_hr_cnt || '0')
+    // Actual = Target - Remaining (standard P6 calculation)
+    const actualHr = Math.max(0, targetHr - remainHr)
+    originalDurationDays += targetHr / hoursPerDay
+    remainingDurationDays += remainHr / hoursPerDay
+    actualDurationDays += actualHr / hoursPerDay
   })
-
-  // CHANGE ORDERS — keyword-based detection (changes/modifications)
-  const CHANGE_KEYWORDS = ['CHANGE', 'CO-', 'DESIGN CHANGE', 'FIELD CHANGE', 'MODIFICATION', 'AMENDMENT', 'REVISION', 'PO-', 'PURCHASE ORDER']
-  const changeOrders = taskArr.filter(t => {
-    const upper = (t.task_name || '').toUpperCase()
-    const code = (t.task_code || '').toUpperCase()
-    return CHANGE_KEYWORDS.some(k => upper.includes(k) || code.includes(k))
-  }).sort((a, b) => {
-    const sa = a.early_start_date || a.target_start_date || ''
-    const sb = b.early_start_date || b.target_start_date || ''
-    return sa.localeCompare(sb)
-  })
-
-  // 2 WEEK LOOKAHEAD — activities starting OR finishing within 14 days after data date
-  const dataDateObj = parsed.dataDate ? new Date(parsed.dataDate.replace(' ', 'T')) : null
-  const twoWeeksOut = dataDateObj ? new Date(dataDateObj.getTime() + 14 * 24 * 60 * 60 * 1000) : null
-
-  const twoWeekLookahead = (dataDateObj && twoWeeksOut) ? taskArr.filter(t => {
-    if (t.status_code === 'TK_Complete') return false
-    const startStr = t.early_start_date || t.target_start_date
-    const endStr = t.early_end_date || t.target_end_date
-    try {
-      const start = startStr ? new Date(startStr.replace(' ', 'T')) : null
-      const end = endStr ? new Date(endStr.replace(' ', 'T')) : null
-      const startInWindow = start && start >= dataDateObj && start <= twoWeeksOut
-      const endInWindow = end && end >= dataDateObj && end <= twoWeeksOut
-      const ongoing = start && end && start <= dataDateObj && end >= dataDateObj
-      return startInWindow || endInWindow || ongoing
-    } catch { return false }
-  }).sort((a, b) => {
-    const sa = a.early_start_date || a.target_start_date || ''
-    const sb = b.early_start_date || b.target_start_date || ''
-    return sa.localeCompare(sb)
-  }) : []
+  originalDurationDays = Math.round(originalDurationDays)
+  remainingDurationDays = Math.round(remainingDurationDays)
+  actualDurationDays = Math.round(actualDurationDays)
+  const durationAtCompletion = actualDurationDays + remainingDurationDays
 
   return {
     totalActivities: taskArr.length,
     complete, inProgress, notStarted, negativeFloat,
     outOfSequence, noTies,
     longLeadItems, shortLeadItems,
-    submittals, changeOrders, twoWeekLookahead,
     criticalDrivers, ganttActivities, inProgressActivities,
     milestones,
     healthScore, condition, delayDays,
+    // Data date — pulled directly from the XER's PROJECT.last_recalc_date.
+    // This is the schedule's "as-of" date, set by the scheduler in P6.
+    // Different from when the file was uploaded to NobelPM.
+    dataDate: parsed.dataDate,
     // Key dates
     projectStartDate, projectStartSource,
     substantialCompletionDate: substantialDate,

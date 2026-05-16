@@ -335,6 +335,11 @@ export default function UploadPage() {
         const version: ScheduleVersion = {
           id: 'ver_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
           uploadedAt: new Date().toISOString(),
+          // dataDate = the schedule's actual "as-of" date from inside the XER
+          // (PROJECT.last_recalc_date). Falls back to undefined if the parser
+          // couldn't read it from this XER. The trend analyzer uses this for
+          // proper chronological ordering, not upload time.
+          dataDate: data.analysis?.dataDate || undefined,
           fileName: file?.name || 'schedule.xer',
           analysis: data.analysis,
           aiNarrative: data.aiNarrative,

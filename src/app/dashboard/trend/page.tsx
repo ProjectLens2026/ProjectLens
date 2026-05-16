@@ -70,6 +70,20 @@ function shortDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
+// Resolve a version's effective date for display and sorting.
+// Prefers the schedule's actual data date (from inside the XER's
+// PROJECT.last_recalc_date), falling back to upload time for legacy versions
+// stored before the dataDate field was introduced.
+function versionEffectiveDate(v: ScheduleVersion): string {
+  return v.dataDate || v.analysis?.dataDate || v.uploadedAt
+}
+
+// True if this version has a real data date from inside the XER.
+// Used by the UI to distinguish "real schedule date" from "fallback to upload time".
+function hasRealDataDate(v: ScheduleVersion): boolean {
+  return !!(v.dataDate || v.analysis?.dataDate)
+}
+
 export default function TrendAnalysisPage() {
   const [step, setStep] = useState<Step>('select-project')
   const [projects, setProjects] = useState<Project[]>([])
@@ -190,7 +204,10 @@ export default function TrendAnalysisPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {projects.map(p => {
                   const eligible = p.versions.length >= 2
-                  const latest = [...p.versions].sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime())[0]
+                  const latest = [...p.versions].sort((a, b) =>
+                    new Date(versionEffectiveDate(b)).getTime() -
+                    new Date(versionEffectiveDate(a)).getTime()
+                  )[0]
                   const analysis = latest?.analysis
 
                   return (
@@ -228,7 +245,10 @@ export default function TrendAnalysisPage() {
                             <span className="text-[10px] text-slate-500">Health {analysis.healthScore}/100</span>
                           </div>
                           <div className="text-xs text-slate-500 mb-3">
-                            Latest version: {shortDate(latest.uploadedAt)}
+                            Latest data date: {shortDate(versionEffectiveDate(latest))}
+                            {!hasRealDataDate(latest) && (
+                              <span className="text-slate-400 italic"> (from upload)</span>
+                            )}
                           </div>
                         </>
                       ) : (
@@ -256,7 +276,8 @@ export default function TrendAnalysisPage() {
   // ============================================
   if (step === 'select-versions' && selectedProject) {
     const sortedVersions = [...selectedProject.versions].sort((a, b) =>
-      new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+      new Date(versionEffectiveDate(b)).getTime() -
+      new Date(versionEffectiveDate(a)).getTime()
     )
 
     return (
@@ -327,8 +348,18 @@ export default function TrendAnalysisPage() {
                     </div>
                     <div className="font-mono text-xs font-bold text-slate-500 w-12">v{sortedVersions.length - i}</div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-semibold text-slate-800">{shortDate(v.uploadedAt)}</div>
-                      <div className="text-[10px] text-slate-500 truncate">{v.fileName}</div>
+                      <div className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
+                        {shortDate(versionEffectiveDate(v))}
+                        {!hasRealDataDate(v) && (
+                          <span className="text-[9px] font-normal text-amber-600 italic">(upload date)</span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-slate-500 truncate">
+                        {v.fileName}
+                        {hasRealDataDate(v) && (
+                          <span className="text-slate-400"> · uploaded {shortDate(v.uploadedAt)}</span>
+                        )}
+                      </div>
                     </div>
                     {analysis && (
                       <>
@@ -500,7 +531,8 @@ export default function TrendAnalysisPage() {
                   <thead>
                     <tr className="border-b-2 border-slate-200">
                       <th className="text-left py-2 px-2 font-bold text-slate-600">Version</th>
-                      <th className="text-left py-2 px-2 font-bold text-slate-600">Date</th>
+                      <th className="text-left py-2 px-2 font-bold text-slate-600">Data Date</th>
+                      <th className="text-left py-2 px-2 font-bold text-slate-600">Uploaded</th>
                       <th className="text-right py-2 px-2 font-bold text-slate-600">Activities</th>
                       <th className="text-right py-2 px-2 font-bold text-slate-600">Complete</th>
                       <th className="text-right py-2 px-2 font-bold text-slate-600">Neg Float</th>
@@ -513,7 +545,14 @@ export default function TrendAnalysisPage() {
                     {trend.dataPoints.map((d, i) => (
                       <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
                         <td className="py-2 px-2 font-bold text-blue-600">{d.versionLabel}</td>
-                        <td className="py-2 px-2 text-slate-700">{shortDate(d.uploadedAt)}</td>
+                        <td className="py-2 px-2 text-slate-700">
+                          {d.dataDate ? (
+                            shortDate(d.dataDate)
+                          ) : (
+                            <span className="text-amber-600 italic">{shortDate(d.uploadedAt)} <span className="text-[10px]">(from upload)</span></span>
+                          )}
+                        </td>
+                        <td className="py-2 px-2 text-slate-500">{shortDate(d.uploadedAt)}</td>
                         <td className="py-2 px-2 text-right text-slate-700">{d.totalActivities}</td>
                         <td className="py-2 px-2 text-right text-slate-700">{d.completePct}%</td>
                         <td className={`py-2 px-2 text-right font-bold ${d.negativeFloat > 50 ? 'text-red-600' : d.negativeFloat > 0 ? 'text-amber-600' : 'text-green-600'}`}>{d.negativeFloat}</td>
