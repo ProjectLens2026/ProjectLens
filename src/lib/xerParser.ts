@@ -60,6 +60,10 @@ export interface XERAnalysis {
   ganttActivities: Task[]
   inProgressActivities: Task[]
   milestones: Task[]
+  // Two-week lookahead — activities scheduled to start OR finish within 14
+  // calendar days after the schedule's data date. Used by the Schedule Filter
+  // tab on the Full Analysis page. Excludes already-completed activities.
+  twoWeekLookahead?: Task[]
   healthScore: number
   condition: string
   delayDays: number
@@ -286,6 +290,38 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     .filter(t => t.status_code === 'TK_Active')
     .sort((a, b) => parseFloat(a.total_float_hr_cnt || '0') - parseFloat(b.total_float_hr_cnt || '0'))
 
+  // Two-week lookahead — activities scheduled to start or finish within 14
+  // calendar days after the data date. Anchored to the schedule's data date
+  // (PROJECT.last_recalc_date), NOT today's clock. Completed activities are
+  // excluded because they're past, not upcoming. Falls back to target_*
+  // dates when early_* are missing (some XERs only populate one or the other).
+  let twoWeekLookahead: Task[] = []
+  if (parsed.dataDate) {
+    const dataDateObj = new Date(parsed.dataDate.replace(' ', 'T'))
+    if (!isNaN(dataDateObj.getTime())) {
+      const windowEndMs = dataDateObj.getTime() + 14 * 24 * 60 * 60 * 1000
+      const inWindow = (dateStr: string | undefined): boolean => {
+        if (!dateStr) return false
+        const d = new Date(dateStr.replace(' ', 'T'))
+        if (isNaN(d.getTime())) return false
+        const ms = d.getTime()
+        return ms >= dataDateObj.getTime() && ms <= windowEndMs
+      }
+      twoWeekLookahead = taskArr
+        .filter(t => {
+          if (t.status_code === 'TK_Complete') return false
+          const startStr = t.early_start_date || t.target_start_date
+          const endStr = t.early_end_date || t.target_end_date
+          return inWindow(startStr) || inWindow(endStr)
+        })
+        .sort((a, b) => {
+          const aStr = a.early_start_date || a.target_start_date || ''
+          const bStr = b.early_start_date || b.target_start_date || ''
+          return aStr.localeCompare(bStr)
+        })
+    }
+  }
+
   // Delay days
   let delayDays = 0
   if (parsed.contractEnd && parsed.projectedEnd) {
@@ -364,6 +400,7 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     longLeadItems, shortLeadItems,
     criticalDrivers, ganttActivities, inProgressActivities,
     milestones,
+    twoWeekLookahead,
     healthScore, condition, delayDays,
     // Data date — pulled directly from the XER's PROJECT.last_recalc_date.
     // This is the schedule's "as-of" date, set by the scheduler in P6.
