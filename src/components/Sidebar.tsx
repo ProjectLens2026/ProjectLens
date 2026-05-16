@@ -32,11 +32,10 @@ export default function Sidebar({ user }: SidebarProps) {
   async function handleSignOut() {
     const supabase = createClient()
     await supabase.auth.signOut()
-    // Clear any local project data so the next user on this browser starts clean.
-    // Phase 3 (data migration to Supabase) will make this unnecessary.
-    Object.keys(localStorage).forEach(key => {
-      if (key.startsWith('pl_')) localStorage.removeItem(key)
-    })
+    // NOTE: localStorage project data intentionally NOT cleared here.
+    // Until Phase 3 moves data to Supabase tables, clearing localStorage on
+    // sign-out would force users to re-upload every XER after each session.
+    // For now, projects persist in the browser between sign-outs.
     router.push('/login')
   }
 
