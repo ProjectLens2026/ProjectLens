@@ -99,8 +99,8 @@ export async function POST(req: NextRequest) {
           children: [new ImageRun({
             data: buffer,
             // Word doc page width ~6in usable. 540x270pt keeps generous margin.
+            // docx 8.x autodetects image type from the buffer (no `type` field).
             transformation: { width: 540, height: 297 },
-            type: 'png',
           })],
         })
       } catch (err) {
