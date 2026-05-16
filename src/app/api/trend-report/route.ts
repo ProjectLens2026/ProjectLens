@@ -87,7 +87,9 @@ export async function POST(req: NextRequest) {
     // Helper: build a centered image paragraph for a chart PNG.
     // base64Png is the data part only (no "data:image/png;base64," prefix).
     // Returns null when the input is empty/missing so we can skip cleanly.
-    function chartImageParagraph(base64Png: string | undefined): Paragraph | null {
+    // Defined as a const arrow function (not `function`) so it's a valid
+    // expression inside the POST handler under ES5 strict mode.
+    const chartImageParagraph = (base64Png: string | undefined): Paragraph | null => {
       if (!base64Png) return null
       try {
         const buffer = Buffer.from(base64Png, 'base64')
