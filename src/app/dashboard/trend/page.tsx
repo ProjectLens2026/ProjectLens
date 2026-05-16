@@ -7,11 +7,15 @@ import { analyzeProjectTrend, TrendAnalysisResult, VersionDataPoint } from '@/li
 type Step = 'select-project' | 'select-versions' | 'results'
 
 // Simple SVG line chart
-function MiniLineChart({ data, label, color, suffix = '' }: {
+function MiniLineChart({ data, label, color, suffix = '', chartId }: {
   data: { x: string; y: number }[]
   label: string
   color: string
   suffix?: string
+  // Optional DOM id placed on the inner <svg>. Used by the Word-report
+  // download flow to find the chart and rasterize it to a PNG before
+  // sending to the server.
+  chartId?: string
 }) {
   if (!data || data.length < 2) return null
   const values = data.map(d => d.y)
@@ -40,7 +44,7 @@ function MiniLineChart({ data, label, color, suffix = '' }: {
           {trend === 'up' ? '↗' : trend === 'down' ? '↘' : '→'} {first}{suffix} → {last}{suffix}
         </div>
       </div>
-      <svg viewBox={`0 0 ${width} ${height + 10}`} className="w-full" preserveAspectRatio="none" style={{ height: 80 }}>
+      <svg id={chartId} viewBox={`0 0 ${width} ${height + 10}`} className="w-full" preserveAspectRatio="none" style={{ height: 80 }}>
         <line x1={0} y1={height / 2} x2={width} y2={height / 2} stroke="#e2e8f0" strokeDasharray="2,2" strokeWidth="0.3" />
         <path d={pathD} fill="none" stroke={color} strokeWidth="1.5" />
         {points.map((p, i) => (
@@ -138,14 +142,132 @@ export default function TrendAnalysisPage() {
     setStep('select-versions')
   }
 
+  // ============================================================================
+  // CHART CAPTURE FOR WORD REPORT
+  // ============================================================================
+  // The trend page renders inline SVG charts via MiniLineChart. The Word doc
+  // can't consume SVG directly, so we rasterize each chart to a PNG (drawn
+  // onto a canvas with version labels added at the bottom), then send the
+  // base64 PNGs to the server-side route which embeds them as images.
+  // ============================================================================
+
+  /**
+   * Rasterize one chart SVG to a base64 PNG.
+   * Returns null if the SVG isn't in the DOM or rendering fails.
+   */
+  async function captureChartAsPng(
+    svgId: string,
+    versionLabels: string[],
+  ): Promise<string | null> {
+    if (typeof document === 'undefined') return null
+    const svg = document.getElementById(svgId) as SVGSVGElement | null
+    if (!svg) return null
+
+    // Target output dimensions — wide enough for a clean Word doc embed.
+    // Aspect roughly matches the on-screen chart's viewBox.
+    const chartWidth = 720
+    const chartHeight = 360
+    const labelStripHeight = 36  // space below for version labels
+    const totalHeight = chartHeight + labelStripHeight
+
+    // Clone the SVG so our changes don't affect the live DOM
+    const clone = svg.cloneNode(true) as SVGSVGElement
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+    clone.setAttribute('width', String(chartWidth))
+    clone.setAttribute('height', String(chartHeight))
+    // Force a font on all text so canvas rendering is consistent.
+    // Inline a <style> block — safer than relying on document CSS.
+    const style = document.createElementNS('http://www.w3.org/2000/svg', 'style')
+    style.textContent = 'text { font-family: Arial, Helvetica, sans-serif; }'
+    clone.insertBefore(style, clone.firstChild)
+
+    const svgString = new XMLSerializer().serializeToString(clone)
+    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' })
+    const url = URL.createObjectURL(svgBlob)
+
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const i = new Image()
+        i.onload = () => resolve(i)
+        i.onerror = () => reject(new Error('SVG image load failed'))
+        i.src = url
+      })
+
+      const canvas = document.createElement('canvas')
+      canvas.width = chartWidth
+      canvas.height = totalHeight
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return null
+
+      // White background — embedded images on transparent look bad in Word
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, chartWidth, totalHeight)
+      ctx.drawImage(img, 0, 0, chartWidth, chartHeight)
+
+      // Draw version labels along the bottom strip
+      ctx.fillStyle = '#475569'
+      ctx.font = '14px Arial, Helvetica, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      const labelY = chartHeight + labelStripHeight / 2
+      versionLabels.forEach((label, i) => {
+        const rawX = versionLabels.length === 1
+          ? chartWidth / 2
+          : (i / (versionLabels.length - 1)) * chartWidth
+        // Keep edge labels visible (don't push half off-canvas)
+        const x = Math.max(20, Math.min(chartWidth - 20, rawX))
+        ctx.fillText(label, x, labelY)
+      })
+
+      // canvas.toDataURL throws SecurityError if tainted, but our SVG is
+      // same-origin so it should always work.
+      const dataUrl = canvas.toDataURL('image/png')
+      return dataUrl.split(',')[1] || null
+    } catch {
+      return null
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+  }
+
+  /**
+   * Capture all 4 trend charts in parallel. Returns an object mapping each
+   * metric key to its base64 PNG (or undefined if capture failed).
+   */
+  async function captureAllCharts(): Promise<{
+    delayDays?: string
+    negativeFloat?: string
+    healthScore?: string
+    completePct?: string
+  }> {
+    if (!trend) return {}
+    const labels = trend.dataPoints.map(d => d.versionLabel)
+    const [delayDays, negativeFloat, healthScore, completePct] = await Promise.all([
+      captureChartAsPng('chart-delayDays', labels),
+      captureChartAsPng('chart-negativeFloat', labels),
+      captureChartAsPng('chart-healthScore', labels),
+      captureChartAsPng('chart-completePct', labels),
+    ])
+    return {
+      delayDays: delayDays || undefined,
+      negativeFloat: negativeFloat || undefined,
+      healthScore: healthScore || undefined,
+      completePct: completePct || undefined,
+    }
+  }
+
   async function downloadWordReport() {
     if (!trend) return
     setDownloading(true)
     try {
+      // Rasterize the 4 trend charts to PNGs before calling the API.
+      // The route uses these to embed real images in the Word doc.
+      const charts = await captureAllCharts()
+
       const res = await fetch('/api/trend-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trend }),
+        body: JSON.stringify({ trend, charts }),
       })
       if (!res.ok) throw new Error('Download failed')
       const blob = await res.blob()
@@ -518,10 +640,10 @@ export default function TrendAnalysisPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <MiniLineChart data={chartData('delayDays')} label="Days Behind Contract" color="#dc2626" suffix="d" />
-              <MiniLineChart data={chartData('negativeFloat')} label="Negative Float Activities" color="#dc2626" />
-              <MiniLineChart data={chartData('healthScore')} label="Health Score" color="#2563eb" />
-              <MiniLineChart data={chartData('completePct')} label="Work Complete %" color="#16a34a" suffix="%" />
+              <MiniLineChart data={chartData('delayDays')} label="Days Behind Contract" color="#dc2626" suffix="d" chartId="chart-delayDays" />
+              <MiniLineChart data={chartData('negativeFloat')} label="Negative Float Activities" color="#dc2626" chartId="chart-negativeFloat" />
+              <MiniLineChart data={chartData('healthScore')} label="Health Score" color="#2563eb" chartId="chart-healthScore" />
+              <MiniLineChart data={chartData('completePct')} label="Work Complete %" color="#16a34a" suffix="%" chartId="chart-completePct" />
             </div>
 
             <div className="bg-white border border-slate-200 rounded-xl p-5">

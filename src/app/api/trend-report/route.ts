@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
   Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType,
-  Table, TableRow, TableCell, WidthType, ShadingType, PageBreak
+  Table, TableRow, TableCell, WidthType, ShadingType, PageBreak, ImageRun
 } from 'docx'
 import type { TrendAnalysisResult } from '@/lib/trendAnalyzer'
+
+// Charts come from the client as base64-encoded PNGs. Keys match the
+// VersionDataPoint metric fields. Any may be absent if client-side capture
+// failed for that chart — the report degrades gracefully in that case.
+interface TrendChartImages {
+  delayDays?: string
+  negativeFloat?: string
+  healthScore?: string
+  completePct?: string
+}
 
 const COLOR_PRIMARY = '1e3a8a'
 const COLOR_RED = 'b91c1c'
@@ -63,13 +73,40 @@ function tableCell(text: string, opts: { bold?: boolean; color?: string; bg?: st
 
 export async function POST(req: NextRequest) {
   try {
-    const { trend } = await req.json() as { trend: TrendAnalysisResult }
+    const { trend, charts } = await req.json() as {
+      trend: TrendAnalysisResult
+      charts?: TrendChartImages
+    }
 
     if (!trend) {
       return NextResponse.json({ error: 'No trend data provided' }, { status: 400 })
     }
 
     const children: (Paragraph | Table)[] = []
+
+    // Helper: build a centered image paragraph for a chart PNG.
+    // base64Png is the data part only (no "data:image/png;base64," prefix).
+    // Returns null when the input is empty/missing so we can skip cleanly.
+    function chartImageParagraph(base64Png: string | undefined): Paragraph | null {
+      if (!base64Png) return null
+      try {
+        const buffer = Buffer.from(base64Png, 'base64')
+        return new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 120, after: 240 },
+          children: [new ImageRun({
+            data: buffer,
+            // Word doc page width ~6in usable. 540x270pt keeps generous margin.
+            transformation: { width: 540, height: 297 },
+            type: 'png',
+          })],
+        })
+      } catch (err) {
+        console.error('Chart image embed failed:', err)
+        return null
+      }
+    }
+
 
     // COVER PAGE
     children.push(new Paragraph({
@@ -138,6 +175,30 @@ export async function POST(req: NextRequest) {
     children.push(bullet(`Health score change: ${trend.summary.overallHealthChange > 0 ? '+' : ''}${trend.summary.overallHealthChange} points`))
     children.push(bullet(`Completion change: ${trend.summary.overallCompletionChange > 0 ? '+' : ''}${trend.summary.overallCompletionChange}%`))
     children.push(bullet(`Average monthly delay growth: ${trend.summary.averageMonthlyDelayGrowth > 0 ? '+' : ''}${trend.summary.averageMonthlyDelayGrowth} days/month`))
+
+    // TREND CHARTS — embedded images captured client-side from the trend page.
+    // Each chart is preceded by its own H2 heading so the report reads as a
+    // structured visual progression. If a particular chart failed to capture
+    // (charts object missing or that key absent), it's silently skipped.
+    const chartSpecs: { key: keyof TrendChartImages; title: string }[] = [
+      { key: 'delayDays',      title: 'Days Behind Contract' },
+      { key: 'negativeFloat',  title: 'Negative Float Activities' },
+      { key: 'healthScore',    title: 'Health Score' },
+      { key: 'completePct',    title: 'Work Complete %' },
+    ]
+
+    const embeddedCharts = chartSpecs
+      .map(spec => ({ spec, img: chartImageParagraph(charts?.[spec.key]) }))
+      .filter(c => c.img !== null)
+
+    if (embeddedCharts.length > 0) {
+      children.push(new Paragraph({ children: [new PageBreak()] }))
+      children.push(heading('Trend Charts'))
+      embeddedCharts.forEach(({ spec, img }) => {
+        children.push(heading(spec.title, HeadingLevel.HEADING_2))
+        children.push(img as Paragraph)
+      })
+    }
 
     // VERSION DATA TABLE
     children.push(heading('Version-by-Version Data', HeadingLevel.HEADING_2))
