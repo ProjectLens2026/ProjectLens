@@ -6,7 +6,7 @@ import {
   loadProjects, deleteProject, renameProject, deleteVersion,
   moveVersionToProject,
   setActiveProjectId, setActiveVersionId, getLatestVersion,
-  migrateLegacyData, Project
+  migrateLegacyData, Project, ScheduleVersion
 } from '@/lib/projectStore'
 
 export default function ProjectsPage() {
@@ -76,6 +76,20 @@ export default function ProjectsPage() {
     try {
       return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     } catch { return d.slice(0, 10) }
+  }
+
+  // Resolve a version's effective date for display and sorting.
+  // Prefers the schedule's actual data date (XER PROJECT.last_recalc_date),
+  // falling back to upload time for legacy versions saved before the
+  // dataDate field was introduced.
+  function versionEffectiveDate(v: ScheduleVersion): string {
+    return v.dataDate || v.analysis?.dataDate || v.uploadedAt
+  }
+
+  // True when the version carries a real schedule data date.
+  // Used to mark fallback dates (upload time used as substitute) in the UI.
+  function hasRealDataDate(v: ScheduleVersion): boolean {
+    return !!(v.dataDate || v.analysis?.dataDate)
   }
 
   function conditionStyle(condition?: string) {
@@ -232,7 +246,12 @@ export default function ProjectsPage() {
                     {/* Version list */}
                     {isExpanded && (
                       <div className="space-y-1 mb-3 bg-slate-50 rounded-lg p-2 max-h-64 overflow-y-auto">
-                        {p.versions.map((v, i) => {
+                        {[...p.versions]
+                          .sort((a, b) =>
+                            new Date(versionEffectiveDate(b)).getTime() -
+                            new Date(versionEffectiveDate(a)).getTime()
+                          )
+                          .map((v, i, sortedVersions) => {
                           const isDeletingVer = confirmDeleteVersion === v.id
                           const isMovingVer = confirmMoveTarget?.versionId === v.id
                           const targetProj = isMovingVer ? projects.find(pr => pr.id === confirmMoveTarget?.targetId) : null
@@ -243,7 +262,8 @@ export default function ProjectsPage() {
                               <div key={v.id} className="bg-red-50 border border-red-300 rounded-lg p-2">
                                 <div className="text-[10px] text-red-900 font-bold mb-1">Delete this version?</div>
                                 <div className="text-[9px] text-red-700 mb-2 truncate" title={v.fileName}>
-                                  {v.fileName || 'untitled.xer'} · {shortDate(v.uploadedAt)}
+                                  {v.fileName || 'untitled.xer'} · {shortDate(versionEffectiveDate(v))}
+                                  {!hasRealDataDate(v) && <span className="italic"> (from upload)</span>}
                                 </div>
                                 <div className="text-[9px] text-red-700 mb-2">This will permanently remove the version and its analysis. This cannot be undone.</div>
                                 <div className="flex gap-2">
@@ -281,10 +301,22 @@ export default function ProjectsPage() {
 
                           return (
                             <div key={v.id} className="flex items-center gap-2 text-[10px] py-1 px-2 hover:bg-white rounded relative">
-                              <span className="font-mono text-slate-400 flex-shrink-0">v{p.versions.length - i}</span>
+                              <span className="font-mono text-slate-400 flex-shrink-0">v{sortedVersions.length - i}</span>
                               <div className="flex-1 min-w-0">
                                 <div className="font-semibold text-slate-700 truncate">{v.fileName || 'untitled.xer'}</div>
-                                <div className="text-slate-400 text-[9px]">{shortDate(v.uploadedAt)}</div>
+                                <div className="text-[9px] flex items-center gap-1 flex-wrap">
+                                  {hasRealDataDate(v) ? (
+                                    <>
+                                      <span className="text-slate-600 font-medium">{shortDate(versionEffectiveDate(v))}</span>
+                                      <span className="text-slate-300">·</span>
+                                      <span className="text-slate-400">uploaded {shortDate(v.uploadedAt)}</span>
+                                    </>
+                                  ) : (
+                                    <span className="text-amber-600 italic">
+                                      {shortDate(v.uploadedAt)} (from upload)
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                               <span className="text-slate-500 flex-shrink-0">{v.analysis?.totalActivities || 0} acts</span>
                               {v.analysis?.condition && (
