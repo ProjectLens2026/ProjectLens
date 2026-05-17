@@ -373,25 +373,37 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   const finalMilestone = findMilestoneByKeywords(['FINAL COMPLETION', 'PROJECT COMPLETE', 'TURNOVER', 'CLOSEOUT COMPLETE', 'FINAL ACCEPTANCE'])
   const finalDate = finalMilestone?.early_end_date || finalMilestone?.target_end_date
 
-  // DURATIONS
-  let originalDurationDays = 0
-  let remainingDurationDays = 0
-  let actualDurationDays = 0
-  taskArr.forEach(t => {
-    const cal = calendars[t.clndr_id]
-    const hoursPerDay = cal ? parseFloat(cal.day_hr_cnt || '8') : 8
-    const targetHr = parseFloat(t.target_drtn_hr_cnt || '0')
-    const remainHr = parseFloat(t.remain_drtn_hr_cnt || '0')
-    // Actual = Target - Remaining (standard P6 calculation)
-    const actualHr = Math.max(0, targetHr - remainHr)
-    originalDurationDays += targetHr / hoursPerDay
-    remainingDurationDays += remainHr / hoursPerDay
-    actualDurationDays += actualHr / hoursPerDay
-  })
-  originalDurationDays = Math.round(originalDurationDays)
-  remainingDurationDays = Math.round(remainingDurationDays)
-  actualDurationDays = Math.round(actualDurationDays)
-  const durationAtCompletion = actualDurationDays + remainingDurationDays
+  // DURATIONS — project-level, calculated from plan / forecast dates
+  //
+  // Previously summed each activity's individual duration in hours then
+  // divided by hours-per-day. That gives total person/crew-days of workload
+  // across all activities (e.g. 6,580 days for ~550 activities), which is a
+  // different concept from how long the project is. Users see "Original
+  // Duration" on the dashboard and expect contract length — the time from
+  // project start to project end — not aggregate activity workload.
+  //
+  // We now use project-level dates:
+  //   Original Duration   = plan start  → plan end       (contract length)
+  //   Actual Duration     = plan start  → data date      (time elapsed)
+  //   Remaining Duration  = data date   → forecast end   (time left)
+  //   Duration at Compl.  = plan start  → forecast end   (total when done)
+  const calcCalendarDays = (start: string | undefined, end: string | undefined): number => {
+    if (!start || !end) return 0
+    const s = new Date(start.replace(' ', 'T'))
+    const e = new Date(end.replace(' ', 'T'))
+    if (isNaN(s.getTime()) || isNaN(e.getTime())) return 0
+    return Math.max(0, Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)))
+  }
+
+  const planStart = projectStartDate
+  const planEnd = parsed.contractEnd
+  const forecastEnd = parsed.projectedEnd || parsed.contractEnd
+  const dataDateStr = parsed.dataDate
+
+  const originalDurationDays = calcCalendarDays(planStart, planEnd)
+  const actualDurationDays = calcCalendarDays(planStart, dataDateStr)
+  const remainingDurationDays = calcCalendarDays(dataDateStr, forecastEnd)
+  const durationAtCompletion = calcCalendarDays(planStart, forecastEnd)
 
   return {
     totalActivities: taskArr.length,
