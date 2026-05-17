@@ -12,6 +12,13 @@ interface Risk {
   recommendation: string
   affectedActivities?: any[]
   actionItems: string[]
+  // For Construction Sequence Problems risks, this carries the FULL list of
+  // affected activities (each entry has .task, .predecessors[], .violations[]).
+  // Renders as a scrollable inline table inside the expanded risk so the PM
+  // can review all 44 (or however many) activities without leaving the Risks
+  // page. Each row shows the activity ID + name + primary violation reason
+  // (predecessor task code + relationship type + variance in days).
+  sequenceProblems?: any[]
 }
 export default function RisksPage() {
   const [project, setProject] = useState<any>(null)
@@ -136,6 +143,10 @@ export default function RisksPage() {
           'Correct schedule logic in P6 where gaps are real',
           'Coordinate with field super to enforce sequence going forward',
         ],
+        // Full list of affected activities for inline display below the
+        // recommendation. Each entry includes .task, .predecessors[],
+        // .violations[] so the UI can show ID + name + violation reason.
+        sequenceProblems: a.outOfSequence,
       })
     } else if (a.outOfSequence?.length > 5) {
       risks.push({
@@ -152,6 +163,7 @@ export default function RisksPage() {
           'Document acceleration efforts as TIA evidence',
           'Fix true logic errors in the schedule',
         ],
+        sequenceProblems: a.outOfSequence,
       })
     }
     // No logic ties
@@ -365,6 +377,66 @@ export default function RisksPage() {
                                 </div>
                               )
                             })}
+                          </div>
+                        </div>
+                      )}
+                      {/* CONSTRUCTION SEQUENCE PROBLEMS — full activity list
+                          Shown only on the Construction Sequence Problems risks
+                          (oos-severe / oos). For each affected activity, shows
+                          the activity ID, name, and a one-line summary of the
+                          violation reason (predecessor task + relationship
+                          type + how many days early). Scrollable so 40+ rows
+                          don't blow up the page. Click "Open Full Analysis >
+                          Sequence Problems" for the deeper per-violation
+                          evidence with dates and explanations. */}
+                      {risk.sequenceProblems && risk.sequenceProblems.length > 0 && (
+                        <div className="mt-4">
+                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                            All Affected Activities ({risk.sequenceProblems.length})
+                          </div>
+                          <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+                            <div className="bg-slate-50 border-b-2 border-slate-200 px-3 py-2 grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-600 uppercase tracking-wider">
+                              <div className="col-span-2">Activity ID</div>
+                              <div className="col-span-4">Activity Name</div>
+                              <div className="col-span-2">Predecessor</div>
+                              <div className="col-span-1 text-center">Rel</div>
+                              <div className="col-span-2 text-right">Variance</div>
+                              <div className="col-span-1 text-center">Violations</div>
+                            </div>
+                            <div className="max-h-[420px] overflow-y-auto">
+                              {risk.sequenceProblems.map((o: any, i: number) => {
+                                // Use the primary (first / worst) violation for the
+                                // headline row. The full per-violation evidence with
+                                // dates lives on Lens > Sequence Problems for the
+                                // deeper drill-down. Here we just want each PM-readable
+                                // row to identify the activity and the reason.
+                                const primary = (o.violations && o.violations[0]) || null
+                                const predCode = primary?.pred?.task_code || o.pred?.task_code || '—'
+                                const predName = primary?.pred?.task_name || o.pred?.task_name || ''
+                                const relLabel = primary?.relTypeLabel || (o.relType?.replace(/^PR_/, '')) || '—'
+                                const variance = primary?.varianceDays
+                                const violationCount = (o.violations?.length || o.predecessors?.length || 1)
+                                return (
+                                  <div key={i} className={`grid grid-cols-12 gap-2 px-3 py-2 text-xs border-b border-slate-100 last:border-0 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
+                                    <div className="col-span-2 font-mono font-bold text-slate-900 truncate">{o.task.task_code}</div>
+                                    <div className="col-span-4 text-slate-700 truncate" title={o.task.task_name}>{o.task.task_name}</div>
+                                    <div className="col-span-2 font-mono text-slate-600 truncate" title={predName}>{predCode}</div>
+                                    <div className="col-span-1 text-center">
+                                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">{relLabel}</span>
+                                    </div>
+                                    <div className="col-span-2 text-right font-bold text-red-600">
+                                      {variance !== undefined ? `${variance}d early` : '—'}
+                                    </div>
+                                    <div className="col-span-1 text-center text-slate-500">
+                                      {violationCount}
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                          <div className="mt-2 text-[10px] text-slate-500 italic">
+                            One row per affected activity. The "Predecessor" column shows the first violating predecessor; activities with multiple violated relationships are noted in the "Violations" count. Full per-relationship evidence (dates, lag, plain-language explanation) is on Full Analysis &rarr; Sequence Problems.
                           </div>
                         </div>
                       )}
