@@ -1,22 +1,4 @@
-// Project storage layer — IndexedDB-backed.
-//
-// PREVIOUS: localStorage only. Hit a 5 MB hard cap that fails on XER files
-// with 2,000+ activities (parsed analysis alone can exceed 5 MB even for
-// a single project with no other data stored).
-//
-// NOW: IndexedDB is the source of truth. Practical limits are typically
-// gigabytes per origin instead of 5 MB. Even DGS-scale projects (3,000+
-// activities, multiple versions, multi-year history) fit comfortably.
-//
-// The PUBLIC API of this file is still synchronous (loadProjects, etc.)
-// so existing pages do not need to be rewritten. Internally we keep a
-// memory cache that's hydrated from IndexedDB once on app load. Writes
-// update the memory cache synchronously and persist to IndexedDB in the
-// background.
-//
-// A subscription mechanism lets pages that mount BEFORE hydration finishes
-// re-render once the cache is populated.
-
+// Project storage layer — uses localStorage. Will migrate to Supabase later.
 export interface ScheduleVersion {
   id: string
   uploadedAt: string
@@ -30,7 +12,7 @@ export interface ScheduleVersion {
   aiNarrative?: string
   context?: any
   versionLabel?: string  // e.g. "May 2026 Update"
-  rawXER?: string  // Raw XER text — used for TIA comparison from saved version
+  rawXER?: string  // Raw XER text content — used for TIA comparison from saved version
 }
 export interface Project {
   id: string
@@ -46,172 +28,121 @@ export interface Project {
   changeOrders: any[]
 }
 
-// Result returned by saveProjects so the caller can show a real error to
-// the user if the persist failed. With IndexedDB this is rare — only
-// happens if the user's disk is genuinely full or they're in private
-// browsing on a browser that disables IndexedDB.
+// Result returned by saveProjects() so callers know whether the save
+// actually persisted or whether the user needs to see an error message.
+// Previously saveProjects() returned void and swallowed errors silently,
+// which masked localStorage quota failures — the symptom we saw with
+// 1,040-activity XERs (analysis displayed correctly on-screen but the
+// project never appeared in the projects list because the underlying
+// save threw QuotaExceededError and was discarded).
 export interface SaveResult {
   ok: boolean
   error?: string
+  pruned?: boolean  // true if older versions' rawXER was dropped to fit
 }
 
-// localStorage keys — small metadata only (no analysis data)
-const LEGACY_PROJECTS_KEY = 'pl_projects'  // checked once for migration, then cleared
+const PROJECTS_KEY = 'pl_projects'
 const ACTIVE_PROJECT_KEY = 'pl_active_project_id'
 const ACTIVE_VERSION_KEY = 'pl_active_version_id'
-
-// IndexedDB names
-const DB_NAME = 'nobelpm'
-const DB_VERSION = 1
-const PROJECTS_STORE = 'projects'
-
-// ----- Module-level state (singleton in browser) -----
-
-let _projects: Project[] = []
-let _hydrated = false
-let _hydrationPromise: Promise<void> | null = null
-let _dbPromise: Promise<IDBDatabase> | null = null
-type Listener = () => void
-const _listeners: Set<Listener> = new Set()
-
-// ----- IndexedDB helpers -----
-
-function openDB(): Promise<IDBDatabase> {
-  if (_dbPromise) return _dbPromise
-  _dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-    if (typeof indexedDB === 'undefined') {
-      reject(new Error('IndexedDB not available in this browser'))
-      return
-    }
-    const req = indexedDB.open(DB_NAME, DB_VERSION)
-    req.onerror = () => reject(req.error || new Error('Failed to open IndexedDB'))
-    req.onsuccess = () => resolve(req.result)
-    req.onupgradeneeded = () => {
-      const db = req.result
-      if (!db.objectStoreNames.contains(PROJECTS_STORE)) {
-        db.createObjectStore(PROJECTS_STORE, { keyPath: 'id' })
-      }
-    }
-  })
-  return _dbPromise
-}
-
-async function idbGetAllProjects(): Promise<Project[]> {
-  const db = await openDB()
-  return new Promise<Project[]>((resolve, reject) => {
-    const tx = db.transaction(PROJECTS_STORE, 'readonly')
-    const store = tx.objectStore(PROJECTS_STORE)
-    const req = store.getAll()
-    req.onsuccess = () => resolve((req.result as Project[]) || [])
-    req.onerror = () => reject(req.error || new Error('idbGetAll failed'))
-  })
-}
-
-async function idbPutProject(project: Project): Promise<void> {
-  const db = await openDB()
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(PROJECTS_STORE, 'readwrite')
-    const store = tx.objectStore(PROJECTS_STORE)
-    const req = store.put(project)
-    req.onsuccess = () => resolve()
-    req.onerror = () => reject(req.error || new Error('idbPut failed'))
-  })
-}
-
-async function idbDeleteProject(id: string): Promise<void> {
-  const db = await openDB()
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(PROJECTS_STORE, 'readwrite')
-    const store = tx.objectStore(PROJECTS_STORE)
-    const req = store.delete(id)
-    req.onsuccess = () => resolve()
-    req.onerror = () => reject(req.error || new Error('idbDelete failed'))
-  })
-}
-
-// ----- Hydration (one-time on app load) -----
-
-async function hydrate(): Promise<void> {
-  if (_hydrated) return
-  try {
-    let projects: Project[] = []
-    try {
-      projects = await idbGetAllProjects()
-    } catch (err) {
-      console.error('[NobelPM] IndexedDB read failed during hydration:', err)
-    }
-
-    // One-time migration from old localStorage-based storage.
-    if (projects.length === 0 && typeof localStorage !== 'undefined') {
-      try {
-        const legacy = localStorage.getItem(LEGACY_PROJECTS_KEY)
-        if (legacy) {
-          const parsed = JSON.parse(legacy)
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            console.log('[NobelPM] Migrating', parsed.length, 'project(s) from localStorage to IndexedDB')
-            for (const p of parsed) {
-              try { await idbPutProject(p) } catch (e) {
-                console.error('[NobelPM] Migration: failed to write project', p?.id, e)
-              }
-            }
-            projects = await idbGetAllProjects()
-            try { localStorage.removeItem(LEGACY_PROJECTS_KEY) } catch {}
-          }
-        }
-      } catch (err) {
-        console.error('[NobelPM] Migration check failed (non-fatal):', err)
-      }
-    }
-
-    // Sort newest-first so the in-memory order matches what users see in
-    // the sidebar (most recently updated at top).
-    projects.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
-
-    _projects = projects
-    _hydrated = true
-    notifyListeners()
-  } catch (err) {
-    console.error('[NobelPM] Hydration failed:', err)
-    _hydrated = true
-    notifyListeners()
-  }
-}
-
-// Kick off hydration as soon as this module is imported in the browser.
-if (typeof window !== 'undefined') {
-  _hydrationPromise = hydrate()
-}
-
-// ----- Subscription API -----
-
-function notifyListeners() {
-  _listeners.forEach(fn => { try { fn() } catch (err) { console.error(err) } })
-}
-
-// Subscribe to project list updates. Fires on hydration complete and on
-// every save/delete/update. Returns an unsubscribe function.
-export function subscribeToProjects(listener: Listener): () => void {
-  _listeners.add(listener)
-  return () => { _listeners.delete(listener) }
-}
-
-export function whenHydrated(): Promise<void> {
-  return _hydrationPromise || Promise.resolve()
-}
-
-export function isHydrated(): boolean {
-  return _hydrated
-}
-
-// ----- Sync read API (returns memory cache) -----
+const LEGACY_ANALYSIS_KEY = 'pl_last_analysis'
+const LEGACY_RFIS_KEY = 'pl_rfis'
 
 export function loadProjects(): Project[] {
-  return _projects
+  if (typeof window === 'undefined') return []
+  try {
+    const stored = localStorage.getItem(PROJECTS_KEY)
+    if (stored) return JSON.parse(stored)
+  } catch {}
+  return []
 }
 
 // Resolve a version's effective date for sorting/comparison.
+// Falls back through dataDate (best) → analysis.dataDate (some early versions) → uploadedAt (legacy)
 export function getVersionEffectiveDate(v: ScheduleVersion): string {
   return v.dataDate || v.analysis?.dataDate || v.uploadedAt
+}
+
+// Strip `rawXER` from all but the LATEST version of each project.
+//
+// rawXER is the full XER file content as text — typically 500 KB to a
+// few MB per file. It's only used for TIA comparison, which always
+// compares the latest two versions. Older versions don't need it, so
+// when localStorage is under pressure we drop it from anything that's
+// not the most recent. Returns a fresh project array (does not mutate).
+function pruneRawXERFromOlderVersions(projects: Project[]): Project[] {
+  return projects.map(p => {
+    if (!p.versions || p.versions.length === 0) return p
+
+    // Find the LATEST version by effective date (data date when available,
+    // upload time as fallback). Only this version keeps rawXER.
+    const sorted = [...p.versions].sort((a, b) =>
+      new Date(getVersionEffectiveDate(b)).getTime() -
+      new Date(getVersionEffectiveDate(a)).getTime()
+    )
+    const latestId = sorted[0].id
+
+    const cleanedVersions = p.versions.map(v => {
+      if (v.id === latestId) return v        // keep rawXER on latest
+      if (!v.rawXER) return v                // already pruned, nothing to do
+      // Strip rawXER but keep everything else (parsed analysis stays intact)
+      const { rawXER, ...rest } = v
+      return rest as ScheduleVersion
+    })
+
+    return { ...p, versions: cleanedVersions }
+  })
+}
+
+// Save projects to localStorage with quota-aware retry.
+//
+// If the first attempt throws QuotaExceededError, we prune `rawXER` from
+// all older versions (only the latest version of each project keeps it)
+// and retry. If it still fails, returns ok:false with a user-readable
+// error message so the upload page can show an alert.
+//
+// On success, mutates the input array if pruning happened, so the in-memory
+// project list matches what was persisted.
+export function saveProjects(projects: Project[]): SaveResult {
+  if (typeof window === 'undefined') return { ok: false, error: 'No window' }
+
+  // First attempt — try the save as-is.
+  try {
+    localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects))
+    return { ok: true }
+  } catch (err: any) {
+    // Detect quota errors across browser quirks. Firefox uses code 1014,
+    // Chrome/Safari use code 22, all use DOMException name "QuotaExceededError".
+    const isQuota =
+      err?.name === 'QuotaExceededError' ||
+      err?.code === 22 ||
+      err?.code === 1014 ||
+      /quota/i.test(err?.message || '')
+
+    if (!isQuota) {
+      // Not a quota error — log and surface the message.
+      console.error('[NobelPM] Failed to save projects:', err)
+      return { ok: false, error: err?.message || 'Save failed' }
+    }
+
+    // Quota exceeded — try pruning rawXER from older versions and retry.
+    console.warn('[NobelPM] localStorage quota exceeded. Pruning rawXER from older versions and retrying...')
+    const pruned = pruneRawXERFromOlderVersions(projects)
+    try {
+      localStorage.setItem(PROJECTS_KEY, JSON.stringify(pruned))
+      // Mutate the input array so callers see the pruned state in memory.
+      projects.length = 0
+      for (const p of pruned) projects.push(p)
+      console.log('[NobelPM] Save succeeded after pruning rawXER from older versions')
+      return { ok: true, pruned: true }
+    } catch (err2: any) {
+      console.error('[NobelPM] Save still failed after pruning:', err2)
+      return {
+        ok: false,
+        error:
+          'Browser storage is full. Please delete one or more old projects or schedule versions to free up space. (We are migrating storage to the cloud in the next update which will remove this limit.)'
+      }
+    }
+  }
 }
 
 export function getActiveProjectId(): string | null {
@@ -220,13 +151,10 @@ export function getActiveProjectId(): string | null {
 }
 export function setActiveProjectId(id: string | null) {
   if (typeof window === 'undefined') return
-  try {
-    if (id) localStorage.setItem(ACTIVE_PROJECT_KEY, id)
-    else localStorage.removeItem(ACTIVE_PROJECT_KEY)
-    localStorage.removeItem(ACTIVE_VERSION_KEY)
-  } catch (err) {
-    console.error('[NobelPM] setActiveProjectId failed:', err)
-  }
+  if (id) localStorage.setItem(ACTIVE_PROJECT_KEY, id)
+  else localStorage.removeItem(ACTIVE_PROJECT_KEY)
+  // Reset active version when switching projects
+  localStorage.removeItem(ACTIVE_VERSION_KEY)
 }
 export function getActiveVersionId(): string | null {
   if (typeof window === 'undefined') return null
@@ -234,18 +162,17 @@ export function getActiveVersionId(): string | null {
 }
 export function setActiveVersionId(id: string | null) {
   if (typeof window === 'undefined') return
-  try {
-    if (id) localStorage.setItem(ACTIVE_VERSION_KEY, id)
-    else localStorage.removeItem(ACTIVE_VERSION_KEY)
-  } catch (err) {
-    console.error('[NobelPM] setActiveVersionId failed:', err)
-  }
+  if (id) localStorage.setItem(ACTIVE_VERSION_KEY, id)
+  else localStorage.removeItem(ACTIVE_VERSION_KEY)
 }
 export function getActiveProject(): Project | null {
   const id = getActiveProjectId()
   if (!id) return null
-  return _projects.find(p => p.id === id) || null
+  const projects = loadProjects()
+  return projects.find(p => p.id === id) || null
 }
+// Get latest version of project (sorted by data date when available, falling
+// back to upload time for older versions that pre-date the data date field).
 export function getLatestVersion(project: Project | null): ScheduleVersion | null {
   if (!project || !project.versions || project.versions.length === 0) return null
   return [...project.versions].sort((a, b) =>
@@ -253,6 +180,7 @@ export function getLatestVersion(project: Project | null): ScheduleVersion | nul
     new Date(getVersionEffectiveDate(a)).getTime()
   )[0]
 }
+// Get currently selected version (either explicitly chosen OR latest)
 export function getActiveVersion(project?: Project | null): ScheduleVersion | null {
   const p = project || getActiveProject()
   if (!p) return null
@@ -263,66 +191,22 @@ export function getActiveVersion(project?: Project | null): ScheduleVersion | nu
   }
   return getLatestVersion(p)
 }
+// Get the analysis from the currently active project + version
 export function getActiveAnalysis(): any {
   const v = getActiveVersion()
   return v?.analysis || null
 }
+// Get RFIs for the active project
 export function getActiveProjectRFIs(): any[] {
   const p = getActiveProject()
   return p?.rfis || []
 }
-
-// ----- Sync write API (updates cache + persists async to IndexedDB) -----
-
-// Replace ALL projects (used by bulk operations).
-// Updates memory cache immediately, then persists to IndexedDB in the
-// background. Errors during persist are logged but not thrown — the
-// memory cache is the source of truth for the current session.
-export function saveProjects(projects: Project[]): SaveResult {
-  if (typeof window === 'undefined') return { ok: false, error: 'No window' }
-
-  _projects = [...projects]
-  notifyListeners()
-
-  const writePromise = (async () => {
-    let oldIds: Set<string> = new Set<string>()
-    try {
-      const stored = await idbGetAllProjects()
-      oldIds = new Set(stored.map(p => p.id))
-    } catch (err) {
-      // Continue — writes below will still work or fail clearly
-    }
-
-    const newIds = new Set(projects.map(p => p.id))
-
-    for (const p of projects) {
-      try {
-        await idbPutProject(p)
-      } catch (err) {
-        console.error('[NobelPM] IndexedDB write failed for project', p.id, err)
-        throw err
-      }
-    }
-
-    const oldIdArray = Array.from(oldIds)
-    for (const oldId of oldIdArray) {
-      if (!newIds.has(oldId)) {
-        try {
-          await idbDeleteProject(oldId)
-        } catch (err) {
-          console.error('[NobelPM] IndexedDB delete failed for project', oldId, err)
-        }
-      }
-    }
-  })()
-
-  writePromise.catch(err => {
-    console.error('[NobelPM] saveProjects: IndexedDB persist failed:', err)
-  })
-
-  return { ok: true }
-}
-
+// Create a new project from an XER upload.
+//
+// Throws if the save fails (typically QuotaExceededError even after the
+// pruning retry inside saveProjects). The upload page catches this and
+// shows the user an actionable error message rather than silently
+// dropping the project.
 export function createProject(opts: {
   name: string
   projectId?: string
@@ -340,169 +224,138 @@ export function createProject(opts: {
     rfis: [],
     changeOrders: [],
   }
-  _projects = [project, ..._projects]
-  notifyListeners()
-
-  idbPutProject(project).catch(err => {
-    console.error('[NobelPM] createProject: IndexedDB persist failed:', err)
-  })
-
+  const projects = loadProjects()
+  projects.unshift(project)
+  const result = saveProjects(projects)
+  if (!result.ok) {
+    throw new Error(result.error || 'Failed to save project')
+  }
   setActiveProjectId(project.id)
   setActiveVersionId(opts.version.id)
   return project
 }
 
+// Add a new schedule version to an existing project.
+// Throws on save failure for the same reason as createProject.
 export function addVersionToProject(projectId: string, version: ScheduleVersion): Project | null {
-  const idx = _projects.findIndex(p => p.id === projectId)
+  const projects = loadProjects()
+  const idx = projects.findIndex(p => p.id === projectId)
   if (idx === -1) return null
-  const updated: Project = {
-    ..._projects[idx],
-    versions: [version, ..._projects[idx].versions],
-    updatedAt: new Date().toISOString(),
+  projects[idx].versions.unshift(version)
+  projects[idx].updatedAt = new Date().toISOString()
+  const result = saveProjects(projects)
+  if (!result.ok) {
+    throw new Error(result.error || 'Failed to save schedule version')
   }
-  _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
-  notifyListeners()
-
-  idbPutProject(updated).catch(err => {
-    console.error('[NobelPM] addVersionToProject: IndexedDB persist failed:', err)
-  })
-
   setActiveProjectId(projectId)
   setActiveVersionId(version.id)
-  return updated
+  return projects[idx]
 }
-
+// Add an RFI evaluation to the active project
 export function addRFIToActiveProject(rfi: any): Project | null {
   const id = getActiveProjectId()
   if (!id) return null
-  const idx = _projects.findIndex(p => p.id === id)
+  const projects = loadProjects()
+  const idx = projects.findIndex(p => p.id === id)
   if (idx === -1) return null
-  const newRfi = {
+  projects[idx].rfis.unshift({
     id: 'rfi_' + Date.now().toString(36),
     ...rfi,
     addedAt: new Date().toISOString(),
-  }
-  const updated: Project = {
-    ..._projects[idx],
-    rfis: [newRfi, ..._projects[idx].rfis],
-    updatedAt: new Date().toISOString(),
-  }
-  _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
-  notifyListeners()
-
-  idbPutProject(updated).catch(err => {
-    console.error('[NobelPM] addRFIToActiveProject: IndexedDB persist failed:', err)
   })
-
-  return updated
+  projects[idx].updatedAt = new Date().toISOString()
+  saveProjects(projects)
+  return projects[idx]
 }
-
 export function deleteRFIFromActiveProject(rfiId: string) {
   const id = getActiveProjectId()
   if (!id) return
-  const idx = _projects.findIndex(p => p.id === id)
+  const projects = loadProjects()
+  const idx = projects.findIndex(p => p.id === id)
   if (idx === -1) return
-  const updated: Project = {
-    ..._projects[idx],
-    rfis: _projects[idx].rfis.filter((r: any) => r.id !== rfiId),
-  }
-  _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
-  notifyListeners()
-
-  idbPutProject(updated).catch(err => {
-    console.error('[NobelPM] deleteRFIFromActiveProject: IndexedDB persist failed:', err)
-  })
+  projects[idx].rfis = projects[idx].rfis.filter((r: any) => r.id !== rfiId)
+  saveProjects(projects)
 }
-
 export function deleteProject(id: string) {
-  _projects = _projects.filter(p => p.id !== id)
-  notifyListeners()
-
-  idbDeleteProject(id).catch(err => {
-    console.error('[NobelPM] deleteProject: IndexedDB delete failed:', err)
-  })
-
+  let projects = loadProjects()
+  projects = projects.filter(p => p.id !== id)
+  saveProjects(projects)
   if (getActiveProjectId() === id) {
-    setActiveProjectId(_projects[0]?.id || null)
+    setActiveProjectId(projects[0]?.id || null)
   }
 }
-
 export function deleteVersion(projectId: string, versionId: string) {
-  const idx = _projects.findIndex(p => p.id === projectId)
+  const projects = loadProjects()
+  const idx = projects.findIndex(p => p.id === projectId)
   if (idx === -1) return
-  const updated: Project = {
-    ..._projects[idx],
-    versions: _projects[idx].versions.filter(v => v.id !== versionId),
-    updatedAt: new Date().toISOString(),
-  }
-  _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
-  notifyListeners()
-
-  idbPutProject(updated).catch(err => {
-    console.error('[NobelPM] deleteVersion: IndexedDB persist failed:', err)
-  })
-
+  projects[idx].versions = projects[idx].versions.filter(v => v.id !== versionId)
+  projects[idx].updatedAt = new Date().toISOString()
+  saveProjects(projects)
   if (getActiveVersionId() === versionId) {
     setActiveVersionId(null)
   }
 }
-
+// Move a version from one project to another (P6 EPS-style)
 export function moveVersionToProject(sourceProjectId: string, versionId: string, targetProjectId: string): boolean {
-  const sourceIdx = _projects.findIndex(p => p.id === sourceProjectId)
-  const targetIdx = _projects.findIndex(p => p.id === targetProjectId)
+  const projects = loadProjects()
+  const sourceIdx = projects.findIndex(p => p.id === sourceProjectId)
+  const targetIdx = projects.findIndex(p => p.id === targetProjectId)
   if (sourceIdx === -1 || targetIdx === -1) return false
   if (sourceProjectId === targetProjectId) return false
-  const sourceVersions = _projects[sourceIdx].versions
-  const versionIdx = sourceVersions.findIndex(v => v.id === versionId)
+  const versionIdx = projects[sourceIdx].versions.findIndex(v => v.id === versionId)
   if (versionIdx === -1) return false
-
-  const movedVersion = sourceVersions[versionIdx]
-  const newSource: Project = {
-    ..._projects[sourceIdx],
-    versions: sourceVersions.filter((_, i) => i !== versionIdx),
-    updatedAt: new Date().toISOString(),
-  }
-  const newTarget: Project = {
-    ..._projects[targetIdx],
-    versions: [movedVersion, ..._projects[targetIdx].versions],
-    updatedAt: new Date().toISOString(),
-  }
-  _projects = _projects.map((p, i) => {
-    if (i === sourceIdx) return newSource
-    if (i === targetIdx) return newTarget
-    return p
-  })
-  notifyListeners()
-
-  Promise.all([idbPutProject(newSource), idbPutProject(newTarget)]).catch(err => {
-    console.error('[NobelPM] moveVersionToProject: IndexedDB persist failed:', err)
-  })
-
+  // Pull version out of source
+  const [movedVersion] = projects[sourceIdx].versions.splice(versionIdx, 1)
+  projects[sourceIdx].updatedAt = new Date().toISOString()
+  // Add to target (at top so it becomes most recent)
+  projects[targetIdx].versions.unshift(movedVersion)
+  projects[targetIdx].updatedAt = new Date().toISOString()
+  saveProjects(projects)
+  // If the moved version was the active version, reset source's active to latest remaining
   if (getActiveVersionId() === versionId) {
-    setActiveVersionId(null)
+    setActiveVersionId(null)  // will fall back to latest of whichever project is active
   }
   return true
 }
-
 export function renameProject(id: string, newName: string, projectId?: string) {
-  const idx = _projects.findIndex(p => p.id === id)
+  const projects = loadProjects()
+  const idx = projects.findIndex(p => p.id === id)
   if (idx === -1) return
-  const updated: Project = {
-    ..._projects[idx],
-    name: newName,
-    updatedAt: new Date().toISOString(),
-  }
-  if (projectId !== undefined) updated.projectId = projectId
-  _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
-  notifyListeners()
-
-  idbPutProject(updated).catch(err => {
-    console.error('[NobelPM] renameProject: IndexedDB persist failed:', err)
-  })
+  projects[idx].name = newName
+  if (projectId !== undefined) projects[idx].projectId = projectId
+  projects[idx].updatedAt = new Date().toISOString()
+  saveProjects(projects)
 }
-
-// Legacy migration is now handled inside hydrate(). This function exists
-// for backward compat with any code that called it directly — it's a no-op.
+// Migrate from old localStorage schema to new project-based one
 export function migrateLegacyData() {
-  // No longer needed — hydrate() handles migration from pl_projects on startup.
+  if (typeof window === 'undefined') return
+  const projects = loadProjects()
+  if (projects.length > 0) return
+  try {
+    const legacyAnalysis = localStorage.getItem(LEGACY_ANALYSIS_KEY)
+    if (!legacyAnalysis) return
+    const analysis = JSON.parse(legacyAnalysis)
+    if (!analysis) return
+    const legacyRfisStr = localStorage.getItem(LEGACY_RFIS_KEY)
+    const legacyRfis = legacyRfisStr ? JSON.parse(legacyRfisStr) : []
+    const version: ScheduleVersion = {
+      id: 'ver_' + Date.now().toString(36),
+      uploadedAt: new Date().toISOString(),
+      fileName: analysis.projectName ? `${analysis.projectName}.xer` : 'imported.xer',
+      analysis,
+    }
+    const project: Project = {
+      id: 'proj_' + Date.now().toString(36),
+      name: analysis.projectName || 'Imported Project',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      versions: [version],
+      rfis: legacyRfis,
+      changeOrders: [],
+    }
+    saveProjects([project])
+    setActiveProjectId(project.id)
+  } catch (err) {
+    console.error('Legacy migration failed:', err)
+  }
 }

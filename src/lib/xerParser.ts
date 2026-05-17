@@ -96,18 +96,8 @@ export interface XERAnalysis {
 }
 
 export interface OutOfSequence {
-  // The successor activity that started before its predecessor finished.
-  // One OutOfSequence entry per affected successor activity — matches how
-  // Primavera P6 reports out-of-sequence in its Schedule Log (by activity,
-  // not by relationship).
   task: Task
-  // First violating predecessor. Kept for backwards compatibility with any
-  // existing UI that reads .pred — older code continues to work unchanged.
   pred: Task
-  // All violating predecessors for this successor. A single successor can
-  // have multiple OOS predecessors (e.g. a CMU install where rebar, footing
-  // inspection, and form-stripping all finished after the install started).
-  predecessors: Task[]
   category: string
 }
 
@@ -211,19 +201,8 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     return !isNaN(f) && f < 0
   }).length
 
-  // Out of sequence — one entry per affected SUCCESSOR activity, not per
-  // relationship. This matches how Primavera P6 reports out-of-sequence in
-  // its Schedule Log. A single successor with multiple violating predecessors
-  // appears once with all its violating preds attached.
-  //
-  // Detection rule (matches P6 for FS relationships):
-  //   - Predecessor has an actual finish date (it's completed)
-  //   - Successor has an actual start date (it has started)
-  //   - Successor's actual start is BEFORE predecessor's actual finish
-  //
-  // Only Finish-to-Start (FS) relationships are checked here. P6 also
-  // reports OOS for SS/FF/SF — see open follow-up to extend coverage.
-  const oosMap = new Map<string, OutOfSequence>()
+  // Out of sequence
+  const outOfSequence: OutOfSequence[] = []
   for (const r of relationships) {
     if (r.pred_type !== 'PR_FS') continue
     const t = tasks[r.task_id]
@@ -233,29 +212,9 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       let category = 'Other'
       if (t.task_code?.includes('PRO-') || t.task_code?.includes('PROC')) category = 'Procurement'
       else if (t.task_code?.includes('PRE-CON')) category = 'Pre-Construction'
-
-      const existing = oosMap.get(t.task_id)
-      if (existing) {
-        existing.predecessors.push(p)
-        // Upgrade category if a later relationship gives us a more specific
-        // bucket than 'Other' (e.g. a procurement predecessor on a generic task)
-        if (existing.category === 'Other' && category !== 'Other') {
-          existing.category = category
-        }
-      } else {
-        oosMap.set(t.task_id, {
-          task: t,
-          pred: p,                // first violating predecessor — kept for backwards compat
-          predecessors: [p],
-          category,
-        })
-      }
+      outOfSequence.push({ task: t, pred: p, category })
     }
   }
-  // Sort by task_code ascending so the order matches what a scheduler sees
-  // when they sort P6's out-of-sequence report alphabetically by Activity ID.
-  const outOfSequence: OutOfSequence[] = Array.from(oosMap.values())
-    .sort((a, b) => (a.task.task_code || '').localeCompare(b.task.task_code || ''))
 
   // No logic ties
   const noTies: Task[] = []

@@ -120,15 +120,12 @@ export default function RisksPage() {
       })
     }
 
-    // Out of sequence — count is unique affected activities (matches P6's
-    // Schedule Log convention). A single activity with multiple violating
-    // predecessors counts once, with all its violating preds available in
-    // entry.predecessors for the detail drawer.
+    // Out of sequence
     if (a.outOfSequence?.length > 20) {
       risks.push({
         id: 'oos-severe',
         category: 'Logic Integrity',
-        title: `${a.outOfSequence.length} out-of-sequence activities`,
+        title: `${a.outOfSequence.length} out-of-sequence violations`,
         description: 'Schedule logic integrity compromised — work is being performed out of planned order on a large scale.',
         severity: 'high',
         detail: 'Out-of-sequence work means activities started before their predecessors finished. This breaks CPM calculations and indicates either field is ignoring schedule, or schedule logic was wrong.',
@@ -144,7 +141,7 @@ export default function RisksPage() {
       risks.push({
         id: 'oos',
         category: 'Logic Integrity',
-        title: `${a.outOfSequence.length} out-of-sequence activities`,
+        title: `${a.outOfSequence.length} out-of-sequence violations`,
         description: 'Some activities running out of planned sequence. May indicate field acceleration or schedule logic issues.',
         severity: 'medium',
         detail: 'Out-of-sequence work in moderate numbers is often a sign of contractor trying to make up time — but it makes float calculations unreliable.',
