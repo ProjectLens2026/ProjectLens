@@ -295,7 +295,7 @@ export default function NobelPMAnalysisPage() {
             {[
               { id: 'gantt', label: 'Gantt Chart', icon: '📊' },
               { id: 'schedule-filter', label: 'Schedule Filter', icon: '🔎' },
-              { id: 'logic', label: 'Logic Check', icon: '🔧' },
+              { id: 'logic', label: 'Sequence Problems', icon: '🔧' },
               { id: 'noties', label: 'No Logic Ties', icon: '⛓️' },
               { id: 'longlead', label: 'Long Lead Items', icon: '📦' },
               { id: 'field', label: 'Field Reality', icon: '👷' },
@@ -467,29 +467,100 @@ export default function NobelPMAnalysisPage() {
                 )}
               </div>
             )}
-            {/* LOGIC CHECK */}
+            {/* CONSTRUCTION SEQUENCE PROBLEMS — formerly "Logic Check"
+                Renamed and reworked to show full per-violation evidence so
+                the PM can review each flagged activity with their scheduler.
+                Each affected activity is listed with every violated
+                relationship: which predecessor, what dates, how many days
+                early, and a plain-language explanation. */}
             {activeTab === 'logic' && (
               <div>
-                <h3 className="text-sm font-bold mb-3">Schedule logic check — out-of-sequence work ({a.outOfSequence?.length || 0} violations)</h3>
-                <div className="bg-red-50 border-l-4 border-red-500 p-3 text-xs text-red-900 mb-4 leading-relaxed">
-                  Out-of-sequence means an activity started before its predecessor was finished. This makes float calculations unreliable and creates rework risk — if the review comes back with changes after fabrication has started, materials may need to be remade.
+                <h3 className="text-sm font-bold mb-3">
+                  Construction Sequence Problems · {a.outOfSequence?.length || 0} affected {a.outOfSequence?.length === 1 ? 'activity' : 'activities'}
+                </h3>
+                <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
+                  <div className="font-bold mb-1">What this shows</div>
+                  Activities whose actual progress conflicts with the relationship logic
+                  in the schedule. For each one, NobelPM lists every violated relationship
+                  with full evidence — what the logic required, what actually happened,
+                  and how many days earlier the work occurred than the logic allowed.
+                  <div className="mt-2">
+                    <strong>Review each with your scheduler.</strong> Legitimate fast-tracking
+                    (intentional acceleration) and true logic gaps both show up here. The
+                    PM and scheduler together decide which is which. Lead values (negative
+                    lag) are already accounted for — what you see is genuinely early work.
+                  </div>
                 </div>
-                {['Procurement', 'Pre-Construction', 'Other'].map(category => {
-                  const items = (a.outOfSequence || []).filter((o: any) => o.category === category)
-                  if (items.length === 0) return null
-                  return (
-                    <div key={category} className="mb-4">
-                      <div className="text-xs font-bold mb-2 text-slate-700">{category} violations ({items.length})</div>
-                      {items.slice(0, 10).map((o: any, i: number) => (
-                        <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 text-xs">
-                          <div className="col-span-3 font-mono font-semibold">{o.task.task_code}</div>
-                          <div className="col-span-7 text-slate-600">{o.task.task_name} started before predecessor {o.pred.task_code} finished</div>
-                          <div className="col-span-2 text-right"><span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">Sequence error</span></div>
+                {(!a.outOfSequence || a.outOfSequence.length === 0) ? (
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-6 text-center">
+                    <div className="text-3xl mb-2">✓</div>
+                    <div className="text-sm font-bold text-green-900">No sequence problems detected</div>
+                    <div className="text-xs text-green-700 mt-1">All actual progress is consistent with the relationship logic.</div>
+                  </div>
+                ) : (
+                  <>
+                    {['Procurement', 'Pre-Construction', 'Other'].map(category => {
+                      const items = (a.outOfSequence || []).filter((o: any) => o.category === category)
+                      if (items.length === 0) return null
+                      const catColor = category === 'Procurement' ? 'text-amber-700'
+                                     : category === 'Pre-Construction' ? 'text-blue-700'
+                                     : 'text-slate-700'
+                      return (
+                        <div key={category} className="mb-5">
+                          <div className={`text-xs font-bold mb-2 uppercase tracking-wider ${catColor}`}>
+                            {category} · {items.length} {items.length === 1 ? 'activity' : 'activities'}
+                          </div>
+                          <div className="space-y-2">
+                            {items.slice(0, 30).map((o: any, i: number) => {
+                              // Each entry: activity header + a list of every
+                              // violation (one row per violated relationship)
+                              const violations = o.violations || []
+                              return (
+                                <div key={i} className="border border-slate-200 rounded-lg overflow-hidden bg-white">
+                                  {/* Activity header */}
+                                  <div className="bg-slate-50 px-3 py-2 border-b border-slate-100 flex items-center gap-3">
+                                    <div className="font-mono font-bold text-xs text-slate-900">{o.task.task_code}</div>
+                                    <div className="flex-1 text-xs text-slate-700 truncate">{o.task.task_name}</div>
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                                      {violations.length} violation{violations.length === 1 ? '' : 's'}
+                                    </span>
+                                  </div>
+                                  {/* Per-violation evidence */}
+                                  <div className="divide-y divide-slate-100">
+                                    {violations.length === 0 ? (
+                                      <div className="px-3 py-2 text-[11px] text-slate-500 italic">
+                                        Predecessor {o.pred?.task_code} — relationship logic violated
+                                      </div>
+                                    ) : violations.map((v: any, vi: number) => (
+                                      <div key={vi} className="px-3 py-2 text-[11px] leading-relaxed">
+                                        <div className="flex items-start gap-2">
+                                          <span className="font-mono font-bold text-slate-700 w-24 flex-shrink-0">{v.pred.task_code}</span>
+                                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 flex-shrink-0">{v.relTypeLabel}</span>
+                                          <span className="flex-1 text-slate-600">{v.pred.task_name}</span>
+                                          <span className="text-[10px] font-bold text-red-700 flex-shrink-0">
+                                            {v.varianceDays}d early
+                                          </span>
+                                        </div>
+                                        <div className="mt-1 ml-26 text-[10px] text-slate-500 leading-snug">
+                                          {v.description}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                            {items.length > 30 && (
+                              <div className="text-center text-[10px] text-slate-400 pt-2">
+                                Showing first 30 of {items.length} activities in this category
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                  )
-                })}
+                      )
+                    })}
+                  </>
+                )}
               </div>
             )}
             {/* NO TIES */}

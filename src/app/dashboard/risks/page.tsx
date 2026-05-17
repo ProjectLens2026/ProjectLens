@@ -116,39 +116,41 @@ export default function RisksPage() {
         ],
       })
     }
-    // Out of sequence — count is unique affected activities (matches P6's
-    // Schedule Log convention). A single activity with multiple violating
-    // predecessors counts once, with all its violating preds available in
-    // entry.predecessors for the detail drawer.
+    // Construction Sequence Problems — count is unique affected activities
+    // (matches P6's Schedule Log convention). A single activity with multiple
+    // violating predecessors counts once. Full per-violation evidence is
+    // available in the Lens > Sequence Problems tab for review.
     if (a.outOfSequence?.length > 20) {
       risks.push({
         id: 'oos-severe',
-        category: 'Logic Integrity',
-        title: `${a.outOfSequence.length} out-of-sequence activities`,
-        description: 'Schedule logic integrity compromised — work is being performed out of planned order on a large scale.',
+        category: 'Construction Sequence',
+        title: `${a.outOfSequence.length} activities with construction sequence problems`,
+        description: 'Schedule logic integrity compromised — actual work order conflicts with the planned relationship logic across many activities.',
         severity: 'high',
-        detail: 'Out-of-sequence work means activities started before their predecessors finished. This breaks CPM calculations and indicates either field is ignoring schedule, or schedule logic was wrong.',
-        recommendation: 'Have scheduler review out-of-sequence relationships. Either logic needs correction or work needs to stop until proper sequence resumes.',
+        detail: 'Construction sequence problems occur when an activity started or finished in a way that violates its relationship logic — for example, an FS successor that started before its predecessor finished, after accounting for any lead/lag. NobelPM reports every activity with at least one violated relationship, with full per-violation evidence available on the Full Analysis > Sequence Problems tab. Some violations are legitimate fast-tracking (TIA evidence); others are true logic gaps. Review each with your scheduler.',
+        recommendation: 'Open Full Analysis > Sequence Problems and walk the list with your scheduler. Tag each activity as either intentional acceleration (document for TIA) or logic gap (fix in P6). Coordinate with field super to enforce sequence going forward where needed.',
         actionItems: [
-          'Review out-of-sequence list with scheduler',
-          'Identify which are logic errors vs intentional acceleration',
-          'Correct schedule logic where needed',
+          'Review the per-activity evidence in Full Analysis > Sequence Problems',
+          'For each: classify as fast-tracking (legitimate) or logic gap (fix)',
+          'Document acceleration efforts — these are TIA evidence',
+          'Correct schedule logic in P6 where gaps are real',
           'Coordinate with field super to enforce sequence going forward',
         ],
       })
     } else if (a.outOfSequence?.length > 5) {
       risks.push({
         id: 'oos',
-        category: 'Logic Integrity',
-        title: `${a.outOfSequence.length} out-of-sequence activities`,
-        description: 'Some activities running out of planned sequence. May indicate field acceleration or schedule logic issues.',
+        category: 'Construction Sequence',
+        title: `${a.outOfSequence.length} activities with construction sequence problems`,
+        description: 'Some activities have actual progress conflicting with relationship logic. May indicate field acceleration or schedule logic issues.',
         severity: 'medium',
-        detail: 'Out-of-sequence work in moderate numbers is often a sign of contractor trying to make up time — but it makes float calculations unreliable.',
-        recommendation: 'Review with scheduler whether these are intentional acceleration or schedule logic gaps. Document either way.',
+        detail: 'Construction sequence problems in moderate numbers often signal intentional acceleration — but each one makes float calculations less reliable. Review the full per-violation evidence on the Full Analysis > Sequence Problems tab.',
+        recommendation: 'Open Full Analysis > Sequence Problems and review with your scheduler. Document acceleration where intentional; fix logic gaps where the schedule was wrong.',
         actionItems: [
-          'Walk out-of-sequence list with scheduler',
-          'Document acceleration efforts (good TIA evidence)',
-          'Fix logic errors in schedule',
+          'Open Full Analysis > Sequence Problems for the full list',
+          'Walk each with your scheduler to classify',
+          'Document acceleration efforts as TIA evidence',
+          'Fix true logic errors in the schedule',
         ],
       })
     }

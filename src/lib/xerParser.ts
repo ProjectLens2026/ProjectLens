@@ -90,6 +90,32 @@ export interface XERAnalysis {
   actualDurationDays?: number
   durationAtCompletion?: number
 }
+// A single relationship-level violation. An out-of-sequence activity may
+// have multiple violations (one per predecessor whose logic was broken by
+// actual progress). Each violation carries enough evidence for a PM to
+// review and dispute or accept independently.
+export interface SequenceViolation {
+  pred: Task               // the predecessor on the violating relationship
+  relType: string          // 'PR_FS' | 'PR_SS' | 'PR_FF' | 'PR_SF'
+  relTypeLabel: string     // 'FS' | 'SS' | 'FF' | 'SF' for display
+  // The predecessor's actual date that anchors this relationship
+  // (act_end for FS/FF, act_start for SS/SF). Plain ISO string from XER.
+  predDate: string
+  // The successor's actual date that the predecessor's date is compared
+  // against (act_start for FS/SS, act_end for FF/SF).
+  succDate: string
+  // The date the successor's actual progress should have been at OR after,
+  // accounting for relationship lag. If actual succDate is earlier than
+  // this, the relationship is violated.
+  requiredDate: string
+  lagHours: number
+  // How many calendar days the successor's actual happened before the
+  // required date. Always positive — bigger numbers = bigger violation.
+  varianceDays: number
+  // Plain-language explanation a non-scheduler PM can read directly.
+  description: string
+}
+
 export interface OutOfSequence {
   // The successor activity that started/finished before its predecessor
   // logic allowed. One OutOfSequence entry per affected successor activity
@@ -104,9 +130,14 @@ export interface OutOfSequence {
   // inspection, and form-stripping all finished after the install started).
   predecessors: Task[]
   category: string
-  // The relationship type that triggered the violation (FS / SS / FF / SF).
-  // Stored as P6's pred_type string (PR_FS / PR_SS / PR_FF / PR_SF) for the
-  // first violating relationship. Useful for debugging.
+  // Full per-relationship evidence for each violation involving this
+  // activity. Lets the UI show WHY each activity is flagged, with the
+  // specific dates and variances. This is what powers the "Construction
+  // Sequence Problems" detail view — gives the PM the receipts so they
+  // can dispute or accept each violation rather than just trusting a count.
+  violations: SequenceViolation[]
+  // The relationship type that triggered the FIRST violation (FS / SS / FF / SF).
+  // Stored as P6's pred_type string. Useful for debugging.
   relType?: string
 }
 export interface LongLeadItem extends Task {
@@ -194,47 +225,47 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     return !isNaN(f) && f < 0
   }).length
   // ============================================================================
-  // OUT-OF-SEQUENCE — lag-aware, P6 Schedule Log–style
+  // CONSTRUCTION SEQUENCE PROBLEMS — lag-aware, with full per-violation evidence
   // ============================================================================
   //
-  // GOAL: match what P6 itself reports in its Schedule Log "Out-of-sequence
-  // activities" warning. P6 reports one entry per affected SUCCESSOR activity,
-  // and only counts a relationship as violated if the actual progress
-  // contradicts the logic AFTER accounting for relationship lag.
+  // Renamed from "Out of Sequence" to "Construction Sequence Problems" in the
+  // UI — sidesteps the false-precision claim of matching P6's exact OOS count
+  // (P6 uses proprietary driving-constraint logic). We instead show the PM
+  // every relationship-level violation with full evidence, so they can review
+  // each one with their scheduler and decide whether it's legitimate
+  // fast-tracking, a logic gap, or a true problem.
   //
   // Detection rules per relationship type (lag is in HOURS in TASKPRED.lag_hr_cnt):
   //
   //   PR_FS (Finish-to-Start):
   //     succ.act_start must be >= (pred.act_end + lag)
   //     If lag is negative ("lead"), succ can legitimately start before pred
-  //     finishes — that's INTENTIONAL fast-tracking and NOT out-of-sequence.
-  //     Previous version ignored lag entirely and flagged every overlap as
-  //     OOS — this was the root cause of NobelPM massively over-counting
-  //     compared to P6's Schedule Log.
+  //     finishes — that's INTENTIONAL fast-tracking and NOT a violation.
   //
   //   PR_SS (Start-to-Start):
   //     succ.act_start must be >= (pred.act_start + lag)
-  //     Both must have actual starts to evaluate.
   //
   //   PR_FF (Finish-to-Finish):
   //     succ.act_end must be >= (pred.act_end + lag)
-  //     Both must have actual finishes.
   //
-  //   PR_SF (Start-to-Finish, rare):
+  //   PR_SF (Start-to-Finish):
   //     succ.act_end must be >= (pred.act_start + lag)
   //
-  // ADDITIONAL FILTERS:
-  //   - We require the SUCCESSOR to have actual progress (act_start_date for
-  //     FS/SS, act_end_date for FF/SF). Activities not yet started can't be
-  //     out of sequence — they're just not started.
-  //   - We require the PREDECESSOR to have the dependency-anchor actual date
-  //     populated (act_end_date for FS/FF, act_start_date for SS/SF). If the
-  //     predecessor hasn't reached the relevant milestone, we can't compute
-  //     a violation; this matches P6's behaviour.
-  //   - Dedup by SUCCESSOR task_id so one OOS activity = one entry, even
-  //     when multiple predecessors violated. Matches P6 Schedule Log.
+  // For each violation we record:
+  //   - The relationship type (FS/SS/FF/SF)
+  //   - The predecessor's anchor date (the date used in the comparison)
+  //   - The successor's actual date that should have been after the anchor + lag
+  //   - The REQUIRED date (anchor + lag) — i.e. the earliest legitimate value
+  //   - How many days early the successor's actual occurred (varianceDays)
+  //   - A plain-language description for non-scheduler PMs
+  //
+  // One OutOfSequence entry per affected SUCCESSOR activity. If the activity
+  // has multiple violated predecessors, we collect them all into the
+  // `predecessors[]` and `violations[]` arrays for that one entry. Matches
+  // P6 Schedule Log convention (one warning per affected activity).
   const HOUR_MS = 60 * 60 * 1000
-  const oosMap = new Map<string, OutOfSequence>()
+  const DAY_MS = 24 * HOUR_MS
+
   /** Parse a P6 date string ("2024-04-01 17:00") to ms, or null if invalid. */
   const dateMs = (s: string | undefined): number | null => {
     if (!s) return null
@@ -242,55 +273,125 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     const ms = d.getTime()
     return isNaN(ms) ? null : ms
   }
+
+  /** Format ms back to a P6-style "YYYY-MM-DD HH:MM" string. */
+  const fmtDate = (ms: number): string => {
+    const d = new Date(ms)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+
+  /** Friendly label for a P6 relationship type code. */
+  const relTypeLabel = (predType: string): string => {
+    switch (predType) {
+      case 'PR_FS': return 'FS'
+      case 'PR_SS': return 'SS'
+      case 'PR_FF': return 'FF'
+      case 'PR_SF': return 'SF'
+      default: return predType.replace(/^PR_/, '')
+    }
+  }
+
+  const oosMap = new Map<string, OutOfSequence>()
+
   for (const r of relationships) {
     const t = tasks[r.task_id]
     const p = tasks[r.pred_task_id]
     if (!t || !p) continue
 
-    // Lag is stored in hours, can be positive (delay) or negative (lead).
+    // Lag in milliseconds. Positive = delay required, negative = lead allowed.
     const lagMs = parseFloat(r.lag_hr_cnt || '0') * HOUR_MS
     if (isNaN(lagMs)) continue
 
-    // Compute the violation flag based on relationship type. `violated`
-    // becomes true if the schedule logic was actually broken; null if we
-    // don't have enough actual-date info to evaluate.
-    let violated: boolean | null = null
+    // Compute whether this relationship is violated by actual progress.
+    // `predAnchorMs`/`succActualMs` hold the dates we're comparing.
+    // `null` for either means we lack the actual data to evaluate.
+    let predAnchorMs: number | null = null
+    let succActualMs: number | null = null
+    let predAnchorDateStr = ''
+    let succActualDateStr = ''
+    let kindLabel = ''  // human-readable label for the explanation
+
     switch (r.pred_type) {
-      case 'PR_FS': {
-        const predEnd = dateMs(p.act_end_date)
-        const succStart = dateMs(t.act_start_date)
-        if (predEnd === null || succStart === null) { violated = null; break }
-        violated = succStart < (predEnd + lagMs)
+      case 'PR_FS':
+        predAnchorMs = dateMs(p.act_end_date)
+        succActualMs = dateMs(t.act_start_date)
+        predAnchorDateStr = p.act_end_date
+        succActualDateStr = t.act_start_date
+        kindLabel = 'finished'
         break
-      }
-      case 'PR_SS': {
-        const predStart = dateMs(p.act_start_date)
-        const succStart = dateMs(t.act_start_date)
-        if (predStart === null || succStart === null) { violated = null; break }
-        violated = succStart < (predStart + lagMs)
+      case 'PR_SS':
+        predAnchorMs = dateMs(p.act_start_date)
+        succActualMs = dateMs(t.act_start_date)
+        predAnchorDateStr = p.act_start_date
+        succActualDateStr = t.act_start_date
+        kindLabel = 'started'
         break
-      }
-      case 'PR_FF': {
-        const predEnd = dateMs(p.act_end_date)
-        const succEnd = dateMs(t.act_end_date)
-        if (predEnd === null || succEnd === null) { violated = null; break }
-        violated = succEnd < (predEnd + lagMs)
+      case 'PR_FF':
+        predAnchorMs = dateMs(p.act_end_date)
+        succActualMs = dateMs(t.act_end_date)
+        predAnchorDateStr = p.act_end_date
+        succActualDateStr = t.act_end_date
+        kindLabel = 'finished'
         break
-      }
-      case 'PR_SF': {
-        const predStart = dateMs(p.act_start_date)
-        const succEnd = dateMs(t.act_end_date)
-        if (predStart === null || succEnd === null) { violated = null; break }
-        violated = succEnd < (predStart + lagMs)
+      case 'PR_SF':
+        predAnchorMs = dateMs(p.act_start_date)
+        succActualMs = dateMs(t.act_end_date)
+        predAnchorDateStr = p.act_start_date
+        succActualDateStr = t.act_end_date
+        kindLabel = 'started'
         break
-      }
       default:
-        continue  // unknown relationship type — skip
+        continue  // unknown rel type
     }
-    if (violated !== true) continue
+    if (predAnchorMs === null || succActualMs === null) continue
+
+    const requiredMs = predAnchorMs + lagMs
+    const violated = succActualMs < requiredMs
+    if (!violated) continue
+
+    // Build the violation record
+    const varianceDays = Math.max(0, Math.round((requiredMs - succActualMs) / DAY_MS))
+    const lagHours = lagMs / HOUR_MS
+    const relLabel = relTypeLabel(r.pred_type)
+
+    // Plain-language explanation. Examples:
+    //   FS: "Predecessor PRO-750 finished 2024-04-15 17:00, but PRO-770
+    //        started 2024-04-10 08:00 — 5 days early (FS, no lag)."
+    //   FS with positive lag: "Predecessor PRE-CON-170 finished ... ; PRO-100
+    //        should not have started until ... (FS + 3 day lag), but started ..."
+    //   FS with lead: "Lead of 5 days allowed, but successor started 8 days
+    //        before predecessor finished."
+    const succAction = (r.pred_type === 'PR_FS' || r.pred_type === 'PR_SS') ? 'started' : 'finished'
+    let lagPhrase = ''
+    if (lagHours > 0) {
+      const lagDays = Math.round(lagHours / 24)
+      lagPhrase = ` (${relLabel} + ${lagDays} day lag)`
+    } else if (lagHours < 0) {
+      const leadDays = Math.round(Math.abs(lagHours) / 24)
+      lagPhrase = ` (${relLabel} − ${leadDays} day lead allowed)`
+    } else {
+      lagPhrase = ` (${relLabel}, no lag)`
+    }
+    const description =
+      `Predecessor ${p.task_code} ${kindLabel} ${predAnchorDateStr?.slice(0, 16) || '—'}, ` +
+      `but ${t.task_code} ${succAction} ${succActualDateStr?.slice(0, 16) || '—'} ` +
+      `— ${varianceDays} day${varianceDays === 1 ? '' : 's'} too early${lagPhrase}.`
+
+    const violation: SequenceViolation = {
+      pred: p,
+      relType: r.pred_type,
+      relTypeLabel: relLabel,
+      predDate: predAnchorDateStr,
+      succDate: succActualDateStr,
+      requiredDate: fmtDate(requiredMs),
+      lagHours,
+      varianceDays,
+      description,
+    }
 
     // Categorize the affected activity by code prefix (used by the Risks UI
-    // to group violations into "Procurement", "Pre-Construction", "Other").
+    // and Lens Logic Check to group violations).
     let category = 'Other'
     if (t.task_code?.includes('PRO-') || t.task_code?.includes('PROC')) category = 'Procurement'
     else if (t.task_code?.includes('PRE-CON')) category = 'Pre-Construction'
@@ -298,6 +399,7 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     const existing = oosMap.get(t.task_id)
     if (existing) {
       existing.predecessors.push(p)
+      existing.violations.push(violation)
       if (existing.category === 'Other' && category !== 'Other') {
         existing.category = category
       }
@@ -307,12 +409,13 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
         pred: p,                     // first violating predecessor (back-compat)
         predecessors: [p],
         category,
+        violations: [violation],
         relType: r.pred_type,
       })
     }
   }
-  // Sort by task_code ascending so the order matches how a scheduler reads
-  // P6's Schedule Log when sorted alphabetically by Activity ID.
+  // Sort by task_code ascending — matches how P6's Schedule Log lists OOS
+  // when sorted alphabetically by Activity ID.
   const outOfSequence: OutOfSequence[] = Array.from(oosMap.values())
     .sort((a, b) => (a.task.task_code || '').localeCompare(b.task.task_code || ''))
   // No logic ties
