@@ -398,6 +398,12 @@ export default function UploadPage() {
       // This logic is unchanged from before — we just feed it the analysis
       // that's already in hand (no need to re-read the file from a server
       // round-trip).
+      //
+      // If the save fails (typically QuotaExceededError on big XERs), we
+      // SHOW the user an alert rather than silently dropping the project.
+      // Without this, the analysis would display fine on-screen but the
+      // project would never appear in their projects list — the symptom
+      // we saw with 1,040-activity XERs filling localStorage.
       try {
         const version: ScheduleVersion = {
           id: 'ver_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
@@ -429,10 +435,26 @@ export default function UploadPage() {
           })
           console.log('[NobelPM] Created new project', { id: newProj.id, name: newProj.name })
         }
-        // Keep legacy keys for backward compat
-        localStorage.setItem('pl_last_analysis', JSON.stringify(data.analysis))
-      } catch (err) {
+        // Keep legacy keys for backward compat. Wrapped in its own try/catch
+        // so a quota error here (less critical than the project save above)
+        // doesn't prevent the user from reaching their results.
+        try {
+          localStorage.setItem('pl_last_analysis', JSON.stringify(data.analysis))
+        } catch (legacyErr) {
+          console.warn('[NobelPM] Could not write legacy pl_last_analysis key (non-critical):', legacyErr)
+        }
+      } catch (err: any) {
         console.error('[NobelPM] Failed to save project:', err)
+        // Surface the save failure to the user. Without this, they'd see
+        // the analysis on-screen and assume everything worked, then later
+        // wonder why the project never appeared on the dashboard.
+        const userMessage = err?.message ||
+          'Failed to save this project. The analysis displayed above is correct, but it was not saved to your projects list.'
+        alert(
+          'Your schedule was analyzed successfully, but we could not save it:\n\n' +
+          userMessage +
+          '\n\nThe analysis below is still accurate — but it will not appear in your Projects list until storage is freed up.'
+        )
       }
       setTimeout(() => setStep('done'), 500)
     } catch (err: any) {
