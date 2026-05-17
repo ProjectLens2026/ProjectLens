@@ -64,6 +64,16 @@ export interface XERAnalysis {
   // calendar days after the schedule's data date. Used by the Schedule Filter
   // tab on the Full Analysis page. Excludes already-completed activities.
   twoWeekLookahead?: Task[]
+  // Submittals — Submit activities + their Review/Approval successor pairs.
+  // Detected by activity NAME (not ID), case-insensitive:
+  //   - Name contains SUBMIT or SUBMITTAL → counts as a submit activity
+  //   - Successor of a submit activity whose name contains REVIEW or APPROVAL
+  //     → counts as the paired approval activity
+  // Only the verified pairs are returned. Standalone review/approval
+  // activities (no submit predecessor) are excluded. Used by the Submittals
+  // page in the sidebar — page classifies into Critical/Near-Critical/Healthy
+  // tiers based on each activity's total float.
+  submittals?: Task[]
   healthScore: number
   condition: string
   delayDays: number
@@ -322,6 +332,53 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     }
   }
 
+  // SUBMITTALS — paired Submit + Review/Approval activities
+  //
+  // We look at activity NAMES (not IDs — IDs vary too widely across XERs).
+  // Detection logic:
+  //   1. Find activities whose name contains SUBMIT or SUBMITTAL (case-insensitive)
+  //      → these are "submit" activities, always counted
+  //   2. For each submit activity, walk its successors via succMap
+  //   3. Any successor whose name contains REVIEW or APPROVAL → counts as
+  //      the paired approval activity
+  //   4. Standalone reviews/approvals with no submit predecessor are NOT
+  //      included (prevents design reviews, safety reviews, etc. from
+  //      polluting the list)
+  //
+  // Completed activities (status_code = TK_Complete) are excluded — they're
+  // already approved/done, so they don't need PM attention. The Submittals
+  // page sorts these into Critical / Near-Critical / Healthy tiers based on
+  // total float; we sort by float ascending here so the most urgent items
+  // come first.
+  const SUBMIT_RX = /SUBMIT(?:TAL)?/i
+  const APPROVAL_RX = /REVIEW|APPROVE|APPROVAL/i
+  const submittalsMap = new Map<string, Task>()  // dedupe by task_id
+
+  for (const t of taskArr) {
+    if (t.status_code === 'TK_Complete') continue
+    const name = t.task_name || ''
+    if (!SUBMIT_RX.test(name)) continue
+
+    // This is a submit activity — add it.
+    submittalsMap.set(t.task_id, t)
+
+    // Walk its successors and add any review/approval pairs.
+    const successorIds = succMap[t.task_id] || []
+    for (const succId of successorIds) {
+      const succ = tasks[succId]
+      if (!succ) continue
+      if (succ.status_code === 'TK_Complete') continue
+      const succName = succ.task_name || ''
+      if (APPROVAL_RX.test(succName)) {
+        submittalsMap.set(succ.task_id, succ)
+      }
+    }
+  }
+
+  const submittals = Array.from(submittalsMap.values()).sort((a, b) => {
+    return parseFloat(a.total_float_hr_cnt || '0') - parseFloat(b.total_float_hr_cnt || '0')
+  })
+
   // Delay days
   let delayDays = 0
   if (parsed.contractEnd && parsed.projectedEnd) {
@@ -413,6 +470,7 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     criticalDrivers, ganttActivities, inProgressActivities,
     milestones,
     twoWeekLookahead,
+    submittals,
     healthScore, condition, delayDays,
     // Data date — pulled directly from the XER's PROJECT.last_recalc_date.
     // This is the schedule's "as-of" date, set by the scheduler in P6.
