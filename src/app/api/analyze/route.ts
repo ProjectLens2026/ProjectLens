@@ -1,95 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { parseXER, analyzeXER } from '@/lib/xerParser'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
+// Server-side analysis route — narrative generation only.
+//
+// Previously this route accepted the raw XER file as a multipart upload,
+// parsed it server-side, and generated the narrative. That hit Vercel's
+// serverless function body limit (~256 KB practical for multipart uploads,
+// 4.5 MB hard cap), which silently TRUNCATED larger XER files — e.g. a
+// 620 KB DCDGS schedule with 1,048 activities was getting cut to 557.
+//
+// The browser now does all XER parsing client-side using @/lib/xerParser
+// (no upload size limit since the file never leaves the browser unless
+// the user chooses to save it). Only the small parsed analysis JSON is
+// sent here for narrative generation. The narrative is generated with
+// Claude based on the analysis data.
 export async function POST(req: NextRequest) {
   try {
-    const formData = await req.formData()
-    const file = formData.get('file') as File | null
-    const contextStr = formData.get('context') as string
-    const ctx = contextStr ? JSON.parse(contextStr) : {}
+    const body = await req.json()
+    const analysis = body.analysis
+    const ctx = body.context || {}
 
-    if (!file) {
-      return NextResponse.json({ error: 'No file uploaded' }, { status: 400 })
-    }
-
-    const ext = file.name.split('.').pop()?.toLowerCase()
-    const bytes = await file.arrayBuffer()
-    const buffer = Buffer.from(bytes)
-    
-    let analysis: any = null
-    let fileType = ext?.toUpperCase() || 'UNKNOWN'
-
-    if (ext === 'xer') {
-      // Auto-detect encoding: UTF-16LE (BOM FF FE), UTF-16BE (BOM FE FF), or UTF-8
-      let text: string
-      if (buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE) {
-        // UTF-16 Little Endian (Primavera P6 default export)
-        text = buffer.toString('utf16le', 2)
-      } else if (buffer.length >= 2 && buffer[0] === 0xFE && buffer[1] === 0xFF) {
-        // UTF-16 Big Endian — swap bytes then read as utf16le
-        const swapped = Buffer.alloc(buffer.length - 2)
-        for (let i = 2; i < buffer.length; i += 2) {
-          swapped[i - 2] = buffer[i + 1]
-          swapped[i - 1] = buffer[i]
-        }
-        text = swapped.toString('utf16le')
-      } else {
-        // Check if it looks like UTF-16 without BOM (every other byte is 0x00)
-        let zeroByteCount = 0
-        const sampleSize = Math.min(200, buffer.length)
-        for (let i = 1; i < sampleSize; i += 2) {
-          if (buffer[i] === 0x00) zeroByteCount++
-        }
-        if (zeroByteCount > sampleSize / 4) {
-          // Looks like UTF-16LE without BOM
-          text = buffer.toString('utf16le')
-        } else {
-          // Standard UTF-8
-          text = buffer.toString('utf-8')
-        }
-      }
-      const parsed = parseXER(text)
-      const result = analyzeXER(parsed)
-      analysis = {
-        ...result,
-        projectName: parsed.projectName || ctx.projectName || file.name,
-        dataDate: parsed.dataDate,
-        contractEnd: parsed.contractEnd,
-        projectedEnd: parsed.projectedEnd,
-        fileType: 'Primavera P6 XER',
-      }
-    } else {
-      analysis = {
-        fileType: fileType,
-        projectName: ctx.projectName || file.name,
-        message: 'File received. Detailed parsing is currently optimized for Primavera P6 XER files. Narrative will use the project context you provided.',
-        healthScore: 65,
-        condition: 'Monitor Closely',
-        totalActivities: 0,
-        complete: 0,
-        inProgress: 0,
-        notStarted: 0,
-        negativeFloat: 0,
-        outOfSequence: [],
-        noTies: [],
-        longLeadItems: [],
-        criticalDrivers: [],
-        inProgressActivities: [],
-        delayDays: 0,
-      }
+    if (!analysis) {
+      return NextResponse.json({ error: 'No analysis data provided' }, { status: 400 })
     }
 
     const apiKey = process.env.ANTHROPIC_API_KEY
     let aiNarrative = ''
 
-    if (apiKey && analysis) {
+    if (apiKey) {
       try {
         const Anthropic = (await import('@anthropic-ai/sdk')).default
         const client = new Anthropic({ apiKey })
-
         const prompt = `You are NobelPM — an experienced construction project controls advisor with 20+ years of P6 scheduling, USACE/DGS workflow, and TIA preparation experience. Speak like a senior PM giving honest analysis to a colleague.
 
 Project: ${analysis.projectName}
@@ -137,7 +80,6 @@ Be direct. No fluff. No "AI-style" hedging. Speak like a senior scheduler who ha
           max_tokens: 1500,
           messages: [{ role: 'user', content: prompt }]
         })
-
         aiNarrative = message.content[0].type === 'text' ? message.content[0].text : ''
       } catch (err: any) {
         console.error('AI narrative error:', err)
@@ -145,13 +87,14 @@ Be direct. No fluff. No "AI-style" hedging. Speak like a senior scheduler who ha
       }
     }
 
+    // Echo back the analysis + narrative so the client can save everything
+    // in one place (keeps existing localStorage save logic unchanged).
     return NextResponse.json({
       success: true,
       analysis,
       aiNarrative,
       context: ctx,
     })
-
   } catch (error: any) {
     console.error('Analysis error:', error)
     return NextResponse.json({ error: error.message || 'Analysis failed' }, { status: 500 })

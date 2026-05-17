@@ -6,6 +6,10 @@ import {
   createProject, addVersionToProject,
   ScheduleVersion
 } from '@/lib/projectStore'
+// XER parser — runs in the browser now to avoid Vercel's serverless function
+// body limit (which was truncating large XER files like the 620 KB DCDGS
+// file from 1,048 activities down to 557). See runAnalysis() below.
+import { parseXER, analyzeXER } from '@/lib/xerParser'
 
 // Gantt Chart Component
 function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
@@ -18,19 +22,16 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
   const hasDrivingPath = drivingPath && drivingPath.length > 0
   const displayActivities = hasZeroNegFloat ? activities : (hasDrivingPath ? drivingPath : [])
   const mode = hasZeroNegFloat ? 'float' : hasDrivingPath ? 'driving' : 'none'
-
   function renderGantt(acts: any[]) {
     const start = new Date(dataDate?.replace(' ', 'T') || new Date())
     const end = new Date(projectedEnd?.replace(' ', 'T') || new Date())
     const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)))
-
     function getLeft(dateStr?: string) {
       if (!dateStr) return 0
       const d = new Date(dateStr.replace(' ', 'T'))
       const days = Math.round((d.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
       return Math.max(0, Math.min(100, (days / totalDays) * 100))
     }
-
     function getWidth(startStr?: string, endStr?: string) {
       if (!startStr || !endStr) return 1
       const s = new Date(startStr.replace(' ', 'T'))
@@ -38,9 +39,7 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
       const days = Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24))
       return Math.max(0.5, Math.min(100, (days / totalDays) * 100))
     }
-
     function shortDate(d?: string) { return d ? d.slice(0, 10) : '—' }
-
     const months: { label: string; left: number }[] = []
     const cur = new Date(start)
     cur.setDate(1)
@@ -51,9 +50,7 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
       }
       cur.setMonth(cur.getMonth() + 1)
     }
-
     const displayed = acts.slice(0, 100)
-
     return (
       <div className="overflow-auto max-h-[550px] border border-slate-200 rounded-xl">
         <div className="sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
@@ -78,7 +75,6 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
           const left = getLeft(taskStart)
           const width = getWidth(taskStart, taskEnd)
           const pct = parseFloat(t.phys_complete_pct || '0')
-
           return (
             <div key={i} className={`flex border-b border-slate-100 hover:bg-blue-50/30 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
               <div className="w-80 flex-shrink-0 px-3 py-2 border-r border-slate-100 flex items-center gap-2">
@@ -113,7 +109,6 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
       </div>
     )
   }
-
   // Case 1: No activities at all
   if (mode === 'none') {
     return (
@@ -136,7 +131,6 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
       </div>
     )
   }
-
   // Case 2: No 0/negative float but has driving path — explain why and show driving path
   if (mode === 'driving') {
     return (
@@ -185,7 +179,6 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
       </div>
     )
   }
-
   // Case 3: Normal — show 0/negative float activities
   return (
     <div className="space-y-3">
@@ -199,7 +192,6 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
     </div>
   )
 }
-
 
 type Step = 'upload' | 'context' | 'analyzing' | 'done'
 
@@ -215,6 +207,39 @@ interface ProjectContext {
   criticalConcerns: string
 }
 
+// Read a File as text with encoding auto-detection.
+//
+// Primavera P6 exports XER files as UTF-16LE by default. Other tools and
+// some scripts export as UTF-8. We auto-detect by looking at the BOM and,
+// when no BOM is present, by sampling the first 100 byte-pairs for the
+// characteristic UTF-16 "every other byte is zero" pattern. This mirrors
+// the encoding-detection logic previously running on the server.
+async function readXERFileAsText(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer()
+  const bytes = new Uint8Array(buffer)
+
+  // UTF-16LE with BOM (FF FE) — Primavera P6 default export
+  if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
+    return new TextDecoder('utf-16le').decode(bytes.slice(2))
+  }
+  // UTF-16BE with BOM (FE FF)
+  if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
+    return new TextDecoder('utf-16be').decode(bytes.slice(2))
+  }
+  // UTF-16LE without BOM — detect by counting zero bytes in odd positions.
+  // A pure ASCII file encoded as UTF-16LE has 0x00 at every odd index.
+  let zeroByteCount = 0
+  const sampleSize = Math.min(200, bytes.length)
+  for (let i = 1; i < sampleSize; i += 2) {
+    if (bytes[i] === 0x00) zeroByteCount++
+  }
+  if (zeroByteCount > sampleSize / 4) {
+    return new TextDecoder('utf-16le').decode(bytes)
+  }
+  // Default: UTF-8
+  return new TextDecoder('utf-8').decode(bytes)
+}
+
 export default function UploadPage() {
   const router = useRouter()
   const [step, setStep] = useState<Step>('upload')
@@ -228,18 +253,15 @@ export default function UploadPage() {
     completionDate: '', owner: '', gc: '', procurementIssues: '',
     keyConstraints: '', criticalConcerns: ''
   })
-
   // Project assignment state
   const [existingProjects, setExistingProjects] = useState<any[]>([])
   const [projectMode, setProjectMode] = useState<'new' | 'existing'>('new')
   const [selectedProjectId, setSelectedProjectId] = useState<string>('')
   const [newProjectId, setNewProjectId] = useState<string>('')
-
   useEffect(() => {
     // Run on mount AND when navigating to this page
     refreshProjectsList()
   }, [])
-
   function refreshProjectsList() {
     const all = loadProjects()
     setExistingProjects(all)
@@ -253,12 +275,9 @@ export default function UploadPage() {
       setProjectMode('new')
     }
   }
-
   const fileRef = useRef<HTMLInputElement>(null)
-
   const accept = '.xer,.xml,.mpp,.pdf,.xlsx,.xls,.csv'
   const phases = ['Pre-Construction','Foundation & Sitework','Structure','MEP Rough-In','Interior Finishes','Commissioning & Closeout','Punch & Turnover']
-
   function onDrop(e: React.DragEvent) {
     e.preventDefault(); setDragging(false)
     const f = e.dataTransfer.files[0]
@@ -268,7 +287,6 @@ export default function UploadPage() {
       setStep('context')
     }
   }
-
   function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
     if (f) {
@@ -282,55 +300,104 @@ export default function UploadPage() {
     setStep('analyzing')
     setProgress(0)
 
+    // Progress bar animation — parsing is fast (under a second even for
+    // a 3,000-activity XER), the network call for the AI narrative is
+    // what takes time. We tick up to ~85% during work, then snap to 100%
+    // when the response comes back.
     const progInterval = setInterval(() => {
       setProgress(p => p < 85 ? p + Math.random() * 8 : p)
     }, 400)
 
     try {
-      const formData = new FormData()
-      if (file) formData.append('file', file)
-      formData.append('context', JSON.stringify(ctx))
+      if (!file) {
+        throw new Error('No file selected')
+      }
 
-      const res = await fetch('/api/analyze', { method: 'POST', body: formData })
-      clearInterval(progInterval)
-      setProgress(100)
+      const ext = file.name.split('.').pop()?.toLowerCase()
+      let analysis: any
+      let rawXER: string | undefined
 
-      if (!res.ok) throw new Error('Analysis failed')
-      const data = await res.json()
-      setResult(data)
+      if (ext === 'xer') {
+        // CLIENT-SIDE XER PARSING — bypasses Vercel's serverless function
+        // upload size limit (~256 KB practical for multipart form-data,
+        // which was truncating the 620 KB DCDGS file from 1,048 activities
+        // down to 557).
+        //
+        // The browser reads the entire file into memory using FileReader,
+        // auto-detects encoding (Primavera P6 defaults to UTF-16LE), then
+        // runs the same parseXER + analyzeXER functions the server used
+        // to call. Only the small parsed analysis JSON is sent to the
+        // server, where it's used purely as input to the AI narrative.
+        setProgress(10)
+        const text = await readXERFileAsText(file)
+        rawXER = text  // Saved with the version for TIA comparison later
 
-      // Read raw XER text for TIA comparison from saved versions
-      // Auto-detect UTF-8 vs UTF-16 (Primavera often exports as UTF-16LE)
-      let rawXER: string | undefined = undefined
-      if (file && file.name.toLowerCase().endsWith('.xer')) {
-        try {
-          const buffer = await file.arrayBuffer()
-          const bytes = new Uint8Array(buffer)
-          if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
-            // UTF-16 Little Endian (with BOM)
-            rawXER = new TextDecoder('utf-16le').decode(bytes.slice(2))
-          } else if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
-            // UTF-16 Big Endian (with BOM)
-            rawXER = new TextDecoder('utf-16be').decode(bytes.slice(2))
-          } else {
-            // Check for UTF-16LE without BOM (every other byte zero)
-            let zeroByteCount = 0
-            const sampleSize = Math.min(200, bytes.length)
-            for (let i = 1; i < sampleSize; i += 2) {
-              if (bytes[i] === 0x00) zeroByteCount++
-            }
-            if (zeroByteCount > sampleSize / 4) {
-              rawXER = new TextDecoder('utf-16le').decode(bytes)
-            } else {
-              rawXER = new TextDecoder('utf-8').decode(bytes)
-            }
-          }
-        } catch (e) {
-          console.warn('Could not read raw XER text:', e)
+        setProgress(35)
+        const parsed = parseXER(text)
+        const result = analyzeXER(parsed)
+
+        analysis = {
+          ...result,
+          projectName: parsed.projectName || ctx.projectName || file.name,
+          dataDate: parsed.dataDate,
+          contractEnd: parsed.contractEnd,
+          projectedEnd: parsed.projectedEnd,
+          fileType: 'Primavera P6 XER',
+        }
+        setProgress(55)
+      } else {
+        // Non-XER files — build the fallback analysis the server used to
+        // generate. No parsing happens (we don't yet support these formats
+        // deeply). The narrative still runs, using the project context the
+        // user typed in to give general operational advice.
+        analysis = {
+          fileType: ext?.toUpperCase() || 'UNKNOWN',
+          projectName: ctx.projectName || file.name,
+          message: 'File received. Detailed parsing is currently optimized for Primavera P6 XER files. Narrative will use the project context you provided.',
+          healthScore: 65,
+          condition: 'Monitor Closely',
+          totalActivities: 0,
+          complete: 0,
+          inProgress: 0,
+          notStarted: 0,
+          negativeFloat: 0,
+          outOfSequence: [],
+          noTies: [],
+          longLeadItems: [],
+          criticalDrivers: [],
+          inProgressActivities: [],
+          delayDays: 0,
         }
       }
 
-      // Save as a project version based on user selection
+      // Send the parsed analysis JSON to the server for AI narrative.
+      // The payload is small (KBs, not MB) regardless of how big the
+      // original XER was — that's how we bypass the upload size cap.
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          analysis,
+          context: ctx,
+          fileName: file.name,
+        }),
+      })
+
+      clearInterval(progInterval)
+      setProgress(100)
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => 'Unknown error')
+        throw new Error(`Server error: ${errText}`)
+      }
+
+      const data = await res.json()
+      setResult(data)
+
+      // Save as a project version based on user selection.
+      // This logic is unchanged from before — we just feed it the analysis
+      // that's already in hand (no need to re-read the file from a server
+      // round-trip).
       try {
         const version: ScheduleVersion = {
           id: 'ver_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
@@ -346,9 +413,7 @@ export default function UploadPage() {
           context: ctx,
           rawXER,
         }
-
         console.log('[NobelPM] Saving version', { projectMode, selectedProjectId, versionId: version.id })
-
         if (projectMode === 'existing' && selectedProjectId) {
           // Add as new version to existing project
           const updated = addVersionToProject(selectedProjectId, version)
@@ -364,18 +429,16 @@ export default function UploadPage() {
           })
           console.log('[NobelPM] Created new project', { id: newProj.id, name: newProj.name })
         }
-
         // Keep legacy keys for backward compat
         localStorage.setItem('pl_last_analysis', JSON.stringify(data.analysis))
       } catch (err) {
         console.error('[NobelPM] Failed to save project:', err)
       }
-
       setTimeout(() => setStep('done'), 500)
-
     } catch (err: any) {
       clearInterval(progInterval)
-      alert('Analysis failed: ' + err.message)
+      console.error('[NobelPM] Analysis error:', err)
+      alert('Analysis failed: ' + (err.message || 'Unknown error'))
       setStep('context')
     }
   }
@@ -385,18 +448,15 @@ export default function UploadPage() {
     if (isNaN(h)) return '—'
     return Math.round(h / 8) + 'd'
   }
-
   function conditionColor(cond: string) {
     if (cond === 'Recovery Required') return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-900' }
     if (cond === 'Attention Needed') return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-900' }
     if (cond === 'Monitor Closely') return { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-900' }
     return { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-900' }
   }
-
   if (step === 'done' && result?.analysis) {
     const a = result.analysis
     const condColor = conditionColor(a.condition)
-
     return (
       <div className="flex flex-col h-full">
         <style jsx global>{`
@@ -425,7 +485,6 @@ export default function UploadPage() {
             </button>
           </div>
         </div>
-
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
           {/* Header */}
           <div className="bg-white border border-slate-200 rounded-xl p-4">
@@ -440,7 +499,6 @@ export default function UploadPage() {
               </div>
             </div>
           </div>
-
           {/* Condition Banner */}
           <div className={`${condColor.bg} ${condColor.border} border rounded-xl p-4 flex items-center gap-4`}>
             <div className="text-3xl">{a.condition === 'Recovery Required' ? '🔴' : a.condition === 'Attention Needed' ? '⚠️' : '🟢'}</div>
@@ -457,7 +515,6 @@ export default function UploadPage() {
               <div className="text-[10px] opacity-70">Health Score / 100</div>
             </div>
           </div>
-
           {/* KPI Grid */}
           <div className="grid grid-cols-5 gap-2">
             <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Total activities</div><div className="text-xl font-bold">{a.totalActivities}</div></div>
@@ -466,7 +523,6 @@ export default function UploadPage() {
             <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Negative float</div><div className="text-xl font-bold text-red-600">{a.negativeFloat}</div></div>
             <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Out-of-sequence</div><div className="text-xl font-bold text-red-600">{a.outOfSequence?.length || 0}</div></div>
           </div>
-
           {/* Tabs */}
           <div className="bg-white border border-slate-200 rounded-xl">
             <div className="tab-bar flex gap-0 border-b border-slate-100 overflow-x-auto no-print">
@@ -486,7 +542,6 @@ export default function UploadPage() {
                 </button>
               ))}
             </div>
-
             <div className="p-5">
               {/* GANTT CHART */}
               {activeTab === 'gantt' && (
@@ -496,7 +551,6 @@ export default function UploadPage() {
                   <GanttChart activities={a.ganttActivities || []} drivingPath={a.criticalDrivers || []} dataDate={a.dataDate} projectedEnd={a.projectedEnd} />
                 </div>
               )}
-
               {/* CRITICAL PATH */}
               {(activeTab === 'critical' || typeof window !== 'undefined' && window.matchMedia?.('print').matches) && (
                 <div className="tab-pane">
@@ -515,7 +569,6 @@ export default function UploadPage() {
                   </div>
                 </div>
               )}
-
               {/* LOGIC CHECK */}
               {activeTab === 'logic' && (
                 <div>
@@ -541,7 +594,6 @@ export default function UploadPage() {
                   })}
                 </div>
               )}
-
               {/* NO TIES */}
               {activeTab === 'noties' && (
                 <div>
@@ -564,7 +616,6 @@ export default function UploadPage() {
                   </div>
                 </div>
               )}
-
               {/* LONG LEAD */}
               {activeTab === 'longlead' && (
                 <div>
@@ -586,7 +637,6 @@ export default function UploadPage() {
                   </div>
                 </div>
               )}
-
               {/* FIELD REALITY */}
               {activeTab === 'field' && (
                 <div>
@@ -614,7 +664,6 @@ export default function UploadPage() {
                   </div>
                 </div>
               )}
-
               {/* PLAIN LANGUAGE */}
               {activeTab === 'plain' && (
                 <div>
@@ -659,7 +708,6 @@ export default function UploadPage() {
                   </div>
                 </div>
               )}
-
               {/* NARRATIVE */}
               {activeTab === 'ai' && (
                 <div>
@@ -676,7 +724,6 @@ export default function UploadPage() {
               )}
             </div>
           </div>
-
           {/* Action buttons */}
           <div className="grid grid-cols-3 gap-3 no-print">
             <button className="bg-white border border-slate-200 rounded-xl p-4 text-left hover:border-blue-300 transition-colors">
@@ -699,7 +746,6 @@ export default function UploadPage() {
       </div>
     )
   }
-
   return (
     <div className="flex flex-col h-full">
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0">
@@ -723,14 +769,11 @@ export default function UploadPage() {
           </div>
         </div>
       </div>
-
       <div className="flex-1 overflow-y-auto p-6">
-
         {step === 'upload' && (
           <div className="max-w-2xl mx-auto">
             <h2 className="text-xl font-extrabold text-slate-900 mb-1">Upload your project schedule</h2>
             <p className="text-slate-500 text-sm mb-6">NobelPM reads Primavera P6 XER files and interprets them like an experienced project controls advisor — including logic checks, long lead detection, and TIA evidence.</p>
-
             <div
               className={`upload-zone ${dragging ? 'dragging' : ''}`}
               onDragOver={e => { e.preventDefault(); setDragging(true) }}
@@ -747,7 +790,6 @@ export default function UploadPage() {
                 <span className="bg-slate-50 text-slate-500 text-xs font-semibold px-3 py-1 rounded-full border border-slate-100">.xml / .mpp / .pdf (limited)</span>
               </div>
             </div>
-
             <div className="mt-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
               <div className="text-xs font-bold text-slate-500 mb-2">WHAT NOBELPM WILL ANALYZE</div>
               <div className="space-y-1.5 text-xs text-slate-600">
@@ -762,7 +804,6 @@ export default function UploadPage() {
             </div>
           </div>
         )}
-
         {step === 'context' && (
           <div className="max-w-2xl mx-auto">
             <div className="flex items-center gap-3 mb-6 p-4 bg-green-50 border border-green-200 rounded-xl">
@@ -772,10 +813,8 @@ export default function UploadPage() {
                 <div className="text-green-600 text-xs mt-0.5">{file ? (file.size / 1024).toFixed(0) + ' KB' : ''} · Now tell NobelPM about your project</div>
               </div>
             </div>
-
             <h2 className="text-xl font-extrabold text-slate-900 mb-1">Tell us about your project</h2>
             <p className="text-slate-500 text-sm mb-5">Takes 2 minutes. The more context you give, the more accurate the analysis.</p>
-
             {/* Project assignment */}
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5">
               <div className="text-xs font-bold text-blue-900 uppercase tracking-wider mb-3">Assign this schedule to:</div>
@@ -808,7 +847,6 @@ export default function UploadPage() {
                   </div>
                 </button>
               </div>
-
               {projectMode === 'existing' && (
                 <div>
                   <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">Select Project</label>
@@ -825,7 +863,6 @@ export default function UploadPage() {
                   </select>
                 </div>
               )}
-
               {projectMode === 'new' && (
                 <div>
                   <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">Project ID (optional)</label>
@@ -839,7 +876,6 @@ export default function UploadPage() {
                 </div>
               )}
             </div>
-
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -885,7 +921,6 @@ export default function UploadPage() {
                   placeholder="e.g. Worried about finishing on time. Commissioning slipping..."
                   value={ctx.criticalConcerns} onChange={e => setCtx({...ctx, criticalConcerns: e.target.value})} />
               </div>
-
               <div className="flex gap-3 pt-2">
                 <button onClick={() => setStep('upload')} className="px-4 py-2.5 border border-slate-200 text-slate-600 rounded-lg text-sm font-semibold hover:border-slate-300">
                   ← Change File
@@ -898,7 +933,6 @@ export default function UploadPage() {
             </div>
           </div>
         )}
-
         {step === 'analyzing' && (
           <div className="max-w-2xl mx-auto text-center py-16">
             <div className="text-6xl mb-6 animate-pulse">🔍</div>
