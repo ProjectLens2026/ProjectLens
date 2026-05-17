@@ -1,8 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { getActiveProject, getLatestVersion } from '@/lib/projectStore'
-
+import { getActiveProject, getActiveVersion } from '@/lib/projectStore'
 interface Risk {
   id: string
   category: string
@@ -14,32 +13,32 @@ interface Risk {
   affectedActivities?: any[]
   actionItems: string[]
 }
-
 export default function RisksPage() {
   const [project, setProject] = useState<any>(null)
   const [analysis, setAnalysis] = useState<any>(null)
   const [version, setVersion] = useState<any>(null)
   const [filter, setFilter] = useState<'all' | 'critical' | 'high' | 'medium'>('all')
   const [expandedRisk, setExpandedRisk] = useState<string | null>(null)
-
   useEffect(() => {
     refresh()
     const interval = setInterval(refresh, 1000)
     return () => clearInterval(interval)
   }, [])
-
   function refresh() {
     const p = getActiveProject()
     setProject(p)
-    const v = getLatestVersion(p)
+    // Show the SELECTED version (V1 / V2 / etc. from sidebar), falling back
+    // to the latest version when nothing is explicitly selected. Previously
+    // this always called getLatestVersion which ignored sidebar selection
+    // and caused the "click V2 still sees V1" bug along with the apparent
+    // doubling of risk counts.
+    const v = getActiveVersion(p)
     setVersion(v)
     setAnalysis(v?.analysis || null)
   }
-
   function detectRisks(a: any): Risk[] {
     if (!a) return []
     const risks: Risk[] = []
-
     // TIA Territory
     if (a.delayDays > 30) {
       risks.push({
@@ -59,7 +58,6 @@ export default function RisksPage() {
         ],
       })
     }
-
     // Critical path compromised
     if (a.negativeFloat > 50) {
       risks.push({
@@ -97,7 +95,6 @@ export default function RisksPage() {
         ],
       })
     }
-
     // Long lead at risk
     const longLeadAtRisk = (a.longLeadItems || []).filter((t: any) => t.floatDays < 0)
     if (longLeadAtRisk.length > 0) {
@@ -119,13 +116,15 @@ export default function RisksPage() {
         ],
       })
     }
-
-    // Out of sequence
+    // Out of sequence — count is unique affected activities (matches P6's
+    // Schedule Log convention). A single activity with multiple violating
+    // predecessors counts once, with all its violating preds available in
+    // entry.predecessors for the detail drawer.
     if (a.outOfSequence?.length > 20) {
       risks.push({
         id: 'oos-severe',
         category: 'Logic Integrity',
-        title: `${a.outOfSequence.length} out-of-sequence violations`,
+        title: `${a.outOfSequence.length} out-of-sequence activities`,
         description: 'Schedule logic integrity compromised — work is being performed out of planned order on a large scale.',
         severity: 'high',
         detail: 'Out-of-sequence work means activities started before their predecessors finished. This breaks CPM calculations and indicates either field is ignoring schedule, or schedule logic was wrong.',
@@ -141,7 +140,7 @@ export default function RisksPage() {
       risks.push({
         id: 'oos',
         category: 'Logic Integrity',
-        title: `${a.outOfSequence.length} out-of-sequence violations`,
+        title: `${a.outOfSequence.length} out-of-sequence activities`,
         description: 'Some activities running out of planned sequence. May indicate field acceleration or schedule logic issues.',
         severity: 'medium',
         detail: 'Out-of-sequence work in moderate numbers is often a sign of contractor trying to make up time — but it makes float calculations unreliable.',
@@ -153,7 +152,6 @@ export default function RisksPage() {
         ],
       })
     }
-
     // No logic ties
     if (a.noTies?.length > 10) {
       risks.push({
@@ -172,7 +170,6 @@ export default function RisksPage() {
         ],
       })
     }
-
     // Health score critical
     if (a.healthScore < 40) {
       risks.push({
@@ -192,7 +189,6 @@ export default function RisksPage() {
         ],
       })
     }
-
     // Milestones at risk
     const milestonesAtRisk = (a.milestones || []).filter((m: any) => {
       const float = parseFloat(m.total_float_hr_cnt || '0') / 8
@@ -216,13 +212,11 @@ export default function RisksPage() {
         ],
       })
     }
-
     return risks.sort((a, b) => {
       const order = { critical: 0, high: 1, medium: 2 }
       return order[a.severity] - order[b.severity]
     })
   }
-
   if (!project) {
     return (
       <div className="flex flex-col h-full">
@@ -245,7 +239,6 @@ export default function RisksPage() {
       </div>
     )
   }
-
   if (!analysis) {
     return (
       <div className="flex flex-col h-full">
@@ -259,7 +252,6 @@ export default function RisksPage() {
       </div>
     )
   }
-
   const allRisks = detectRisks(analysis)
   const filtered = filter === 'all' ? allRisks : allRisks.filter(r => r.severity === filter)
   const counts = {
@@ -267,13 +259,11 @@ export default function RisksPage() {
     high: allRisks.filter(r => r.severity === 'high').length,
     medium: allRisks.filter(r => r.severity === 'medium').length,
   }
-
   function sevStyle(sev: string) {
     if (sev === 'critical') return { bg: 'bg-red-50', border: 'border-red-300', text: 'text-red-900', badge: 'bg-red-100 text-red-700', icon: '🚨' }
     if (sev === 'high') return { bg: 'bg-amber-50', border: 'border-amber-300', text: 'text-amber-900', badge: 'bg-amber-100 text-amber-700', icon: '⚠️' }
     return { bg: 'bg-yellow-50', border: 'border-yellow-300', text: 'text-yellow-900', badge: 'bg-yellow-100 text-yellow-700', icon: '⚡' }
   }
-
   return (
     <div className="flex flex-col h-full">
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0">
@@ -285,10 +275,8 @@ export default function RisksPage() {
           🖨 Print
         </button>
       </div>
-
       <div className="flex-1 overflow-y-auto p-5 bg-slate-50">
         <div className="max-w-5xl mx-auto space-y-3">
-
           {/* Filter buttons */}
           <div className="flex gap-2 no-print">
             <button onClick={() => setFilter('all')}
@@ -308,7 +296,6 @@ export default function RisksPage() {
               ⚡ Medium ({counts.medium})
             </button>
           </div>
-
           {/* Risk cards */}
           {filtered.length === 0 ? (
             <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
@@ -335,21 +322,18 @@ export default function RisksPage() {
                     </div>
                     <span className="text-xs text-slate-400 flex-shrink-0 mt-1">{isExpanded ? '▼' : '▶'}</span>
                   </button>
-
                   {isExpanded && (
                     <div className="px-5 py-4 border-t border-slate-200 bg-white">
                       <div className="mb-4">
                         <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Detail</div>
                         <div className="text-sm text-slate-700 whitespace-pre-line leading-relaxed">{risk.detail}</div>
                       </div>
-
                       <div className="mb-4">
                         <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">NobelPM Recommendation</div>
                         <div className={`text-sm font-medium ${style.text} bg-slate-50 border-l-4 ${style.border} p-3 rounded-r-lg leading-relaxed`}>
                           {risk.recommendation}
                         </div>
                       </div>
-
                       <div className="mb-4">
                         <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Action Items</div>
                         <ul className="space-y-1.5">
@@ -361,7 +345,6 @@ export default function RisksPage() {
                           ))}
                         </ul>
                       </div>
-
                       {risk.affectedActivities && risk.affectedActivities.length > 0 && (
                         <div>
                           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
@@ -389,7 +372,6 @@ export default function RisksPage() {
               )
             })
           )}
-
           {allRisks.length === 0 && (
             <div className="bg-green-50 border border-green-200 rounded-2xl p-8 text-center">
               <div className="text-4xl mb-3">✅</div>

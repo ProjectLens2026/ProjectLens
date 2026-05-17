@@ -1,8 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { getActiveProject, getLatestVersion } from '@/lib/projectStore'
-
+import { getActiveProject, getActiveVersion } from '@/lib/projectStore'
 // Gantt Chart Component
 function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
   activities: any[]
@@ -14,19 +13,16 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
   const hasDrivingPath = drivingPath && drivingPath.length > 0
   const displayActivities = hasZeroNegFloat ? activities : (hasDrivingPath ? drivingPath : [])
   const mode = hasZeroNegFloat ? 'float' : hasDrivingPath ? 'driving' : 'none'
-
   function renderGantt(acts: any[]) {
     const start = new Date(dataDate?.replace(' ', 'T') || new Date())
     const end = new Date(projectedEnd?.replace(' ', 'T') || new Date())
     const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)))
-
     function getLeft(dateStr?: string) {
       if (!dateStr) return 0
       const d = new Date(dateStr.replace(' ', 'T'))
       const days = Math.round((d.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
       return Math.max(0, Math.min(100, (days / totalDays) * 100))
     }
-
     function getWidth(startStr?: string, endStr?: string) {
       if (!startStr || !endStr) return 1
       const s = new Date(startStr.replace(' ', 'T'))
@@ -34,9 +30,7 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
       const days = Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24))
       return Math.max(0.5, Math.min(100, (days / totalDays) * 100))
     }
-
     function shortDate(d?: string) { return d ? d.slice(0, 10) : '—' }
-
     const months: { label: string; left: number }[] = []
     const cur = new Date(start)
     cur.setDate(1)
@@ -47,9 +41,7 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
       }
       cur.setMonth(cur.getMonth() + 1)
     }
-
     const displayed = acts.slice(0, 100)
-
     return (
       <div className="overflow-auto max-h-[550px] border border-slate-200 rounded-xl">
         <div className="sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
@@ -74,7 +66,6 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
           const left = getLeft(taskStart)
           const width = getWidth(taskStart, taskEnd)
           const pct = parseFloat(t.phys_complete_pct || '0')
-
           return (
             <div key={i} className={`flex border-b border-slate-100 hover:bg-blue-50/30 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
               <div className="w-80 flex-shrink-0 px-3 py-2 border-r border-slate-100 flex items-center gap-2">
@@ -109,7 +100,6 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
       </div>
     )
   }
-
   if (mode === 'none') {
     return (
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
@@ -131,7 +121,6 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
       </div>
     )
   }
-
   if (mode === 'driving') {
     return (
       <div className="space-y-4">
@@ -161,7 +150,6 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
       </div>
     )
   }
-
   return (
     <div className="space-y-3">
       <div className="flex gap-4 text-xs">
@@ -174,11 +162,10 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
     </div>
   )
 }
-
-
 export default function NobelPMAnalysisPage() {
   const [analysis, setAnalysis] = useState<any>(null)
   const [project, setProject] = useState<any>(null)
+  const [version, setVersion] = useState<any>(null)
   const [activeTab, setActiveTab] = useState('gantt')
   // Schedule Filter sub-filter (which slice of activities to show inside
   // the new "Schedule Filter" tab). Replaces the old separate Critical Path
@@ -188,34 +175,33 @@ export default function NobelPMAnalysisPage() {
   const [scheduleFilter, setScheduleFilter] = useState<
     'critical' | 'longest' | 'lookahead' | 'not-started' | 'finished'
   >('critical')
-
   useEffect(() => {
     refresh()
     const interval = setInterval(refresh, 1000)
     return () => clearInterval(interval)
   }, [])
-
   function refresh() {
     const p = getActiveProject()
     setProject(p)
-    // Always show the LATEST version on Full Analysis page
-    const latest = getLatestVersion(p)
-    setAnalysis(latest?.analysis || null)
+    // Show the SELECTED version (V1 / V2 / etc. from sidebar), falling back
+    // to the latest version when nothing is explicitly selected. Previously
+    // this always called getLatestVersion which ignored sidebar selection
+    // and caused clicking V1 to still render V2's data on Full Analysis.
+    const v = getActiveVersion(p)
+    setVersion(v)
+    setAnalysis(v?.analysis || null)
   }
-
   function fmtFloat(hours: string | number) {
     const h = typeof hours === 'string' ? parseFloat(hours || '0') : hours
     if (isNaN(h)) return '—'
     return Math.round(h / 8) + 'd'
   }
-
   function conditionColor(cond: string) {
     if (cond === 'Recovery Required') return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-900' }
     if (cond === 'Attention Needed') return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-900' }
     if (cond === 'Monitor Closely') return { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-900' }
     return { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-900' }
   }
-
   // No active project or no analysis
   if (!analysis || !project) {
     return (
@@ -242,11 +228,12 @@ export default function NobelPMAnalysisPage() {
       </div>
     )
   }
-
   const a = analysis
   const condColor = conditionColor(a.condition)
-  const aiNarrative = project?.versions?.[0]?.aiNarrative || ''
-
+  // AI narrative is stored per-version, not per-project. Read from the
+  // currently selected version's aiNarrative field (not always v0 like
+  // the old code did, which would show V1's narrative even when viewing V2).
+  const aiNarrative = version?.aiNarrative || ''
   return (
     <div className="flex flex-col h-full">
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0 no-print">
@@ -263,7 +250,6 @@ export default function NobelPMAnalysisPage() {
           </Link>
         </div>
       </div>
-
       <div className="flex-1 overflow-y-auto p-5 space-y-3">
         {/* Header */}
         <div className="bg-white border border-slate-200 rounded-xl p-4">
@@ -279,7 +265,6 @@ export default function NobelPMAnalysisPage() {
             </div>
           </div>
         </div>
-
         {/* Condition Banner */}
         <div className={`${condColor.bg} ${condColor.border} border rounded-xl p-4 flex items-center gap-4`}>
           <div className="text-3xl">{a.condition === 'Recovery Required' ? '🔴' : a.condition === 'Attention Needed' ? '⚠️' : '🟢'}</div>
@@ -296,7 +281,6 @@ export default function NobelPMAnalysisPage() {
             <div className="text-[10px] opacity-70">Health Score / 100</div>
           </div>
         </div>
-
         {/* KPI Grid */}
         <div className="grid grid-cols-5 gap-2">
           <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Total activities</div><div className="text-xl font-bold">{a.totalActivities}</div></div>
@@ -305,7 +289,6 @@ export default function NobelPMAnalysisPage() {
           <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Negative float</div><div className="text-xl font-bold text-red-600">{a.negativeFloat}</div></div>
           <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Out-of-sequence</div><div className="text-xl font-bold text-red-600">{a.outOfSequence?.length || 0}</div></div>
         </div>
-
         {/* Tabs */}
         <div className="bg-white border border-slate-200 rounded-xl">
           <div className="tab-bar flex gap-0 border-b border-slate-100 overflow-x-auto no-print">
@@ -325,7 +308,6 @@ export default function NobelPMAnalysisPage() {
               </button>
             ))}
           </div>
-
           <div className="p-5">
             {/* GANTT CHART */}
             {activeTab === 'gantt' && (
@@ -335,7 +317,6 @@ export default function NobelPMAnalysisPage() {
                 <GanttChart activities={a.ganttActivities || []} drivingPath={a.criticalDrivers || []} dataDate={a.dataDate} projectedEnd={a.projectedEnd} />
               </div>
             )}
-
             {/* SCHEDULE FILTER — replaces the old Critical Path + 2 Week Lookahead tabs.
                 Single tab with a sub-filter selector. Three filters work today using
                 data already produced by the XER parser; two are placeholders pending
@@ -346,7 +327,6 @@ export default function NobelPMAnalysisPage() {
                 <p className="text-xs text-slate-500 mb-4">
                   Slice the schedule different ways. Pick a filter below.
                 </p>
-
                 {/* Sub-filter selector — pill buttons. Disabled state used for
                     placeholder filters (Not Started, Finished) until parser exposes
                     the underlying activity lists. */}
@@ -374,7 +354,6 @@ export default function NobelPMAnalysisPage() {
                     </button>
                   ))}
                 </div>
-
                 {/* CRITICAL PATH sub-filter — activities with zero or negative float.
                     Uses a.criticalDrivers, already computed by the XER parser. */}
                 {scheduleFilter === 'critical' && (
@@ -398,7 +377,6 @@ export default function NobelPMAnalysisPage() {
                     </div>
                   </div>
                 )}
-
                 {/* LONGEST PATH sub-filter — for v1, mirrors Critical Path data.
                     Proper longest-path computation through substantial / final
                     completion milestones is planned for the parser upgrade. */}
@@ -423,7 +401,6 @@ export default function NobelPMAnalysisPage() {
                     </div>
                   </div>
                 )}
-
                 {/* 2 WEEK LOOKAHEAD sub-filter — activities starting/finishing within 14
                     calendar days of the schedule's data date. */}
                 {scheduleFilter === 'lookahead' && (
@@ -466,7 +443,6 @@ export default function NobelPMAnalysisPage() {
                     )}
                   </div>
                 )}
-
                 {/* ACTIVITIES NOT STARTED — placeholder. Real data needs the parser
                     to expose all-activities + act_start_date. Coming next push. */}
                 {scheduleFilter === 'not-started' && (
@@ -478,7 +454,6 @@ export default function NobelPMAnalysisPage() {
                     </div>
                   </div>
                 )}
-
                 {/* ACTIVITIES FINISHED — placeholder. Same parser dependency as
                     Not Started above. */}
                 {scheduleFilter === 'finished' && (
@@ -492,7 +467,6 @@ export default function NobelPMAnalysisPage() {
                 )}
               </div>
             )}
-
             {/* LOGIC CHECK */}
             {activeTab === 'logic' && (
               <div>
@@ -518,7 +492,6 @@ export default function NobelPMAnalysisPage() {
                 })}
               </div>
             )}
-
             {/* NO TIES */}
             {activeTab === 'noties' && (
               <div>
@@ -541,7 +514,6 @@ export default function NobelPMAnalysisPage() {
                 </div>
               </div>
             )}
-
             {/* LONG LEAD */}
             {activeTab === 'longlead' && (
               <div>
@@ -563,7 +535,6 @@ export default function NobelPMAnalysisPage() {
                 </div>
               </div>
             )}
-
             {/* FIELD REALITY */}
             {activeTab === 'field' && (
               <div>
@@ -591,7 +562,6 @@ export default function NobelPMAnalysisPage() {
                 </div>
               </div>
             )}
-
             {/* PLAIN LANGUAGE */}
             {activeTab === 'plain' && (
               <div>
@@ -636,7 +606,6 @@ export default function NobelPMAnalysisPage() {
                 </div>
               </div>
             )}
-
             {/* NARRATIVE */}
             {activeTab === 'ai' && (
               <div>
