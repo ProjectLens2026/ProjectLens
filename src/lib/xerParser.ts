@@ -60,6 +60,30 @@ export interface XERAnalysis {
   // calendar days after the schedule's data date. Used by the Schedule Filter
   // tab on the Full Analysis page. Excludes already-completed activities.
   twoWeekLookahead?: Task[]
+  // Activities Not Started — activities with no actual start date and no
+  // physical progress recorded. Sorted by planned start ascending so the
+  // soonest-due-to-start are at the top. Excludes completed activities
+  // (defensive — if it's complete it can't be "not started", but the parser
+  // shouldn't trust status_code alone since some scheduled report data is
+  // inconsistent). Used by the Schedule Filter tab > Activities Not Started.
+  notStartedActivities?: Task[]
+  // Activities Finished — activities with an actual finish date (work is
+  // complete). Sorted by actual finish DESCENDING so the most recently
+  // completed appear first — useful for "what did we just finish" review.
+  // Includes activities that may have status_code other than TK_Complete
+  // if they have a populated act_end_date (XER data can be inconsistent
+  // — some schedulers update actual dates without re-running the status
+  // calculation). Used by the Schedule Filter tab > Activities Finished.
+  finishedActivities?: Task[]
+  // Longest Path — activities that P6 has marked as being on the longest
+  // path via the driving_path_flag = 'Y' field. The longest path is the
+  // chain of activities that determines the project finish date; it differs
+  // from the critical path when the schedule has multiple float-zero chains
+  // or when there's a "Must Finish By" constraint pulling float negative
+  // on a non-longest chain. Falls back to criticalDrivers in the page UI
+  // when no activities have the flag set (typical in schedules where P6
+  // hasn't been told to calculate longest path).
+  longestPathActivities?: Task[]
   // Submittals — Submit activities + their Review/Approval successor pairs.
   // Detected by activity NAME (not ID), case-insensitive:
   //   - Name contains SUBMIT or SUBMITTAL → counts as a submit activity
@@ -518,6 +542,79 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
         })
     }
   }
+  // ACTIVITIES NOT STARTED — activities the contractor has not yet begun.
+  //
+  // An activity counts as "not started" if BOTH:
+  //   - It has no actual start date (act_start_date is empty)
+  //   - Its physical complete % is 0 or missing
+  // We do NOT rely solely on status_code === 'TK_NotStart' because some XER
+  // files come out with stale status codes after manual progress updates.
+  // The actual-date + percent-complete check is more reliable.
+  //
+  // Sort by planned start ascending so the soonest-due-to-start are at the
+  // top — that's the operational order the PM cares about ("what should
+  // already have started but hasn't").
+  const notStartedActivities = taskArr
+    .filter(t => {
+      // Skip if it has an actual start
+      if (t.act_start_date && t.act_start_date.trim() !== '') return false
+      // Skip if it has any physical progress
+      const pct = parseFloat(t.phys_complete_pct || '0')
+      if (!isNaN(pct) && pct > 0) return false
+      // Skip milestones — they're not "activities" in the field sense and
+      // would clutter the list. Milestone status is shown on the dashboard.
+      if (t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile' || t.task_type === 'TT_StartMile') return false
+      return true
+    })
+    .sort((a, b) => {
+      const aStr = a.early_start_date || a.target_start_date || ''
+      const bStr = b.early_start_date || b.target_start_date || ''
+      return aStr.localeCompare(bStr)
+    })
+  // ACTIVITIES FINISHED — completed activities with an actual finish date.
+  //
+  // An activity counts as "finished" if it has a populated act_end_date.
+  // We don't filter by status_code alone — some XERs have act_end_date set
+  // without status being updated to TK_Complete (or vice versa). The
+  // actual-date check is more reliable.
+  //
+  // Sort by actual finish DESCENDING so most recently completed work
+  // appears first — that's the natural "what did we just finish" review
+  // order for the PM. Milestones are EXCLUDED here too for the same reason
+  // as Not Started — they belong on the milestones display, not in the
+  // finished activities list.
+  const finishedActivities = taskArr
+    .filter(t => {
+      if (!t.act_end_date || t.act_end_date.trim() === '') return false
+      if (t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile' || t.task_type === 'TT_StartMile') return false
+      return true
+    })
+    .sort((a, b) => {
+      // Descending by actual finish (most recent first)
+      const aStr = a.act_end_date || ''
+      const bStr = b.act_end_date || ''
+      return bStr.localeCompare(aStr)
+    })
+  // LONGEST PATH — activities P6 has flagged via driving_path_flag = 'Y'.
+  //
+  // The longest path is the chain of activities that determines when the
+  // project finishes. It's similar to the critical path but doesn't depend
+  // on float being zero — P6 calculates it independently and marks each
+  // activity on the path with driving_path_flag = 'Y'. Useful when a
+  // schedule has positive total float everywhere (no constraint pulling
+  // float negative) and the critical path view shows nothing useful.
+  //
+  // Sort by early start ascending so the path reads left-to-right
+  // chronologically. Empty array when no activities have the flag set —
+  // the page UI falls back to criticalDrivers in that case so the tab
+  // never shows nothing.
+  const longestPathActivities = taskArr
+    .filter(t => t.driving_path_flag === 'Y')
+    .sort((a, b) => {
+      const aStr = a.early_start_date || a.target_start_date || a.act_start_date || ''
+      const bStr = b.early_start_date || b.target_start_date || b.act_start_date || ''
+      return aStr.localeCompare(bStr)
+    })
   // SUBMITTALS — paired Submit + Review/Approval activities
   const SUBMIT_RX = /SUBMIT(?:TAL)?/i
   const APPROVAL_RX = /REVIEW|APPROVE|APPROVAL/i
@@ -604,6 +701,9 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     criticalDrivers, ganttActivities, inProgressActivities,
     milestones,
     twoWeekLookahead,
+    notStartedActivities,
+    finishedActivities,
+    longestPathActivities,
     submittals,
     healthScore, condition, delayDays,
     dataDate: parsed.dataDate,
