@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import {
   getActiveProject, getActiveProjectId, loadProjects,
   createProject, addVersionToProject,
+  subscribeToProjects,
   ScheduleVersion
 } from '@/lib/projectStore'
 // XER parser — runs in the browser now to avoid Vercel's serverless function
@@ -259,8 +260,12 @@ export default function UploadPage() {
   const [selectedProjectId, setSelectedProjectId] = useState<string>('')
   const [newProjectId, setNewProjectId] = useState<string>('')
   useEffect(() => {
-    // Run on mount AND when navigating to this page
+    // Initial load — IndexedDB may not be hydrated yet, in which case
+    // loadProjects() returns []. The subscription below will fire when
+    // hydration completes (and on any subsequent writes).
     refreshProjectsList()
+    const unsubscribe = subscribeToProjects(refreshProjectsList)
+    return unsubscribe
   }, [])
   function refreshProjectsList() {
     const all = loadProjects()
@@ -445,15 +450,16 @@ export default function UploadPage() {
         }
       } catch (err: any) {
         console.error('[NobelPM] Failed to save project:', err)
-        // Surface the save failure to the user. Without this, they'd see
-        // the analysis on-screen and assume everything worked, then later
-        // wonder why the project never appeared on the dashboard.
+        // Surface the save failure to the user. With IndexedDB this is
+        // rare — only happens if the disk is genuinely full or the
+        // browser is in private mode without IndexedDB. The analysis
+        // displayed on-screen is still accurate, it just won't persist.
         const userMessage = err?.message ||
-          'Failed to save this project. The analysis displayed above is correct, but it was not saved to your projects list.'
+          'Failed to save this project. The analysis displayed above is correct, but it was not saved.'
         alert(
           'Your schedule was analyzed successfully, but we could not save it:\n\n' +
           userMessage +
-          '\n\nThe analysis below is still accurate — but it will not appear in your Projects list until storage is freed up.'
+          '\n\nThe analysis below is still accurate — but it will not appear in your Projects list unless saving succeeds.'
         )
       }
       setTimeout(() => setStep('done'), 500)
