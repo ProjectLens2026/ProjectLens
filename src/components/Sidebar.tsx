@@ -90,31 +90,19 @@ export default function Sidebar({ user }: SidebarProps) {
 
   return (
     <aside className="w-56 flex-shrink-0 flex flex-col h-full no-print" style={{ background: '#0d1b2e' }}>
-      {/* Logo — ControlLens Crosshair Lens.
-          Sidebar uses a slightly smaller mark (28x28) so it fits the compact
-          left-rail layout. Same lens geometry as the auth pages. */}
+      {/* Logo — ControlLens 4-bar mark.
+          Replaces the Crosshair Lens design. Same bars as the NobelPM
+          original brand DNA, in the saturated palette. The dimensions
+          (width 28, height 20, viewBox 44x32) keep the same vertical
+          footprint inside the sidebar header. */}
       <div className="px-4 py-5 border-b border-white/10 flex-shrink-0">
         <Link href="/dashboard/projects" className="flex items-center gap-2.5">
           <div className="flex-shrink-0">
-            <svg width="28" height="28" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" aria-label="ControlLens mark">
-              {/* Lens body */}
-              <circle cx="20" cy="20" r="15.3" fill="#0f172a"/>
-              <circle cx="20" cy="20" r="13.3" fill="#f8fafc"/>
-              {/* Schedule bars clipped to lens face */}
-              <g style={{ clipPath: 'circle(13.3px at 20px 20px)' }}>
-                <rect x="8.4" y="13.9" width="16.7" height="2.3" rx="0.4" fill="#2563eb"/>
-                <rect x="8.4" y="17.2" width="22.6" height="2.3" rx="0.4" fill="#dc2626"/>
-                <rect x="8.4" y="20.5" width="13.8" height="2.3" rx="0.4" fill="#16a34a"/>
-                <rect x="8.4" y="23.8" width="18.2" height="2.3" rx="0.4" fill="#1f2937"/>
-              </g>
-              {/* Crosshair overlay */}
-              <g style={{ clipPath: 'circle(13.3px at 20px 20px)' }} opacity="0.55">
-                <line x1="4.7" y1="20" x2="16.4" y2="20" stroke="#0f172a" strokeWidth="0.5"/>
-                <line x1="23.6" y1="20" x2="35.3" y2="20" stroke="#0f172a" strokeWidth="0.5"/>
-                <line x1="20" y1="4.7" x2="20" y2="16.4" stroke="#0f172a" strokeWidth="0.5"/>
-                <line x1="20" y1="23.6" x2="20" y2="35.3" stroke="#0f172a" strokeWidth="0.5"/>
-                <circle cx="20" cy="20" r="0.6" fill="#0f172a"/>
-              </g>
+            <svg width="28" height="20" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" aria-label="ControlLens mark">
+              <rect x="0" y="0" width="32" height="5" rx="1" fill="#2563eb"/>
+              <rect x="0" y="9" width="44" height="5" rx="1" fill="#dc2626"/>
+              <rect x="0" y="18" width="26" height="5" rx="1" fill="#16a34a"/>
+              <rect x="0" y="27" width="36" height="5" rx="1" fill="#1f2937"/>
             </svg>
           </div>
           <div>
