@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 120" width="520" height="120">
+  <!-- ControlLens horizontal logo lockup -->
+  <defs>
+    <clipPath id="lensClipH">
+      <circle cx="60" cy="60" r="40"/>
+    </clipPath>
+  </defs>
+  
+  <!-- Mark -->
+  <circle cx="60" cy="60" r="46" fill="#0f172a"/>
+  <circle cx="60" cy="60" r="40" fill="#f8fafc"/>
+  <g clip-path="url(#lensClipH)">
+    <rect x="25" y="43" width="58" height="7" rx="1.5" fill="#2563eb"/>
+    <rect x="25" y="53" width="78" height="7" rx="1.5" fill="#dc2626"/>
+    <rect x="25" y="63" width="48" height="7" rx="1.5" fill="#16a34a"/>
+    <rect x="25" y="73" width="62" height="7" rx="1.5" fill="#1f2937"/>
+  </g>
+  <g clip-path="url(#lensClipH)" opacity="0.55">
+    <line x1="20" y1="60" x2="49" y2="60" stroke="#0f172a" stroke-width="1.5"/>
+    <line x1="71" y1="60" x2="100" y2="60" stroke="#0f172a" stroke-width="1.5"/>
+    <line x1="60" y1="20" x2="60" y2="49" stroke="#0f172a" stroke-width="1.5"/>
+    <line x1="60" y1="71" x2="60" y2="100" stroke="#0f172a" stroke-width="1.5"/>
+    <circle cx="60" cy="60" r="1.5" fill="#0f172a"/>
+  </g>
+  <!-- Wordmark -->
+  <text x="130" y="75"
+        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif"
+        font-size="44" font-weight="700"
+        letter-spacing="-0.5">
+    <tspan fill="#0f172a">Control</tspan><tspan fill="#2563eb">Lens</tspan>
+  </text>
+</svg>

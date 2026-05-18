@@ -1,4 +1,5 @@
 'use client'
+
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
@@ -83,6 +84,7 @@ function LoginInner() {
     e.preventDefault()
     setError(null)
     setLoading(true)
+
     const supabase = createClient()
 
     try {
@@ -173,16 +175,37 @@ function LoginInner() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Logo */}
+        {/* Logo — ControlLens Crosshair Lens mark + wordmark.
+            Inline SVG keeps the brand mark crisp at any size and avoids an
+            extra HTTP request. Same geometry as the favicon and asset-pack
+            files, just expressed at viewBox 40x40 for inline use. */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 mb-3">
-            <svg width="44" height="32" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" aria-label="NobelPM mark">
-              <rect x="0" y="0" width="32" height="5" rx="1" fill="#3b82f6"/>
-              <rect x="0" y="9" width="44" height="5" rx="1" fill="#ef4444"/>
-              <rect x="0" y="18" width="26" height="5" rx="1" fill="#22c55e"/>
-              <rect x="0" y="27" width="36" height="5" rx="1" fill="#94a3b8"/>
+          <div className="inline-flex items-center gap-2.5 mb-3">
+            <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" aria-label="ControlLens mark">
+              {/* Lens body — outer ring + inner face */}
+              <circle cx="20" cy="20" r="15.3" fill="#0f172a"/>
+              <circle cx="20" cy="20" r="13.3" fill="#f8fafc"/>
+              {/* Schedule bars (the original 4-bar metaphor, now seen "through" the lens) */}
+              <g style={{ clipPath: 'circle(13.3px at 20px 20px)' }}>
+                <rect x="8.4" y="13.9" width="16.7" height="2.3" rx="0.4" fill="#2563eb"/>
+                <rect x="8.4" y="17.2" width="22.6" height="2.3" rx="0.4" fill="#dc2626"/>
+                <rect x="8.4" y="20.5" width="13.8" height="2.3" rx="0.4" fill="#16a34a"/>
+                <rect x="8.4" y="23.8" width="18.2" height="2.3" rx="0.4" fill="#1f2937"/>
+              </g>
+              {/* Crosshair — clipped to inner face. Gap around center keeps the
+                  bars readable. Slate at 0.55 opacity reads as a subtle overlay
+                  rather than dominating the bars. */}
+              <g style={{ clipPath: 'circle(13.3px at 20px 20px)' }} opacity="0.55">
+                <line x1="4.7" y1="20" x2="16.4" y2="20" stroke="#0f172a" strokeWidth="0.5"/>
+                <line x1="23.6" y1="20" x2="35.3" y2="20" stroke="#0f172a" strokeWidth="0.5"/>
+                <line x1="20" y1="4.7" x2="20" y2="16.4" stroke="#0f172a" strokeWidth="0.5"/>
+                <line x1="20" y1="23.6" x2="20" y2="35.3" stroke="#0f172a" strokeWidth="0.5"/>
+                <circle cx="20" cy="20" r="0.6" fill="#0f172a"/>
+              </g>
             </svg>
-            <span className="text-2xl font-extrabold text-white">NobelPM</span>
+            <span className="text-2xl font-extrabold text-white">
+              Control<span className="text-blue-500">Lens</span>
+            </span>
           </div>
           <p className="text-slate-400 text-sm">Visibility. Insight. Control.</p>
         </div>
@@ -272,6 +295,7 @@ function LoginInner() {
                 </div>
               </>
             )}
+
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Email</label>
               <input
@@ -294,6 +318,7 @@ function LoginInner() {
                 </p>
               )}
             </div>
+
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Password</label>
               <input
@@ -319,7 +344,7 @@ function LoginInner() {
               className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors disabled:opacity-60 mt-2">
               {loading
                 ? (mode === 'signup' ? 'Creating your account...' : 'Signing you in...')
-                : (mode === 'login' ? 'Sign In to NobelPM' : 'Create My Account')
+                : (mode === 'login' ? 'Sign In to ControlLens' : 'Create My Account')
               }
             </button>
           </form>
@@ -334,15 +359,14 @@ function LoginInner() {
 
           {mode === 'signup' && (
             <p className="text-center text-xs text-slate-400 mt-4 leading-relaxed">
-              By creating an account, you agree to use NobelPM responsibly.
+              By creating an account, you agree to use ControlLens responsibly.
               We&apos;ll email you a verification link before you can sign in.
             </p>
           )}
         </div>
 
-        <p className="text-center text-slate-500 text-xs mt-6">
-          <Link href="/" className="hover:text-white transition-colors">← Back to nobelpm.org</Link>
-        </p>
+        {/* Footer link to marketing site removed during rebrand. Will be added
+            back when the marketing site at www.control-lens.com is live. */}
       </div>
     </div>
   )

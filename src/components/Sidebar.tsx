@@ -1,4 +1,5 @@
 'use client'
+
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
@@ -32,10 +33,11 @@ export default function Sidebar({ user }: SidebarProps) {
   async function handleSignOut() {
     const supabase = createClient()
     await supabase.auth.signOut()
-    // NOTE: localStorage project data intentionally NOT cleared here.
-    // Until Phase 3 moves data to Supabase tables, clearing localStorage on
-    // sign-out would force users to re-upload every XER after each session.
-    // For now, projects persist in the browser between sign-outs.
+    // Clear any local project data so the next user on this browser starts clean.
+    // Phase 3 (data migration to Supabase) will make this unnecessary.
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('pl_')) localStorage.removeItem(key)
+    })
     router.push('/login')
   }
 
@@ -61,7 +63,9 @@ export default function Sidebar({ user }: SidebarProps) {
       group: 'Active Project',
       items: [
         { href: '/dashboard', icon: '⊞', label: 'Dashboard' },
-        { href: '/dashboard/lens', icon: '🔍', label: 'Full Analysis' },
+        // Was "NobelPM Analysis" — renamed to "Schedule Analysis" during rebrand.
+        // Clearer label that describes what the page actually does.
+        { href: '/dashboard/lens', icon: '🔍', label: 'Schedule Analysis' },
       ]
     },
     {
@@ -86,19 +90,37 @@ export default function Sidebar({ user }: SidebarProps) {
 
   return (
     <aside className="w-56 flex-shrink-0 flex flex-col h-full no-print" style={{ background: '#0d1b2e' }}>
-      {/* Logo */}
+      {/* Logo — ControlLens Crosshair Lens.
+          Sidebar uses a slightly smaller mark (28x28) so it fits the compact
+          left-rail layout. Same lens geometry as the auth pages. */}
       <div className="px-4 py-5 border-b border-white/10 flex-shrink-0">
         <Link href="/dashboard/projects" className="flex items-center gap-2.5">
           <div className="flex-shrink-0">
-            <svg width="24" height="18" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" aria-label="NobelPM mark">
-              <rect x="0" y="0" width="32" height="5" rx="1" fill="#3b82f6"/>
-              <rect x="0" y="9" width="44" height="5" rx="1" fill="#ef4444"/>
-              <rect x="0" y="18" width="26" height="5" rx="1" fill="#22c55e"/>
-              <rect x="0" y="27" width="36" height="5" rx="1" fill="#94a3b8"/>
+            <svg width="28" height="28" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" aria-label="ControlLens mark">
+              {/* Lens body */}
+              <circle cx="20" cy="20" r="15.3" fill="#0f172a"/>
+              <circle cx="20" cy="20" r="13.3" fill="#f8fafc"/>
+              {/* Schedule bars clipped to lens face */}
+              <g style={{ clipPath: 'circle(13.3px at 20px 20px)' }}>
+                <rect x="8.4" y="13.9" width="16.7" height="2.3" rx="0.4" fill="#2563eb"/>
+                <rect x="8.4" y="17.2" width="22.6" height="2.3" rx="0.4" fill="#dc2626"/>
+                <rect x="8.4" y="20.5" width="13.8" height="2.3" rx="0.4" fill="#16a34a"/>
+                <rect x="8.4" y="23.8" width="18.2" height="2.3" rx="0.4" fill="#1f2937"/>
+              </g>
+              {/* Crosshair overlay */}
+              <g style={{ clipPath: 'circle(13.3px at 20px 20px)' }} opacity="0.55">
+                <line x1="4.7" y1="20" x2="16.4" y2="20" stroke="#0f172a" strokeWidth="0.5"/>
+                <line x1="23.6" y1="20" x2="35.3" y2="20" stroke="#0f172a" strokeWidth="0.5"/>
+                <line x1="20" y1="4.7" x2="20" y2="16.4" stroke="#0f172a" strokeWidth="0.5"/>
+                <line x1="20" y1="23.6" x2="20" y2="35.3" stroke="#0f172a" strokeWidth="0.5"/>
+                <circle cx="20" cy="20" r="0.6" fill="#0f172a"/>
+              </g>
             </svg>
           </div>
           <div>
-            <div className="text-white font-extrabold text-sm tracking-tight">NobelPM</div>
+            <div className="text-white font-extrabold text-sm tracking-tight">
+              Control<span className="text-blue-500">Lens</span>
+            </div>
             <div className="text-white/30 text-[9px]">Construction Intelligence</div>
           </div>
         </Link>

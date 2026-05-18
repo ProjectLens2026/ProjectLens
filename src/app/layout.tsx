@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'NobelPM — Construction Operational Visibility',
+  title: 'ControlLens — Construction Schedule Intelligence',
   description: 'Understand project condition, schedule health, and operational risk — in one screen, in under a minute.',
   icons: {
     icon: [

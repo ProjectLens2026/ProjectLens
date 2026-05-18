@@ -1,9 +1,29 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 246.00 246.00" width="246.00" height="246.00">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- ControlLens mark — Concept 4 (Crosshair Lens).
+       Schedule bars viewed through a precision targeting lens. -->
+  <defs>
+    <clipPath id="lensClip">
+      <circle cx="32.0" cy="32.0" r="21.312"/>
+    </clipPath>
+  </defs>
   
-  <g transform="translate(24.00,51.00) scale(4.5)">
-  <rect x="0" y="0" width="32" height="5" rx="1" fill="#2563eb"/>
-  <rect x="0" y="9" width="44" height="5" rx="1" fill="#dc2626"/>
-  <rect x="0" y="18" width="26" height="5" rx="1" fill="#16a34a"/>
-  <rect x="0" y="27" width="36" height="5" rx="1" fill="#1f2937"/>
+  <!-- Outer ring -->
+  <circle cx="32.0" cy="32.0" r="24.512" fill="#0f172a"/>
+  <!-- Inner face -->
+  <circle cx="32.0" cy="32.0" r="21.312" fill="#f8fafc"/>
+  <!-- Schedule bars -->
+  <g clip-path="url(#lensClip)">
+    <rect x="-38.0" y="-5.0" width="115" height="14" rx="2" fill="#2563eb"/>
+    <rect x="-38.0" y="15.0" width="155" height="14" rx="2" fill="#dc2626"/>
+    <rect x="-38.0" y="35.0" width="95" height="14" rx="2" fill="#16a34a"/>
+    <rect x="-38.0" y="55.0" width="125" height="14" rx="2" fill="#1f2937"/>
+  </g>
+  <!-- Crosshairs (gap-around-center, clipped to lens) -->
+  <g clip-path="url(#lensClip)" opacity="0.55">
+    <line x1="10.687999999999999" y1="32.0" x2="10.0" y2="32.0" stroke="#0f172a" stroke-width="2"/>
+    <line x1="54.0" y1="32.0" x2="53.312" y2="32.0" stroke="#0f172a" stroke-width="2"/>
+    <line x1="32.0" y1="10.687999999999999" x2="32.0" y2="10.0" stroke="#0f172a" stroke-width="2"/>
+    <line x1="32.0" y1="54.0" x2="32.0" y2="53.312" stroke="#0f172a" stroke-width="2"/>
+    <circle cx="32.0" cy="32.0" r="3" fill="#0f172a"/>
   </g>
 </svg>
