@@ -1,71 +1,127 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { useState, useEffect } from 'react'
+import { useRouter, usePathname } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
-import { migrateLegacyData } from '@/lib/projectStore'
+import HelpWidget from '@/components/HelpWidget'
+import { migrateLegacyData, loadProjects, getActiveProjectId, setActiveProjectId } from '@/lib/projectStore'
+import { createClient } from '@/lib/supabase/client'
+
+interface AppUser {
+  name: string
+  email: string
+  company: string
+  role: string
+  initials: string
+}
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
-  const [loading, setLoading] = useState(true)
-  const [user, setUser] = useState<any>(null)
+  const pathname = usePathname()
+  const [user, setUser] = useState<AppUser | null>(null)
+  const [checking, setChecking] = useState(true)
 
   useEffect(() => {
     const supabase = createClient()
-    let mounted = true
 
-    supabase.auth.getUser().then(({ data, error }) => {
-      if (!mounted) return
-      if (error || !data.user) {
-        router.replace('/login?error=session_expired')
+    async function checkAuth() {
+      const { data: { session } } = await supabase.auth.getSession()
+
+      if (!session) {
+        router.replace('/login')
         return
       }
-      setUser(data.user)
-      setLoading(false)
-      // Migrate any pre-existing localStorage data so the dashboard works the
-      // first time a returning user signs in.
-      try { migrateLegacyData() } catch {}
-    })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      // Email must be verified before they can access the dashboard
+      if (!session.user.email_confirmed_at) {
+        await supabase.auth.signOut()
+        router.replace('/login?error=email_not_verified')
+        return
+      }
+
+      // Load profile data (name, company, role) from the profiles table
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .single()
+
+      const name = profile?.name || session.user.email || 'User'
+      const initials = name
+        .split(' ')
+        .map((n: string) => n[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 2)
+
+      setUser({
+        name,
+        email: session.user.email || '',
+        company: profile?.company || '',
+        role: profile?.role || 'Project Manager',
+        initials,
+      })
+
+      // Local project data setup. Phase 3 will migrate these to Supabase.
+      migrateLegacyData()
+      const projects = loadProjects()
+      if (projects.length > 0 && !getActiveProjectId()) {
+        setActiveProjectId(projects[0].id)
+      }
+
+      setChecking(false)
+    }
+
+    checkAuth()
+
+    // React to sign-out from any tab
+    const { data: subscription } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
         router.replace('/login')
       }
     })
 
     return () => {
-      mounted = false
-      subscription.unsubscribe()
+      subscription.subscription.unsubscribe()
     }
   }, [router])
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center">
-        <div className="text-center">
-          {/* Loading screen — pulsing 4-bar mark */}
-          <div className="inline-flex items-center gap-2.5 mb-4 animate-pulse">
-            <svg width="44" height="32" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" aria-label="ControlLens mark">
-              <rect x="0" y="0" width="32" height="5" rx="1" fill="#2563eb"/>
-              <rect x="0" y="9" width="44" height="5" rx="1" fill="#dc2626"/>
-              <rect x="0" y="18" width="26" height="5" rx="1" fill="#16a34a"/>
-              <rect x="0" y="27" width="36" height="5" rx="1" fill="#1f2937"/>
-            </svg>
-            <span className="text-2xl font-extrabold text-white">
-              Control<span className="text-blue-500">Lens</span>
-            </span>
-          </div>
-          <p className="text-slate-400 text-sm">Loading your workspace...</p>
-        </div>
+  if (checking || !user) return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-900">
+      <div className="flex flex-col items-center gap-3">
+        {/* Loading mark — ControlLens Crosshair Lens, pulsing.
+            36x36 size feels right for a loading state — large enough to read,
+            small enough not to dominate. Same geometry as the auth and sidebar
+            marks. */}
+        <svg width="36" height="36" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" className="animate-pulse" aria-label="ControlLens mark">
+          <circle cx="20" cy="20" r="15.3" fill="#0f172a"/>
+          <circle cx="20" cy="20" r="13.3" fill="#f8fafc"/>
+          <g style={{ clipPath: 'circle(13.3px at 20px 20px)' }}>
+            <rect x="8.4" y="13.9" width="16.7" height="2.3" rx="0.4" fill="#2563eb"/>
+            <rect x="8.4" y="17.2" width="22.6" height="2.3" rx="0.4" fill="#dc2626"/>
+            <rect x="8.4" y="20.5" width="13.8" height="2.3" rx="0.4" fill="#16a34a"/>
+            <rect x="8.4" y="23.8" width="18.2" height="2.3" rx="0.4" fill="#1f2937"/>
+          </g>
+          <g style={{ clipPath: 'circle(13.3px at 20px 20px)' }} opacity="0.55">
+            <line x1="4.7" y1="20" x2="16.4" y2="20" stroke="#0f172a" strokeWidth="0.5"/>
+            <line x1="23.6" y1="20" x2="35.3" y2="20" stroke="#0f172a" strokeWidth="0.5"/>
+            <line x1="20" y1="4.7" x2="20" y2="16.4" stroke="#0f172a" strokeWidth="0.5"/>
+            <line x1="20" y1="23.6" x2="20" y2="35.3" stroke="#0f172a" strokeWidth="0.5"/>
+            <circle cx="20" cy="20" r="0.6" fill="#0f172a"/>
+          </g>
+        </svg>
+        <div className="text-white/40 text-sm">Loading ControlLens...</div>
       </div>
-    )
-  }
+    </div>
+  )
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
+    <div className="flex h-screen overflow-hidden bg-slate-100">
       <Sidebar user={user} />
-      <main className="flex-1 ml-64 overflow-y-auto">{children}</main>
+      <div className="flex-1 overflow-hidden flex flex-col min-w-0">
+        {children}
+      </div>
+      <HelpWidget />
     </div>
   )
 }

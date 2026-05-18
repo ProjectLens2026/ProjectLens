@@ -7,17 +7,18 @@ import { createClient } from '@/lib/supabase/client'
 
 export default function ResetPasswordPage() {
   const router = useRouter()
+  const [hasSession, setHasSession] = useState<boolean | null>(null)
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState(false)
-  const [validSession, setValidSession] = useState<boolean | null>(null)
+  const [success, setSuccess] = useState(false)
 
   useEffect(() => {
+    // User must have a valid recovery session (from clicking the reset email link)
     const supabase = createClient()
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setValidSession(!!session)
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setHasSession(!!user)
     })
   }, [])
 
@@ -30,7 +31,7 @@ export default function ResetPasswordPage() {
       return
     }
     if (password !== confirm) {
-      setError('Passwords don\'t match.')
+      setError('Passwords do not match.')
       return
     }
 
@@ -44,22 +45,35 @@ export default function ResetPasswordPage() {
       return
     }
 
-    setDone(true)
+    setSuccess(true)
     setLoading(false)
-    setTimeout(() => router.push('/dashboard'), 1500)
+    // Sign them out then redirect to login (forces fresh login with new password)
+    await supabase.auth.signOut()
+    setTimeout(() => router.push('/login'), 2000)
   }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Logo — ControlLens 4-bar mark */}
+        {/* Logo — ControlLens Crosshair Lens */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2.5 mb-3">
-            <svg width="44" height="32" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" aria-label="ControlLens mark">
-              <rect x="0" y="0" width="32" height="5" rx="1" fill="#2563eb"/>
-              <rect x="0" y="9" width="44" height="5" rx="1" fill="#dc2626"/>
-              <rect x="0" y="18" width="26" height="5" rx="1" fill="#16a34a"/>
-              <rect x="0" y="27" width="36" height="5" rx="1" fill="#1f2937"/>
+            <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" aria-label="ControlLens mark">
+              <circle cx="20" cy="20" r="15.3" fill="#0f172a"/>
+              <circle cx="20" cy="20" r="13.3" fill="#f8fafc"/>
+              <g style={{ clipPath: 'circle(13.3px at 20px 20px)' }}>
+                <rect x="8.4" y="13.9" width="16.7" height="2.3" rx="0.4" fill="#2563eb"/>
+                <rect x="8.4" y="17.2" width="22.6" height="2.3" rx="0.4" fill="#dc2626"/>
+                <rect x="8.4" y="20.5" width="13.8" height="2.3" rx="0.4" fill="#16a34a"/>
+                <rect x="8.4" y="23.8" width="18.2" height="2.3" rx="0.4" fill="#1f2937"/>
+              </g>
+              <g style={{ clipPath: 'circle(13.3px at 20px 20px)' }} opacity="0.55">
+                <line x1="4.7" y1="20" x2="16.4" y2="20" stroke="#0f172a" strokeWidth="0.5"/>
+                <line x1="23.6" y1="20" x2="35.3" y2="20" stroke="#0f172a" strokeWidth="0.5"/>
+                <line x1="20" y1="4.7" x2="20" y2="16.4" stroke="#0f172a" strokeWidth="0.5"/>
+                <line x1="20" y1="23.6" x2="20" y2="35.3" stroke="#0f172a" strokeWidth="0.5"/>
+                <circle cx="20" cy="20" r="0.6" fill="#0f172a"/>
+              </g>
             </svg>
             <span className="text-2xl font-extrabold text-white">
               Control<span className="text-blue-500">Lens</span>
@@ -68,34 +82,42 @@ export default function ResetPasswordPage() {
         </div>
 
         <div className="bg-white rounded-2xl p-8 shadow-2xl">
-          {validSession === false ? (
+          {hasSession === null ? (
+            <div className="text-center py-4 text-sm text-slate-500">Loading...</div>
+          ) : !hasSession ? (
             <div className="text-center">
-              <h2 className="text-lg font-extrabold text-slate-900 mb-2">Link expired</h2>
-              <p className="text-sm text-slate-600 mb-6">
-                This password reset link is no longer valid. Please request a new one.
+              <h2 className="text-xl font-extrabold text-slate-900 mb-2">Link expired or invalid</h2>
+              <p className="text-sm text-slate-600 leading-relaxed mb-6">
+                Password reset links are valid for one hour. Request a new one to continue.
               </p>
-              <Link href="/auth/forgot-password" className="inline-block w-full bg-blue-600 text-white py-2.5 rounded-lg font-semibold text-sm hover:bg-blue-700 transition-colors">
-                Request new link
+              <Link
+                href="/auth/forgot-password"
+                className="inline-block w-full bg-blue-600 text-white py-3 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors">
+                Request a new link
               </Link>
             </div>
-          ) : done ? (
+          ) : success ? (
             <div className="text-center">
               <div className="w-14 h-14 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12" />
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12"/>
                 </svg>
               </div>
-              <h2 className="text-lg font-extrabold text-slate-900 mb-2">Password updated</h2>
-              <p className="text-sm text-slate-600">Signing you in to ControlLens...</p>
+              <h2 className="text-xl font-extrabold text-slate-900 mb-2">Password updated</h2>
+              <p className="text-sm text-slate-600 mb-2">
+                Redirecting you to sign in with your new password...
+              </p>
             </div>
           ) : (
             <>
-              <h1 className="text-xl font-extrabold text-slate-900 mb-1.5">Set a new password</h1>
-              <p className="text-sm text-slate-500 mb-6">Choose a strong password you&apos;ll remember.</p>
+              <h2 className="text-xl font-extrabold text-slate-900 mb-1">Set a new password</h2>
+              <p className="text-sm text-slate-500 mb-6">
+                Choose a strong password — at least 8 characters.
+              </p>
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">New password</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">New Password</label>
                   <input
                     type="password"
                     required
@@ -106,14 +128,13 @@ export default function ResetPasswordPage() {
                     className="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50"
                   />
                 </div>
-
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Confirm new password</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Confirm New Password</label>
                   <input
                     type="password"
                     required
                     minLength={8}
-                    placeholder="Type it again"
+                    placeholder="Repeat password"
                     value={confirm}
                     onChange={e => setConfirm(e.target.value)}
                     className="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50"
@@ -128,9 +149,9 @@ export default function ResetPasswordPage() {
 
                 <button
                   type="submit"
-                  disabled={loading || validSession === null}
+                  disabled={loading}
                   className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors disabled:opacity-60">
-                  {loading ? 'Updating...' : 'Update password'}
+                  {loading ? 'Updating...' : 'Update Password'}
                 </button>
               </form>
             </>
