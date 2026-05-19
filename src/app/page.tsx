@@ -205,31 +205,6 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Founder note */}
-      <section className="bg-slate-50 py-20">
-        <div className="max-w-3xl mx-auto px-8">
-          <div className="bg-white rounded-2xl border border-slate-200 p-8">
-            <div className="text-xs font-bold text-blue-600 mb-2 uppercase tracking-wider">A note from the founder</div>
-            <h3 className="text-2xl font-extrabold text-slate-900 mb-4">Why I built ControlLens</h3>
-            <p className="text-slate-600 text-sm leading-relaxed mb-3">
-              I&apos;ve spent 18 years managing federal and commercial construction projects — USACE, DGS, GSA, healthcare, K-12.
-              I&apos;m PMP-certified, a daily Primavera P6 user, and I&apos;ve prepared more TIAs than I can count.
-            </p>
-            <p className="text-slate-600 text-sm leading-relaxed mb-3">
-              The same thing kept happening on every project: the schedule had the answers, but nobody read it.
-              Critical paths were misunderstood. Logic violations went unnoticed. Long lead items slipped because
-              nobody flagged them in time. And when delays hit, the TIA work took weeks of manual P6 effort.
-            </p>
-            <p className="text-slate-600 text-sm leading-relaxed">
-              ControlLens is what I always wished I had — a tool that reads the schedule the way an experienced
-              scheduler would, and tells you what matters in plain language. It&apos;s not another PM tool. It&apos;s the
-              visibility layer that helps you see what your schedule is really trying to say.
-            </p>
-            <p className="text-slate-700 font-bold text-sm mt-5">— Jawid Noorzai, PMP</p>
-          </div>
-        </div>
-      </section>
-
       {/* CTA */}
       <section className="py-20 text-center">
         <h2 className="text-3xl font-extrabold text-slate-900 mb-4">See your schedule clearly.</h2>
