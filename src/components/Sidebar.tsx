@@ -1,5 +1,4 @@
 'use client'
-
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
@@ -11,11 +10,36 @@ interface SidebarProps {
   user?: { name: string; role: string; initials: string; company: string }
 }
 
+// =============================================================================
+// DEMO MODE — pre-launch placeholder for showing the team UI to prospects.
+// =============================================================================
+// When DEMO_MODE = true, the sidebar shows fake workspace + team data
+// regardless of the real signed-in user. This is temporary scaffolding
+// for showing the product to prospects from app.control-lens.com without
+// revealing the real founder's identity or testing accounts.
+//
+// To turn off: set DEMO_MODE = false. Sidebar then uses the real `user`
+// prop passed by the dashboard layout. Will be removed entirely when D3
+// (Supabase-backed multi-tenant data) ships.
+// =============================================================================
+const DEMO_MODE = true
+const DEMO_USER = {
+  name: 'Mike Anderson',
+  role: 'Admin',
+  initials: 'MA',
+  company: 'Nobel Project Control Services, LLC',
+}
+const DEMO_TEAM_MEMBER_COUNT = 4
+
 export default function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const [activeProject, setActiveProject] = useState<Project | null>(null)
   const [totalProjects, setTotalProjects] = useState(0)
+
+  // In demo mode, ignore the real signed-in user and show placeholder data
+  const displayUser = DEMO_MODE ? DEMO_USER : user
+  const showTeamMode = !!displayUser?.company
 
   useEffect(() => {
     refreshProject()
@@ -23,13 +47,11 @@ export default function Sidebar({ user }: SidebarProps) {
     const interval = setInterval(refreshProject, 1000)
     return () => clearInterval(interval)
   }, [pathname])
-
   function refreshProject() {
     const p = getActiveProject()
     setActiveProject(p)
     setTotalProjects(loadProjects().length)
   }
-
   async function handleSignOut() {
     const supabase = createClient()
     await supabase.auth.signOut()
@@ -40,7 +62,6 @@ export default function Sidebar({ user }: SidebarProps) {
     })
     router.push('/login')
   }
-
   const latest = activeProject?.versions?.[0]
   const analysis = latest?.analysis
   const condition = analysis?.condition || 'No data'
@@ -52,12 +73,10 @@ export default function Sidebar({ user }: SidebarProps) {
                   condition.includes('Recovery') ? 'bg-red-400' :
                   condition.includes('Attention') ? 'bg-amber-400' :
                   condition.includes('Monitor') ? 'bg-yellow-400' : 'bg-slate-400'
-
   // Build nav based on whether there's an active project
   const overviewItems = [
     { href: '/dashboard/projects', icon: '🏗', label: 'Projects', badge: totalProjects > 0 ? String(totalProjects) : null },
   ]
-
   const projectScopedNav = activeProject ? [
     {
       group: 'Active Project',
@@ -87,14 +106,9 @@ export default function Sidebar({ user }: SidebarProps) {
       ]
     },
   ] : []
-
   return (
     <aside className="w-56 flex-shrink-0 flex flex-col h-full no-print" style={{ background: '#0d1b2e' }}>
-      {/* Logo — ControlLens 4-bar mark.
-          Replaces the Crosshair Lens design. Same bars as the NobelPM
-          original brand DNA, in the saturated palette. The dimensions
-          (width 28, height 20, viewBox 44x32) keep the same vertical
-          footprint inside the sidebar header. */}
+      {/* Logo — ControlLens 4-bar mark. */}
       <div className="px-4 py-5 border-b border-white/10 flex-shrink-0">
         <Link href="/dashboard/projects" className="flex items-center gap-2.5">
           <div className="flex-shrink-0">
@@ -113,6 +127,18 @@ export default function Sidebar({ user }: SidebarProps) {
           </div>
         </Link>
       </div>
+
+      {/* Workspace banner — shows company name in team mode.
+          Visible only when displayUser.company is set (team users).
+          Personal users (no company) don't see this section. */}
+      {showTeamMode && (
+        <div className="px-4 py-2.5 border-b border-white/5 flex-shrink-0">
+          <div className="text-white/30 text-[9px] uppercase tracking-widest mb-0.5">Workspace</div>
+          <div className="text-white text-xs font-semibold leading-tight" title={displayUser!.company}>
+            {displayUser!.company}
+          </div>
+        </div>
+      )}
 
       {/* Active project pill */}
       <div className="mx-3 my-3 bg-white/5 rounded-lg p-3 border border-white/10 flex-shrink-0">
@@ -140,7 +166,6 @@ export default function Sidebar({ user }: SidebarProps) {
           </>
         )}
       </div>
-
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-2 pb-3">
         {/* Overview - always shown */}
@@ -165,7 +190,6 @@ export default function Sidebar({ user }: SidebarProps) {
             )
           })}
         </div>
-
         {/* Project-scoped nav - only shown when a project is active */}
         {projectScopedNav.map(group => (
           <div key={group.group} className="mb-1">
@@ -190,18 +214,39 @@ export default function Sidebar({ user }: SidebarProps) {
             })}
           </div>
         ))}
-      </nav>
 
+        {/* Team section — only in team mode.
+            Members + Invite people. Currently placeholder links;
+            real pages get built in v2 when team mode actually ships. */}
+        {showTeamMode && (
+          <div className="mb-1">
+            <div className="text-white/25 text-[9px] uppercase tracking-widest px-2 py-2">Team</div>
+            <Link href="/dashboard/team"
+              className="flex items-center gap-2.5 px-3 py-2 rounded-lg mb-0.5 transition-all text-xs font-medium border-l-2 text-slate-400 border-transparent hover:text-white hover:bg-white/5">
+              <span className="text-sm w-4 text-center">👥</span>
+              <span className="flex-1">Members</span>
+              <span className="bg-white/10 text-white/60 text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                {DEMO_TEAM_MEMBER_COUNT}
+              </span>
+            </Link>
+            <Link href="/dashboard/invite"
+              className="flex items-center gap-2.5 px-3 py-2 rounded-lg mb-0.5 transition-all text-xs font-medium border-l-2 text-slate-400 border-transparent hover:text-white hover:bg-white/5">
+              <span className="text-sm w-4 text-center">✉</span>
+              <span className="flex-1">Invite people</span>
+            </Link>
+          </div>
+        )}
+      </nav>
       {/* User + Sign Out */}
-      {user && (
+      {displayUser && (
         <div className="px-3 py-3 border-t border-white/10 flex-shrink-0">
           <div className="flex items-center gap-2.5 mb-2">
             <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
-              {user.initials}
+              {displayUser.initials}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-white text-xs font-semibold truncate">{user.name}</div>
-              <div className="text-white/40 text-[10px] truncate">{user.role}</div>
+              <div className="text-white text-xs font-semibold truncate">{displayUser.name}</div>
+              <div className="text-white/40 text-[10px] truncate">{displayUser.role}</div>
             </div>
           </div>
           <button
