@@ -1,34 +1,28 @@
 'use client'
-
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { getActiveProject, getActiveVersion, getActiveProjectRFIs } from '@/lib/projectStore'
-
 export default function DashboardPage() {
   const [analysis, setAnalysis] = useState<any>(null)
   const [rfis, setRfis] = useState<any[]>([])
   const [project, setProject] = useState<any>(null)
-
+  const [version, setVersion] = useState<any>(null)
   useEffect(() => {
     refresh()
-    // Poll for active project changes
+    // Poll for active project + version changes
     const interval = setInterval(refresh, 1000)
     return () => clearInterval(interval)
   }, [])
-
   function refresh() {
     const p = getActiveProject()
     setProject(p)
-    // Show the SELECTED version (V1 / V2 / etc. from sidebar), falling back
-    // to the latest version when nothing is explicitly selected. Previously
-    // this always showed the latest regardless of sidebar selection, which
-    // made the V1/V2 picker appear broken because clicking V1 still rendered
-    // V2's data on the dashboard.
+    // Show the SELECTED version (V1 / V2 / etc.), falling back to latest
+    // when nothing is explicitly selected.
     const v = getActiveVersion(p)
+    setVersion(v)
     setAnalysis(v?.analysis || null)
     setRfis(getActiveProjectRFIs())
   }
-
   function formatMonthDay(d?: string) {
     if (!d) return '—'
     try {
@@ -36,11 +30,9 @@ export default function DashboardPage() {
       return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     } catch { return d.slice(0, 10) }
   }
-
   function lastUpdatedLabel() {
     return new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
   }
-
   // EMPTY STATE
   if (!analysis) {
     return (
@@ -70,7 +62,6 @@ export default function DashboardPage() {
       </div>
     )
   }
-
   // CALCULATIONS FROM XER
   const totalActivities = analysis.totalActivities || 0
   const complete = analysis.complete || 0
@@ -87,6 +78,10 @@ export default function DashboardPage() {
   const healthScore = analysis.healthScore || 0
   const projectName = project?.name || analysis.projectName || 'Untitled Schedule'
 
+  // Version label for header — shows which version is currently being viewed.
+  // Prefers user-given label, falls back to filename, then data date.
+  const versionLabel = version?.versionLabel || version?.fileName || version?.dataDate?.slice(0,10) || null
+
   // CONDITION STYLING
   const condStyle = (() => {
     if (condition === 'Recovery Required') return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-900', subText: 'text-red-800/70', icon: '🔴', btnBorder: 'border-red-300', btnText: 'text-red-800', btnHover: 'hover:bg-red-100' }
@@ -94,14 +89,12 @@ export default function DashboardPage() {
     if (condition === 'Monitor Closely') return { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-900', subText: 'text-yellow-800/70', icon: '👁', btnBorder: 'border-yellow-300', btnText: 'text-yellow-800', btnHover: 'hover:bg-yellow-100' }
     return { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-900', subText: 'text-green-800/70', icon: '✅', btnBorder: 'border-green-300', btnText: 'text-green-800', btnHover: 'hover:bg-green-100' }
   })()
-
   const conditionMessage = (() => {
     if (condition === 'Recovery Required') return 'Project is in recovery condition. Significant intervention required to protect contract completion.'
     if (condition === 'Attention Needed') return 'Project is under pressure in key areas. Timely actions required to protect schedule and turnover readiness.'
     if (condition === 'Monitor Closely') return 'Project is performing acceptably but several indicators warrant close monitoring this week.'
     return 'Project is performing within tolerance. Continue current management approach.'
   })()
-
   // AUTO-DETECT RISKS (same logic as ControlLens Schedule Analysis page)
   const risks: Array<{category: string, title: string, severity: string}> = []
   if (delayDays > 30) risks.push({ category: 'TIA', title: `Project ${delayDays} days behind contract`, severity: 'critical' })
@@ -111,7 +104,6 @@ export default function DashboardPage() {
   if (outOfSequence > 20) risks.push({ category: 'Logic', title: `${outOfSequence} out-of-sequence violations`, severity: 'high' })
   else if (outOfSequence > 5) risks.push({ category: 'Logic', title: `${outOfSequence} out-of-sequence violations`, severity: 'medium' })
   if (noTies > 10) risks.push({ category: 'Quality', title: `${noTies} activities with no logic ties`, severity: 'high' })
-
   // 4 KPI CARDS — all from XER
   const metrics = [
     {
@@ -139,9 +131,6 @@ export default function DashboardPage() {
       delta: longLeadAtRisk > 0 ? '↓ Negative float' : '✓ All clear',
       color: longLeadAtRisk > 0 ? 'text-red-600' : 'text-green-600',
       border: longLeadAtRisk > 0 ? 'border-red-100' : 'border-green-100',
-      // FIXED: long lead items are a procurement concern, not submittals.
-      // Was misrouting to /dashboard/submittals which caused the
-      // "click Risk → land on Submittals" bug the founder reported.
       href: '/dashboard/procurement',
     },
     {
@@ -154,7 +143,6 @@ export default function DashboardPage() {
       href: '/dashboard/risks',
     },
   ]
-
   // IMMEDIATE ATTENTION AREAS — derived from risks
   const attention: Array<{icon: string, title: string, desc: string, badge: string, badgeColor: string, href: string}> = []
   if (longLeadAtRisk > 0) {
@@ -165,8 +153,6 @@ export default function DashboardPage() {
       desc: `${longLeadAtRisk} long lead item${longLeadAtRisk > 1 ? 's' : ''} on negative float${topItem ? `, starting with ${topItem.task_code}` : ''}. Vendor coordination required this week.`,
       badge: 'High Impact',
       badgeColor: 'bg-red-100 text-red-700',
-      // FIXED: was /dashboard/submittals — moved to procurement so the
-      // Procurement Exposure card actually opens the Procurement page.
       href: '/dashboard/procurement',
     })
   }
@@ -221,7 +207,6 @@ export default function DashboardPage() {
       href: '/dashboard/lens',
     })
   }
-
   // UPCOMING MILESTONES — filter to next 14 calendar days
   const now = new Date()
   const twoWeeksFromNow = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000)
@@ -233,18 +218,15 @@ export default function DashboardPage() {
       return d >= now && d <= twoWeeksFromNow
     } catch { return false }
   })
-  // Fallback if no milestones in window — show top critical path items
   const milestonesDisplay = milestoneActivities.length > 0
     ? milestoneActivities.slice(0, 5)
     : (analysis.criticalDrivers || []).slice(0, 5)
-
   function milestoneRisk(t: any) {
     const float = parseFloat(t.total_float_hr_cnt || '0') / 8
     if (float < -10) return { label: 'High', color: 'bg-red-100 text-red-700' }
     if (float < 0) return { label: 'Med', color: 'bg-amber-100 text-amber-700' }
     return { label: 'Low', color: 'bg-green-100 text-green-700' }
   }
-
   function milestoneStatus(t: any) {
     if (t.status_code === 'TK_Active') return { label: 'Active', color: 'bg-blue-100 text-blue-700' }
     const float = parseFloat(t.total_float_hr_cnt || '0') / 8
@@ -252,20 +234,16 @@ export default function DashboardPage() {
     if (float < 0) return { label: 'At Risk', color: 'bg-amber-100 text-amber-700' }
     return { label: 'On Track', color: 'bg-green-100 text-green-700' }
   }
-
-  // OPERATIONAL PRESSURE — derived from XER metrics
   const pressureProcurement = longLead.length > 0 ? Math.min(100, Math.round((longLeadAtRisk / longLead.length) * 100)) : 0
   const pressureCompression = totalActivities > 0 ? Math.min(100, Math.round((negativeFloat / totalActivities) * 100 * 3)) : 0
   const pressureCoordination = Math.min(100, Math.round(outOfSequence / 5))
   const pressureLogic = Math.min(100, Math.round(noTies / 2))
   const pressureRFI = rfis.filter(r => r.evaluation?.classification === 'SCHEDULE_IMPACTING').length * 30
-
   function levelFromPct(p: number) {
     if (p > 70) return { label: 'High', color: 'text-red-600', bar: 'bg-red-500' }
     if (p > 40) return { label: 'Med', color: 'text-amber-600', bar: 'bg-amber-500' }
     return { label: 'Low', color: 'text-green-600', bar: 'bg-green-500' }
   }
-
   const pressure = [
     { label: 'Procurement', pct: pressureProcurement, level: levelFromPct(pressureProcurement) },
     { label: 'Schedule Compression', pct: pressureCompression, level: levelFromPct(pressureCompression) },
@@ -273,8 +251,6 @@ export default function DashboardPage() {
     { label: 'Schedule Quality', pct: pressureLogic, level: levelFromPct(pressureLogic) },
     { label: 'RFI Impact', pct: Math.min(100, pressureRFI), level: levelFromPct(Math.min(100, pressureRFI)) },
   ]
-
-  // RECOMMENDED FOLLOW-UP — generated from findings
   const actions: string[] = []
   if (longLeadAtRisk > 0) {
     const topItem = longLead.find((t: any) => t.floatDays < 0)
@@ -292,8 +268,6 @@ export default function DashboardPage() {
     actions.push('Review long lead procurement status with vendors')
     actions.push('Verify upcoming inspection dates with QC team')
   }
-
-  // COMMUNICATION SUMMARY — short version
   const commSummary = (() => {
     const parts: string[] = []
     if (delayDays > 30) parts.push(`Project is ${delayDays} days behind contract completion`)
@@ -304,7 +278,6 @@ export default function DashboardPage() {
     if (outOfSequence > 10) parts.push(`${outOfSequence} out-of-sequence violations detected`)
     return parts.join('. ') + '. Immediate coordination recommended with vendors, scheduler, and owner.'
   })()
-
   return (
     <div className="flex flex-col h-full">
       {/* Topbar */}
@@ -312,6 +285,11 @@ export default function DashboardPage() {
         <div>
           <span className="font-bold text-slate-900 text-base">Executive Dashboard</span>
           <span className="text-slate-400 text-sm ml-2">· {projectName}</span>
+          {/* Version indicator — shows which version is currently being viewed,
+              so switching V1 → V2 visibly changes the header. */}
+          {versionLabel && (
+            <span className="text-blue-600 text-xs ml-2 font-semibold">· {versionLabel}</span>
+          )}
         </div>
         <div className="ml-auto flex items-center gap-2">
           <span className="text-xs text-slate-400 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg">Last updated: {lastUpdatedLabel()}</span>
@@ -319,10 +297,8 @@ export default function DashboardPage() {
           <Link href="/dashboard/upload" className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition-colors font-semibold">+ Upload Schedule</Link>
         </div>
       </div>
-
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-5 space-y-4">
-
         {/* Condition banner */}
         <div className={`${condStyle.bg} ${condStyle.border} border rounded-xl p-4 flex items-center gap-4`}>
           <span className="text-2xl">{condStyle.icon}</span>
@@ -334,7 +310,6 @@ export default function DashboardPage() {
             Full Analysis →
           </Link>
         </div>
-
         {/* Key Dates & Durations */}
         <div className="bg-white border border-slate-200 rounded-xl p-4">
           <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Key Dates & Durations</div>
@@ -392,7 +367,6 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
-
         {/* Metrics */}
         <div className="grid grid-cols-4 gap-3">
           {metrics.map(m => (
@@ -404,7 +378,6 @@ export default function DashboardPage() {
             </Link>
           ))}
         </div>
-
         {/* Attention + Milestones */}
         <div className="grid grid-cols-2 gap-4">
           <div className="bg-white border border-slate-200 rounded-xl p-4">
@@ -422,7 +395,6 @@ export default function DashboardPage() {
               ))}
             </div>
           </div>
-
           <div className="bg-white border border-slate-200 rounded-xl p-4">
             <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">2 Weeks Lookahead</div>
             {milestonesDisplay.length === 0 ? (
@@ -450,7 +422,6 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
-
         {/* Pressure + Actions + Summary */}
         <div className="grid grid-cols-3 gap-4">
           <div className="bg-white border border-slate-200 rounded-xl p-4">
@@ -467,7 +438,6 @@ export default function DashboardPage() {
               ))}
             </div>
           </div>
-
           <div className="bg-white border border-slate-200 rounded-xl p-4">
             <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Recommended Follow-Up</div>
             <div className="space-y-2">
@@ -481,7 +451,6 @@ export default function DashboardPage() {
               ))}
             </div>
           </div>
-
           <div className="bg-white border border-slate-200 rounded-xl p-4">
             <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Communication Summary</div>
             <div className="bg-blue-50 border-l-4 border-blue-500 p-3 rounded-r-lg text-xs text-blue-900 leading-relaxed mb-3">
@@ -497,7 +466,6 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
-
       </div>
     </div>
   )

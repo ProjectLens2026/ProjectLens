@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import clsx from 'clsx'
-import { getActiveProject, loadProjects, Project } from '@/lib/projectStore'
+import { getActiveProject, getActiveVersion, loadProjects, Project, ScheduleVersion } from '@/lib/projectStore'
 import { createClient } from '@/lib/supabase/client'
 
 interface SidebarProps {
@@ -14,13 +14,8 @@ interface SidebarProps {
 // DEMO MODE — pre-launch placeholder for showing the team UI to prospects.
 // =============================================================================
 // When DEMO_MODE = true, the sidebar shows fake workspace + team data
-// regardless of the real signed-in user. This is temporary scaffolding
-// for showing the product to prospects from app.control-lens.com without
-// revealing the real founder's identity or testing accounts.
-//
-// To turn off: set DEMO_MODE = false. Sidebar then uses the real `user`
-// prop passed by the dashboard layout. Will be removed entirely when D3
-// (Supabase-backed multi-tenant data) ships.
+// regardless of the real signed-in user. Temporary scaffolding; will be
+// removed when D3 (Supabase-backed multi-tenant data) ships.
 // =============================================================================
 const DEMO_MODE = true
 const DEMO_USER = {
@@ -35,23 +30,32 @@ export default function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const [activeProject, setActiveProject] = useState<Project | null>(null)
+  const [activeVersion, setActiveVersion] = useState<ScheduleVersion | null>(null)
   const [totalProjects, setTotalProjects] = useState(0)
 
-  // In demo mode, ignore the real signed-in user and show placeholder data
+  // In demo mode, ignore real signed-in user and show placeholder data
   const displayUser = DEMO_MODE ? DEMO_USER : user
   const showTeamMode = !!displayUser?.company
 
   useEffect(() => {
     refreshProject()
-    // Poll for changes (when user uploads new project, switches projects, etc.)
+    // Poll for active project changes (when user uploads new project, switches projects/versions)
     const interval = setInterval(refreshProject, 1000)
     return () => clearInterval(interval)
   }, [pathname])
+
   function refreshProject() {
     const p = getActiveProject()
     setActiveProject(p)
+    // BUG FIX (May 19): was reading `p?.versions?.[0]` (latest version) which
+    // ignored the user's version selection. Now uses getActiveVersion() which
+    // respects setActiveVersionId() — so clicking V1 vs V2 actually reflects
+    // here in the condition pill.
+    const v = p ? getActiveVersion(p) : null
+    setActiveVersion(v)
     setTotalProjects(loadProjects().length)
   }
+
   async function handleSignOut() {
     const supabase = createClient()
     await supabase.auth.signOut()
@@ -62,8 +66,9 @@ export default function Sidebar({ user }: SidebarProps) {
     })
     router.push('/login')
   }
-  const latest = activeProject?.versions?.[0]
-  const analysis = latest?.analysis
+
+  // BUG FIX (May 19): analysis now comes from the ACTIVE version, not just versions[0]
+  const analysis = activeVersion?.analysis
   const condition = analysis?.condition || 'No data'
   const condColor = condition === 'Stable' ? 'text-green-400' :
                    condition.includes('Recovery') ? 'text-red-400' :
@@ -73,6 +78,7 @@ export default function Sidebar({ user }: SidebarProps) {
                   condition.includes('Recovery') ? 'bg-red-400' :
                   condition.includes('Attention') ? 'bg-amber-400' :
                   condition.includes('Monitor') ? 'bg-yellow-400' : 'bg-slate-400'
+
   // Build nav based on whether there's an active project
   const overviewItems = [
     { href: '/dashboard/projects', icon: '🏗', label: 'Projects', badge: totalProjects > 0 ? String(totalProjects) : null },
@@ -82,8 +88,6 @@ export default function Sidebar({ user }: SidebarProps) {
       group: 'Active Project',
       items: [
         { href: '/dashboard', icon: '⊞', label: 'Dashboard' },
-        // Was "NobelPM Analysis" — renamed to "Schedule Analysis" during rebrand.
-        // Clearer label that describes what the page actually does.
         { href: '/dashboard/lens', icon: '🔍', label: 'Schedule Analysis' },
       ]
     },
@@ -128,9 +132,7 @@ export default function Sidebar({ user }: SidebarProps) {
         </Link>
       </div>
 
-      {/* Workspace banner — shows company name in team mode.
-          Visible only when displayUser.company is set (team users).
-          Personal users (no company) don't see this section. */}
+      {/* Workspace banner — shows company name in team mode. */}
       {showTeamMode && (
         <div className="px-4 py-2.5 border-b border-white/5 flex-shrink-0">
           <div className="text-white/30 text-[9px] uppercase tracking-widest mb-0.5">Workspace</div>
@@ -148,6 +150,12 @@ export default function Sidebar({ user }: SidebarProps) {
             <div className="text-white text-xs font-semibold leading-tight truncate" title={activeProject.name}>
               {activeProject.name}
             </div>
+            {/* Version indicator — shows which version is active so users know */}
+            {activeVersion && (
+              <div className="text-white/50 text-[10px] mt-0.5 truncate" title={activeVersion.versionLabel || activeVersion.fileName}>
+                {activeVersion.versionLabel || activeVersion.fileName}
+              </div>
+            )}
             {analysis ? (
               <div className="flex items-center gap-1.5 mt-1.5">
                 <div className={`w-1.5 h-1.5 rounded-full ${condDot} animate-pulse`} />
@@ -215,9 +223,7 @@ export default function Sidebar({ user }: SidebarProps) {
           </div>
         ))}
 
-        {/* Team section — only in team mode.
-            Members + Invite people. Currently placeholder links;
-            real pages get built in v2 when team mode actually ships. */}
+        {/* Team section — only in team mode (demo or real team users) */}
         {showTeamMode && (
           <div className="mb-1">
             <div className="text-white/25 text-[9px] uppercase tracking-widest px-2 py-2">Team</div>
