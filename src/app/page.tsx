@@ -77,7 +77,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ─────────────── 3. DASHBOARD PREVIEW (full Executive Dashboard) ─────────────── */}
+      {/* ─────────────── 3. DASHBOARD PREVIEW (full Executive Dashboard with Sidebar) ─────────────── */}
       <section className="max-w-6xl mx-auto px-4 pb-20">
         <div className="bg-slate-900 rounded-2xl p-2 shadow-2xl">
 
@@ -91,91 +91,203 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* Dashboard content */}
-          <div className="bg-slate-50 rounded-lg p-4 md:p-5 space-y-3">
+          {/* App shell: sidebar + main content */}
+          <div className="grid md:grid-cols-[220px_1fr] bg-slate-900 rounded-lg overflow-hidden">
 
-            {/* Header */}
-            <div className="bg-white border-b border-slate-200 px-4 py-2.5 -mx-4 -mt-4 md:-mx-5 md:-mt-5 mb-1 flex items-center justify-between">
-              <div>
-                <span className="font-bold text-slate-900 text-sm">Executive Dashboard</span>
-                <span className="text-slate-400 text-xs ml-2 hidden md:inline">· Federal Building Renovation · CL-2024-FBR-127</span>
-              </div>
-              <div className="flex gap-1.5">
-                <span className="bg-blue-600 text-white text-[10px] font-semibold px-2.5 py-1 rounded">🔍 Full Analysis</span>
-              </div>
-            </div>
+            {/* ─────── SIDEBAR ─────── */}
+            <aside className="bg-slate-900 text-white text-xs border-r border-white/10 hidden md:block">
 
-            {/* Health Banner */}
-            <div className="bg-red-50 border-2 border-red-200 rounded-xl p-3 flex items-center gap-3">
-              <div className="text-2xl flex-shrink-0">⚠</div>
-              <div className="flex-1">
-                <div className="font-bold text-red-900 text-sm">Recovery Required · Health 28/100</div>
-                <div className="text-xs text-red-800 mt-0.5">Critical path driven by MEP procurement: thermal expansion tank, insulation, and hydronic air control unit not yet ordered. Switchgear fabrication at −5 days float.</div>
-              </div>
-            </div>
-
-            {/* Key Dates row */}
-            <div className="bg-white border border-slate-200 rounded-xl p-3">
-              <div className="text-xs font-semibold text-slate-800 mb-2">Key Dates &amp; Durations</div>
-              <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
-                <DateMini label="Data Date" value="05/15/2024" />
-                <DateMini label="Project Start" value="07/01/2024" sub="NTP" />
-                <DateMini label="Subst. Completion" value="11/15/2024" sub="MILE-195" />
-                <DateMini label="Final Completion" value="11/30/2024" sub="MILE-200" />
-                <DateMini label="Contract End" value="11/30/2024" valueColor="text-red-600" />
-                <DateMini label="Projected End" value="04/10/2025" valueColor="text-amber-600" />
-              </div>
-            </div>
-
-            {/* KPI tiles */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              <KPIMini label="Days Behind" value="+133" sub="↓ TIA territory" valueColor="text-red-600"/>
-              <KPIMini label="Work Complete" value="40%" sub="222 of 550 activities" valueColor="text-slate-900"/>
-              <KPIMini label="Long Lead at Risk" value="3" sub="of 6 long lead" valueColor="text-red-600"/>
-              <KPIMini label="Risks Detected" value="7" sub="4 critical" valueColor="text-red-600"/>
-            </div>
-
-            {/* Schedule Progress chart (the centerpiece) */}
-            <div className="bg-white border border-slate-200 rounded-xl p-3">
-              <div className="flex items-start justify-between mb-2">
-                <div>
-                  <div className="text-xs font-semibold text-slate-800">Schedule Progress</div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">Planned vs Actual completion · Contract end <span className="text-red-600 font-semibold">11/30/2024</span> · Projected <span className="text-amber-600 font-semibold">04/10/2025 (+133d)</span></div>
-                </div>
-                <div className="flex gap-2 text-[9px] text-slate-500">
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 bg-blue-600 rounded-sm inline-block"/>Planned</span>
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 bg-emerald-600 rounded-sm inline-block"/>Actual</span>
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 bg-amber-400 rounded-sm inline-block"/>Forecast</span>
+              {/* Brand */}
+              <div className="flex items-center gap-2 px-3 py-2.5 border-b border-white/5">
+                <BrandMark/>
+                <div className="leading-tight">
+                  <div className="font-extrabold text-[11px]">Control<span className="text-blue-400">Lens</span></div>
+                  <div className="text-[8px] text-white/40">Construction Intelligence</div>
                 </div>
               </div>
 
-              {/* The chart itself */}
-              <ScheduleProgressMockChart/>
+              {/* Workspace */}
+              <div className="px-3 py-2 border-b border-white/5">
+                <div className="text-white/30 text-[7px] uppercase tracking-widest">Workspace</div>
+                <div className="text-[10px] font-medium mt-0.5 leading-tight">Nobel Project Control Services, LLC</div>
+              </div>
 
-              {/* Insight cells below chart */}
-              <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-100">
-                <div>
-                  <div className="text-[9px] text-slate-500">Behind plan by</div>
-                  <div className="text-xs font-semibold text-red-600 mt-0.5">−60.0 percentage pts</div>
-                </div>
-                <div>
-                  <div className="text-[9px] text-slate-500">Velocity (last 3 mo)</div>
-                  <div className="text-xs font-semibold text-slate-900 mt-0.5">~5.2% / month</div>
-                </div>
-                <div>
-                  <div className="text-[9px] text-slate-500">Required to hit contract</div>
-                  <div className="text-xs font-semibold text-red-600 mt-0.5">— (already past)</div>
+              {/* User */}
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5">
+                <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-[10px] font-bold flex-shrink-0">MA</div>
+                <div className="leading-tight min-w-0">
+                  <div className="text-[10px] font-semibold truncate">Mike Anderson</div>
+                  <div className="text-[8px] text-white/40">Admin</div>
                 </div>
               </div>
-            </div>
 
-            {/* Attention Areas (compact row) */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-              <AttentionMini icon="📅" title="Schedule Compression" desc="75 activities behind. Critical path in compression." impact="medium"/>
-              <AttentionMini icon="🔧" title="Out-of-Sequence Work" desc="57 logic violations. Schedule integrity issue." impact="high"/>
-              <AttentionMini icon="⚖️" title="TIA Territory" desc="133 days behind. Begin documenting delay events." impact="high"/>
-            </div>
+              {/* Search */}
+              <div className="px-3 py-2 border-b border-white/5">
+                <div className="bg-white/5 border border-white/10 px-2 py-1 rounded text-[9px] text-white/40 flex items-center gap-1">
+                  <span>🔍</span><span>Search projects or versions</span>
+                </div>
+              </div>
 
+              {/* Projects */}
+              <div className="py-2 px-2 border-b border-white/5">
+                {/* Active project expanded */}
+                <div className="bg-white/5 rounded">
+                  <div className="flex items-center gap-1 px-1.5 py-1.5">
+                    <span className="text-[8px] text-white/40">▾</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-400"></span>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-[10px] truncate">Federal Building Renovation</div>
+                      <div className="text-white/40 text-[7px] font-mono">CL-2024-FBR-127</div>
+                    </div>
+                    <span className="bg-emerald-500/25 text-emerald-300 text-[7px] font-semibold px-1 py-px rounded-full uppercase">ACTIVE</span>
+                    <span className="text-white/50 text-[8px]">2</span>
+                  </div>
+                  <div className="ml-4 pl-2 border-l border-white/10 pb-1.5 space-y-0.5">
+                    <div className="flex items-center gap-1 py-0.5 -ml-2 pl-1.5 bg-blue-600/20 border-l-2 border-blue-400 rounded-r">
+                      <span className="text-blue-400 text-[8px]">✓</span>
+                      <div className="leading-tight">
+                        <div className="font-medium text-[9px]">CU-06</div>
+                        <div className="text-white/40 text-[7px]">May 15</div>
+                      </div>
+                    </div>
+                    <div className="py-0.5 px-1 text-[9px] text-white/50">Baseline · Mar 1</div>
+                  </div>
+                </div>
+                {/* Other projects */}
+                <div className="flex items-center gap-1 px-1.5 py-1.5 mt-0.5">
+                  <span className="text-[8px] text-white/40">▸</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-[10px] truncate">VA Hospital Mod.</div>
+                    <div className="text-white/40 text-[7px] font-mono">CL-2024-VAH-088</div>
+                  </div>
+                  <span className="bg-emerald-500/25 text-emerald-300 text-[7px] font-semibold px-1 py-px rounded-full uppercase">ACTIVE</span>
+                  <span className="text-white/50 text-[8px]">3</span>
+                </div>
+                <div className="flex items-center gap-1 px-1.5 py-1.5">
+                  <span className="text-[8px] text-white/40">▸</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-[10px] truncate">Federal Courthouse P2</div>
+                    <div className="text-white/40 text-[7px] font-mono">CL-2025-FC-201</div>
+                  </div>
+                  <span className="bg-emerald-500/25 text-emerald-300 text-[7px] font-semibold px-1 py-px rounded-full uppercase">ACTIVE</span>
+                  <span className="text-white/50 text-[8px]">1</span>
+                </div>
+                <div className="px-2 py-1.5 mt-1 text-blue-400 text-[10px] font-medium">+ New project</div>
+              </div>
+
+              {/* Views section */}
+              <div className="py-2 border-b border-white/5">
+                <div className="text-white/30 text-[7px] uppercase tracking-widest px-3 mb-1">Views · CL-2024-FBR-127</div>
+                <SidebarView icon="⊞" name="Overview" active/>
+                <SidebarView icon="🔍" name="Schedule Analysis"/>
+                <SidebarView icon="⚠" name="Risks & Issues"/>
+                <SidebarView icon="🚚" name="Procurement"/>
+                <SidebarView icon="❓" name="RFIs"/>
+                <SidebarView icon="📋" name="Submittals"/>
+                <SidebarView icon="🔄" name="Change Orders"/>
+                <SidebarView icon="⬆" name="Upload Version"/>
+                <SidebarView icon="📈" name="Trend Analysis"/>
+                <SidebarView icon="📑" name="TIA Comparison"/>
+              </div>
+
+              {/* Workspace items */}
+              <div className="py-2 border-b border-white/5">
+                <div className="text-white/30 text-[7px] uppercase tracking-widest px-3 mb-1">Workspace</div>
+                <SidebarView icon="📁" name="Archive Projects"/>
+                <SidebarView icon="🗑" name="Deleted Items"/>
+                <SidebarView icon="⚙" name="Settings"/>
+              </div>
+
+              {/* Sign out */}
+              <div className="py-2">
+                <SidebarView icon="🚪" name="Sign Out"/>
+              </div>
+            </aside>
+
+            {/* ─────── MAIN CONTENT ─────── */}
+            <div className="bg-slate-50 p-3 md:p-4 space-y-3 overflow-hidden">
+
+              {/* Header */}
+              <div className="bg-white border-b border-slate-200 px-3 py-2 -mx-3 md:-mx-4 -mt-3 md:-mt-4 flex items-center justify-between">
+                <div className="min-w-0">
+                  <span className="font-bold text-slate-900 text-xs md:text-sm">Executive Dashboard</span>
+                  <span className="text-slate-400 text-[10px] md:text-xs ml-2 hidden lg:inline">· Federal Building Renovation · CL-2024-FBR-127</span>
+                </div>
+                <div className="flex gap-1 flex-shrink-0">
+                  <span className="bg-blue-600 text-white text-[9px] font-semibold px-2 py-1 rounded">🔍 Full Analysis</span>
+                </div>
+              </div>
+
+              {/* Health Banner */}
+              <div className="bg-red-50 border-2 border-red-200 rounded-lg p-2.5 flex items-center gap-2">
+                <div className="text-xl flex-shrink-0">⚠</div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-red-900 text-xs">Recovery Required · Health 28/100</div>
+                  <div className="text-[10px] text-red-800 mt-0.5 leading-snug">Critical path driven by MEP procurement: thermal expansion tank, insulation, and hydronic air control unit not yet ordered.</div>
+                </div>
+              </div>
+
+              {/* Key Dates row */}
+              <div className="bg-white border border-slate-200 rounded-lg p-2.5">
+                <div className="text-[11px] font-semibold text-slate-800 mb-1.5">Key Dates &amp; Durations</div>
+                <div className="grid grid-cols-3 lg:grid-cols-6 gap-2">
+                  <DateMini label="Data Date" value="05/15/2024" />
+                  <DateMini label="Project Start" value="07/01/2024" sub="NTP" />
+                  <DateMini label="Subst. Comp." value="11/15/2024" sub="MILE-195" />
+                  <DateMini label="Final Comp." value="11/30/2024" sub="MILE-200" />
+                  <DateMini label="Contract End" value="11/30/2024" valueColor="text-red-600" />
+                  <DateMini label="Projected" value="04/10/2025" valueColor="text-amber-600" />
+                </div>
+              </div>
+
+              {/* KPI tiles */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <KPIMini label="Days Behind" value="+133" sub="↓ TIA territory" valueColor="text-red-600"/>
+                <KPIMini label="Work Complete" value="40%" sub="222 of 550" valueColor="text-slate-900"/>
+                <KPIMini label="Long Lead Risk" value="3" sub="of 6 long lead" valueColor="text-red-600"/>
+                <KPIMini label="Risks" value="7" sub="4 critical" valueColor="text-red-600"/>
+              </div>
+
+              {/* Schedule Progress chart */}
+              <div className="bg-white border border-slate-200 rounded-lg p-2.5">
+                <div className="flex items-start justify-between mb-1.5">
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-semibold text-slate-800">Schedule Progress</div>
+                    <div className="text-[9px] text-slate-500 mt-0.5">Contract <span className="text-red-600 font-semibold">11/30/2024</span> · Projected <span className="text-amber-600 font-semibold">04/10/2025 (+133d)</span></div>
+                  </div>
+                  <div className="hidden md:flex gap-2 text-[8px] text-slate-500 flex-shrink-0">
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 bg-blue-600 rounded-sm inline-block"/>Planned</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 bg-emerald-600 rounded-sm inline-block"/>Actual</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 bg-amber-400 rounded-sm inline-block"/>Forecast</span>
+                  </div>
+                </div>
+                <ScheduleProgressMockChart/>
+                <div className="grid grid-cols-3 gap-2 mt-2 pt-2 border-t border-slate-100">
+                  <div>
+                    <div className="text-[8px] text-slate-500">Behind plan by</div>
+                    <div className="text-[10px] font-semibold text-red-600 mt-0.5">−60.0 pts</div>
+                  </div>
+                  <div>
+                    <div className="text-[8px] text-slate-500">Velocity</div>
+                    <div className="text-[10px] font-semibold text-slate-900 mt-0.5">~5.2% / mo</div>
+                  </div>
+                  <div>
+                    <div className="text-[8px] text-slate-500">Required</div>
+                    <div className="text-[10px] font-semibold text-red-600 mt-0.5">Past contract</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Attention Areas */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <AttentionMini icon="📅" title="Compression" desc="75 activities behind." impact="medium"/>
+                <AttentionMini icon="🔧" title="Out-of-Sequence" desc="57 logic violations." impact="high"/>
+                <AttentionMini icon="⚖️" title="TIA Territory" desc="133 days behind." impact="high"/>
+              </div>
+
+            </div>
           </div>
         </div>
       </section>
@@ -405,6 +517,15 @@ function BrandMark() {
       <rect x="0" y="18" width="26" height="5" rx="1" fill="#16a34a"/>
       <rect x="0" y="27" width="36" height="5" rx="1" fill="#1f2937"/>
     </svg>
+  )
+}
+
+function SidebarView({ icon, name, active }: { icon: string; name: string; active?: boolean }) {
+  return (
+    <div className={`flex items-center gap-2 px-3 py-1.5 text-[10px] ${active ? 'bg-blue-600/20 text-blue-100 border-l-2 border-blue-400' : 'text-white/70 hover:bg-white/5'}`}>
+      <span className="text-[10px] w-3 text-center">{icon}</span>
+      <span className="truncate">{name}</span>
+    </div>
   )
 }
 
