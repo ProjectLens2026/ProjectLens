@@ -27,6 +27,8 @@ export interface ScheduleVersion {
   dataDate?: string
   fileName: string
   analysis: any
+  // Internal field name — kept as `aiNarrative` for backward compatibility
+  // with existing saved versions. User-facing labels say "Operational Analysis".
   aiNarrative?: string
   context?: any
   versionLabel?: string  // e.g. "May 2026 Update"
@@ -45,7 +47,6 @@ export interface Project {
   rfis: any[]
   changeOrders: any[]
 }
-
 // Result returned by saveProjects so the caller can show a real error to
 // the user if the persist failed. With IndexedDB this is rare — only
 // happens if the user's disk is genuinely full or they're in private
@@ -54,28 +55,25 @@ export interface SaveResult {
   ok: boolean
   error?: string
 }
-
 // localStorage keys — small metadata only (no analysis data)
 const LEGACY_PROJECTS_KEY = 'pl_projects'  // checked once for migration, then cleared
 const ACTIVE_PROJECT_KEY = 'pl_active_project_id'
 const ACTIVE_VERSION_KEY = 'pl_active_version_id'
-
-// IndexedDB names
+// IndexedDB names — DB name stays 'nobelpm' so existing users don't lose
+// their saved projects when this rebrand goes live. The DB name is internal
+// only; users never see it. Migrating data to a renamed DB would risk
+// orphaning every existing project. Field name remains internal.
 const DB_NAME = 'nobelpm'
 const DB_VERSION = 1
 const PROJECTS_STORE = 'projects'
-
 // ----- Module-level state (singleton in browser) -----
-
 let _projects: Project[] = []
 let _hydrated = false
 let _hydrationPromise: Promise<void> | null = null
 let _dbPromise: Promise<IDBDatabase> | null = null
 type Listener = () => void
 const _listeners: Set<Listener> = new Set()
-
 // ----- IndexedDB helpers -----
-
 function openDB(): Promise<IDBDatabase> {
   if (_dbPromise) return _dbPromise
   _dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
@@ -95,7 +93,6 @@ function openDB(): Promise<IDBDatabase> {
   })
   return _dbPromise
 }
-
 async function idbGetAllProjects(): Promise<Project[]> {
   const db = await openDB()
   return new Promise<Project[]>((resolve, reject) => {
@@ -106,7 +103,6 @@ async function idbGetAllProjects(): Promise<Project[]> {
     req.onerror = () => reject(req.error || new Error('idbGetAll failed'))
   })
 }
-
 async function idbPutProject(project: Project): Promise<void> {
   const db = await openDB()
   return new Promise<void>((resolve, reject) => {
@@ -117,7 +113,6 @@ async function idbPutProject(project: Project): Promise<void> {
     req.onerror = () => reject(req.error || new Error('idbPut failed'))
   })
 }
-
 async function idbDeleteProject(id: string): Promise<void> {
   const db = await openDB()
   return new Promise<void>((resolve, reject) => {
@@ -128,9 +123,7 @@ async function idbDeleteProject(id: string): Promise<void> {
     req.onerror = () => reject(req.error || new Error('idbDelete failed'))
   })
 }
-
 // ----- Hydration (one-time on app load) -----
-
 async function hydrate(): Promise<void> {
   if (_hydrated) return
   try {
@@ -138,9 +131,8 @@ async function hydrate(): Promise<void> {
     try {
       projects = await idbGetAllProjects()
     } catch (err) {
-      console.error('[NobelPM] IndexedDB read failed during hydration:', err)
+      console.error('[ControlLens] IndexedDB read failed during hydration:', err)
     }
-
     // One-time migration from old localStorage-based storage.
     if (projects.length === 0 && typeof localStorage !== 'undefined') {
       try {
@@ -148,10 +140,10 @@ async function hydrate(): Promise<void> {
         if (legacy) {
           const parsed = JSON.parse(legacy)
           if (Array.isArray(parsed) && parsed.length > 0) {
-            console.log('[NobelPM] Migrating', parsed.length, 'project(s) from localStorage to IndexedDB')
+            console.log('[ControlLens] Migrating', parsed.length, 'project(s) from localStorage to IndexedDB')
             for (const p of parsed) {
               try { await idbPutProject(p) } catch (e) {
-                console.error('[NobelPM] Migration: failed to write project', p?.id, e)
+                console.error('[ControlLens] Migration: failed to write project', p?.id, e)
               }
             }
             projects = await idbGetAllProjects()
@@ -159,61 +151,49 @@ async function hydrate(): Promise<void> {
           }
         }
       } catch (err) {
-        console.error('[NobelPM] Migration check failed (non-fatal):', err)
+        console.error('[ControlLens] Migration check failed (non-fatal):', err)
       }
     }
-
     // Sort newest-first so the in-memory order matches what users see in
     // the sidebar (most recently updated at top).
     projects.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
-
     _projects = projects
     _hydrated = true
     notifyListeners()
   } catch (err) {
-    console.error('[NobelPM] Hydration failed:', err)
+    console.error('[ControlLens] Hydration failed:', err)
     _hydrated = true
     notifyListeners()
   }
 }
-
 // Kick off hydration as soon as this module is imported in the browser.
 if (typeof window !== 'undefined') {
   _hydrationPromise = hydrate()
 }
-
 // ----- Subscription API -----
-
 function notifyListeners() {
   _listeners.forEach(fn => { try { fn() } catch (err) { console.error(err) } })
 }
-
 // Subscribe to project list updates. Fires on hydration complete and on
 // every save/delete/update. Returns an unsubscribe function.
 export function subscribeToProjects(listener: Listener): () => void {
   _listeners.add(listener)
   return () => { _listeners.delete(listener) }
 }
-
 export function whenHydrated(): Promise<void> {
   return _hydrationPromise || Promise.resolve()
 }
-
 export function isHydrated(): boolean {
   return _hydrated
 }
-
 // ----- Sync read API (returns memory cache) -----
-
 export function loadProjects(): Project[] {
   return _projects
 }
-
 // Resolve a version's effective date for sorting/comparison.
 export function getVersionEffectiveDate(v: ScheduleVersion): string {
   return v.dataDate || v.analysis?.dataDate || v.uploadedAt
 }
-
 export function getActiveProjectId(): string | null {
   if (typeof window === 'undefined') return null
   try { return localStorage.getItem(ACTIVE_PROJECT_KEY) } catch { return null }
@@ -225,7 +205,7 @@ export function setActiveProjectId(id: string | null) {
     else localStorage.removeItem(ACTIVE_PROJECT_KEY)
     localStorage.removeItem(ACTIVE_VERSION_KEY)
   } catch (err) {
-    console.error('[NobelPM] setActiveProjectId failed:', err)
+    console.error('[ControlLens] setActiveProjectId failed:', err)
   }
 }
 export function getActiveVersionId(): string | null {
@@ -238,7 +218,7 @@ export function setActiveVersionId(id: string | null) {
     if (id) localStorage.setItem(ACTIVE_VERSION_KEY, id)
     else localStorage.removeItem(ACTIVE_VERSION_KEY)
   } catch (err) {
-    console.error('[NobelPM] setActiveVersionId failed:', err)
+    console.error('[ControlLens] setActiveVersionId failed:', err)
   }
 }
 export function getActiveProject(): Project | null {
@@ -271,19 +251,15 @@ export function getActiveProjectRFIs(): any[] {
   const p = getActiveProject()
   return p?.rfis || []
 }
-
 // ----- Sync write API (updates cache + persists async to IndexedDB) -----
-
 // Replace ALL projects (used by bulk operations).
 // Updates memory cache immediately, then persists to IndexedDB in the
 // background. Errors during persist are logged but not thrown — the
 // memory cache is the source of truth for the current session.
 export function saveProjects(projects: Project[]): SaveResult {
   if (typeof window === 'undefined') return { ok: false, error: 'No window' }
-
   _projects = [...projects]
   notifyListeners()
-
   const writePromise = (async () => {
     let oldIds: Set<string> = new Set<string>()
     try {
@@ -292,37 +268,31 @@ export function saveProjects(projects: Project[]): SaveResult {
     } catch (err) {
       // Continue — writes below will still work or fail clearly
     }
-
     const newIds = new Set(projects.map(p => p.id))
-
     for (const p of projects) {
       try {
         await idbPutProject(p)
       } catch (err) {
-        console.error('[NobelPM] IndexedDB write failed for project', p.id, err)
+        console.error('[ControlLens] IndexedDB write failed for project', p.id, err)
         throw err
       }
     }
-
     const oldIdArray = Array.from(oldIds)
     for (const oldId of oldIdArray) {
       if (!newIds.has(oldId)) {
         try {
           await idbDeleteProject(oldId)
         } catch (err) {
-          console.error('[NobelPM] IndexedDB delete failed for project', oldId, err)
+          console.error('[ControlLens] IndexedDB delete failed for project', oldId, err)
         }
       }
     }
   })()
-
   writePromise.catch(err => {
-    console.error('[NobelPM] saveProjects: IndexedDB persist failed:', err)
+    console.error('[ControlLens] saveProjects: IndexedDB persist failed:', err)
   })
-
   return { ok: true }
 }
-
 export function createProject(opts: {
   name: string
   projectId?: string
@@ -342,16 +312,13 @@ export function createProject(opts: {
   }
   _projects = [project, ..._projects]
   notifyListeners()
-
   idbPutProject(project).catch(err => {
-    console.error('[NobelPM] createProject: IndexedDB persist failed:', err)
+    console.error('[ControlLens] createProject: IndexedDB persist failed:', err)
   })
-
   setActiveProjectId(project.id)
   setActiveVersionId(opts.version.id)
   return project
 }
-
 export function addVersionToProject(projectId: string, version: ScheduleVersion): Project | null {
   const idx = _projects.findIndex(p => p.id === projectId)
   if (idx === -1) return null
@@ -362,16 +329,13 @@ export function addVersionToProject(projectId: string, version: ScheduleVersion)
   }
   _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
   notifyListeners()
-
   idbPutProject(updated).catch(err => {
-    console.error('[NobelPM] addVersionToProject: IndexedDB persist failed:', err)
+    console.error('[ControlLens] addVersionToProject: IndexedDB persist failed:', err)
   })
-
   setActiveProjectId(projectId)
   setActiveVersionId(version.id)
   return updated
 }
-
 export function addRFIToActiveProject(rfi: any): Project | null {
   const id = getActiveProjectId()
   if (!id) return null
@@ -389,14 +353,11 @@ export function addRFIToActiveProject(rfi: any): Project | null {
   }
   _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
   notifyListeners()
-
   idbPutProject(updated).catch(err => {
-    console.error('[NobelPM] addRFIToActiveProject: IndexedDB persist failed:', err)
+    console.error('[ControlLens] addRFIToActiveProject: IndexedDB persist failed:', err)
   })
-
   return updated
 }
-
 export function deleteRFIFromActiveProject(rfiId: string) {
   const id = getActiveProjectId()
   if (!id) return
@@ -408,25 +369,20 @@ export function deleteRFIFromActiveProject(rfiId: string) {
   }
   _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
   notifyListeners()
-
   idbPutProject(updated).catch(err => {
-    console.error('[NobelPM] deleteRFIFromActiveProject: IndexedDB persist failed:', err)
+    console.error('[ControlLens] deleteRFIFromActiveProject: IndexedDB persist failed:', err)
   })
 }
-
 export function deleteProject(id: string) {
   _projects = _projects.filter(p => p.id !== id)
   notifyListeners()
-
   idbDeleteProject(id).catch(err => {
-    console.error('[NobelPM] deleteProject: IndexedDB delete failed:', err)
+    console.error('[ControlLens] deleteProject: IndexedDB delete failed:', err)
   })
-
   if (getActiveProjectId() === id) {
     setActiveProjectId(_projects[0]?.id || null)
   }
 }
-
 export function deleteVersion(projectId: string, versionId: string) {
   const idx = _projects.findIndex(p => p.id === projectId)
   if (idx === -1) return
@@ -437,16 +393,13 @@ export function deleteVersion(projectId: string, versionId: string) {
   }
   _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
   notifyListeners()
-
   idbPutProject(updated).catch(err => {
-    console.error('[NobelPM] deleteVersion: IndexedDB persist failed:', err)
+    console.error('[ControlLens] deleteVersion: IndexedDB persist failed:', err)
   })
-
   if (getActiveVersionId() === versionId) {
     setActiveVersionId(null)
   }
 }
-
 export function moveVersionToProject(sourceProjectId: string, versionId: string, targetProjectId: string): boolean {
   const sourceIdx = _projects.findIndex(p => p.id === sourceProjectId)
   const targetIdx = _projects.findIndex(p => p.id === targetProjectId)
@@ -455,7 +408,6 @@ export function moveVersionToProject(sourceProjectId: string, versionId: string,
   const sourceVersions = _projects[sourceIdx].versions
   const versionIdx = sourceVersions.findIndex(v => v.id === versionId)
   if (versionIdx === -1) return false
-
   const movedVersion = sourceVersions[versionIdx]
   const newSource: Project = {
     ..._projects[sourceIdx],
@@ -473,17 +425,14 @@ export function moveVersionToProject(sourceProjectId: string, versionId: string,
     return p
   })
   notifyListeners()
-
   Promise.all([idbPutProject(newSource), idbPutProject(newTarget)]).catch(err => {
-    console.error('[NobelPM] moveVersionToProject: IndexedDB persist failed:', err)
+    console.error('[ControlLens] moveVersionToProject: IndexedDB persist failed:', err)
   })
-
   if (getActiveVersionId() === versionId) {
     setActiveVersionId(null)
   }
   return true
 }
-
 export function renameProject(id: string, newName: string, projectId?: string) {
   const idx = _projects.findIndex(p => p.id === id)
   if (idx === -1) return
@@ -495,10 +444,48 @@ export function renameProject(id: string, newName: string, projectId?: string) {
   if (projectId !== undefined) updated.projectId = projectId
   _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
   notifyListeners()
-
   idbPutProject(updated).catch(err => {
-    console.error('[NobelPM] renameProject: IndexedDB persist failed:', err)
+    console.error('[ControlLens] renameProject: IndexedDB persist failed:', err)
   })
+}
+
+// =============================================================================
+// updateVersionNarrative — write/update/clear the operational analysis for
+// a specific version. Called by the Schedule Analysis page when the PM
+// clicks Generate, Edit-Save, or Clear on the Operational Analysis tab.
+//
+// Pass empty string to clear the narrative. Updates memory cache immediately,
+// persists to IndexedDB in the background. Returns true if the version was
+// found and updated, false otherwise.
+// =============================================================================
+export function updateVersionNarrative(
+  projectId: string,
+  versionId: string,
+  narrative: string
+): boolean {
+  const idx = _projects.findIndex(p => p.id === projectId)
+  if (idx === -1) return false
+  const project = _projects[idx]
+  const verIdx = project.versions.findIndex(v => v.id === versionId)
+  if (verIdx === -1) return false
+  const updatedVersions = [...project.versions]
+  updatedVersions[verIdx] = {
+    ...updatedVersions[verIdx],
+    aiNarrative: narrative,
+  }
+  const updated: Project = {
+    ...project,
+    versions: updatedVersions,
+    // Do NOT bump updatedAt — narrative edits don't change project order.
+    // If you want them to, uncomment the next line:
+    // updatedAt: new Date().toISOString(),
+  }
+  _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
+  notifyListeners()
+  idbPutProject(updated).catch(err => {
+    console.error('[ControlLens] updateVersionNarrative: IndexedDB persist failed:', err)
+  })
+  return true
 }
 
 // Legacy migration is now handled inside hydrate(). This function exists

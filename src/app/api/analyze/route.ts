@@ -1,21 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+export const maxDuration = 30
 
-// Server-side analysis route — narrative generation only.
+// =============================================================================
+// Server-side analyze route — engine only, no AI.
 //
-// Previously this route accepted the raw XER file as a multipart upload,
-// parsed it server-side, and generated the narrative. That hit Vercel's
-// serverless function body limit (~256 KB practical for multipart uploads,
-// 4.5 MB hard cap), which silently TRUNCATED larger XER files — e.g. a
-// 620 KB DCDGS schedule with 1,048 activities was getting cut to 557.
+// PREVIOUSLY this route called Claude to generate the narrative on every
+// upload. That made the entire upload flow depend on Anthropic being up,
+// which was the wrong architecture — the schedule engine should stand
+// on its own.
 //
-// The browser now does all XER parsing client-side using @/lib/xerParser
-// (no upload size limit since the file never leaves the browser unless
-// the user chooses to save it). Only the small parsed analysis JSON is
-// sent here for narrative generation. The narrative is generated with
-// Claude based on the analysis data.
+// NOW: this route just acknowledges the parsed analysis and echoes it
+// back. All parsing happens client-side. Operational Analysis (narrative)
+// is generated separately via /api/generate-narrative ONLY when the PM
+// clicks "Generate Operational Analysis" on the Schedule Analysis page.
+//
+// The benefit: uploads stay fast and reliable regardless of the report
+// service's status. PMs see their schedule analysis instantly. They
+// choose whether and when to generate the written narrative.
+// =============================================================================
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
@@ -26,77 +31,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No analysis data provided' }, { status: 400 })
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY
-    let aiNarrative = ''
-
-    if (apiKey) {
-      try {
-        const Anthropic = (await import('@anthropic-ai/sdk')).default
-        const client = new Anthropic({ apiKey })
-        const prompt = `You are NobelPM — an experienced construction project controls advisor with 20+ years of P6 scheduling, USACE/DGS workflow, and TIA preparation experience. Speak like a senior PM giving honest analysis to a colleague.
-
-Project: ${analysis.projectName}
-File type: ${analysis.fileType}
-Current phase: ${ctx.phase || 'Not specified'}
-Owner: ${ctx.owner || 'Not specified'}
-Contract: ${ctx.contractValue || 'Not specified'}
-Concerns raised by PM: ${ctx.criticalConcerns || 'None'}
-Known procurement issues: ${ctx.procurementIssues || 'None'}
-Known constraints: ${ctx.keyConstraints || 'None'}
-
-Schedule analysis findings:
-- Total activities: ${analysis.totalActivities}
-- Complete: ${analysis.complete} | In Progress: ${analysis.inProgress} | Not Started: ${analysis.notStarted}
-- Activities with negative float: ${analysis.negativeFloat}
-- Out-of-sequence violations: ${analysis.outOfSequence?.length || 0}
-- Activities with no logic ties: ${analysis.noTies?.length || 0}
-- Long lead items: ${analysis.longLeadItems?.length || 0}
-- Days behind contract: ${analysis.delayDays}
-- Health score: ${analysis.healthScore}/100 (${analysis.condition})
-
-Top critical drivers: ${(analysis.criticalDrivers || []).slice(0, 5).map((t: any) => `${t.task_code} ${t.task_name}`).join(', ')}
-
-Write a 400-500 word operational analysis focused on HOW TO FIX THIS. The PM needs concrete next steps, not generic commentary. Structure exactly like this:
-
-1. PROJECT CONDITION
-One sentence verdict on where this project stands.
-
-2. WHAT THE SCHEDULE IS REALLY TELLING YOU
-Operational interpretation of the findings — what is actually happening in the field, in plain language.
-
-3. HOW TO FIX THIS — TOP THREE ACTIONS
-Three specific actions the PM should take this week to recover the schedule. Be concrete: name activities, name trades, name decisions. No generic advice.
-
-4. CONVERSATIONS TO HAVE THIS WEEK
-Specific people to call (the architect, the mechanical sub, the owner's PM, the GC scheduler) and specific questions to ask each one. No vague phrases like "communicate with stakeholders".
-
-5. TIA EVIDENCE
-If delayDays > 30, list exactly what to document right now to protect the time extension request. If under 30, write "TIA not yet warranted — continue tracking delay events."
-
-Be direct. No fluff. No "AI-style" hedging. Speak like a senior scheduler who has done this on 100 federal projects.`
-
-        const message = await client.messages.create({
-          model: 'claude-sonnet-4-5',
-          max_tokens: 1500,
-          messages: [{ role: 'user', content: prompt }]
-        })
-        aiNarrative = message.content[0].type === 'text' ? message.content[0].text : ''
-      } catch (err: any) {
-        console.error('AI narrative error:', err)
-        aiNarrative = `Narrative unavailable. The schedule analysis above is based on direct file parsing. (Error: ${err.message || 'unknown'})`
-      }
-    }
-
-    // Echo back the analysis + narrative so the client can save everything
-    // in one place (keeps existing localStorage save logic unchanged).
+    // Engine-only — no narrative call. The client parsed the XER already;
+    // we just confirm receipt and echo the analysis back so the upload
+    // page can save it as a version.
     return NextResponse.json({
       success: true,
       analysis,
-      aiNarrative,
+      aiNarrative: '', // Always empty here. Generated on demand via /api/generate-narrative.
       context: ctx,
     })
   } catch (error: any) {
-    console.error('Analysis error:', error)
+    console.error('[ControlLens] /api/analyze error:', error)
     return NextResponse.json({ error: error.message || 'Analysis failed' }, { status: 500 })
   }
 }

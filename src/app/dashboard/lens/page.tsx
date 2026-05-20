@@ -1,7 +1,8 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { getActiveProject, getActiveVersion } from '@/lib/projectStore'
+import { getActiveProject, getActiveVersion, updateVersionNarrative } from '@/lib/projectStore'
+
 // Gantt Chart Component
 function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
   activities: any[]
@@ -108,7 +109,7 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
           <div>
             <div className="font-bold text-amber-900 mb-1">Gantt chart cannot be displayed</div>
             <div className="text-sm text-amber-800 leading-relaxed mb-3">
-              NobelPM could not find any activities with driving path or float data in this schedule.
+              ControlLens could not find any activities with driving path or float data in this schedule.
               This usually means the schedule has not been calculated in P6, or the XER was exported before
               a schedule calculation was run.
             </div>
@@ -141,7 +142,7 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
                 <span className="font-bold">What this means operationally:</span> The schedule is showing a longest path but not a true critical path with float enforcement. The PM should verify in P6 that a "Must Finish By" constraint is set on the contract completion milestone.
               </div>
               <div className="mt-3 text-xs text-blue-700 font-semibold">
-                NobelPM is showing the Longest Path (driving path flag = Y) as the best available substitute:
+                ControlLens is showing the Longest Path (driving path flag = Y) as the best available substitute:
               </div>
             </div>
           </div>
@@ -162,35 +163,119 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
     </div>
   )
 }
-export default function NobelPMAnalysisPage() {
+
+export default function ControlLensAnalysisPage() {
   const [analysis, setAnalysis] = useState<any>(null)
   const [project, setProject] = useState<any>(null)
   const [version, setVersion] = useState<any>(null)
   const [activeTab, setActiveTab] = useState('gantt')
-  // Schedule Filter sub-filter (which slice of activities to show inside
-  // the new "Schedule Filter" tab). Replaces the old separate Critical Path
-  // and 2-Week Lookahead tabs with a single tab that has multiple filter
-  // modes. Two filters ('not-started' and 'finished') are placeholders for
-  // now — their data depends on parser changes coming in the next push.
   const [scheduleFilter, setScheduleFilter] = useState<
     'critical' | 'longest' | 'lookahead' | 'not-started' | 'finished'
   >('critical')
+
+  // Operational Analysis (narrative) — on-demand state.
+  // - narrativeText: editable copy of the narrative the PM is currently
+  //   seeing / editing
+  // - isGenerating: true while /api/generate-narrative is in flight
+  // - isEditing: true when PM has clicked Edit and is in textarea mode
+  // - narrativeError: error message from a failed generation attempt
+  const [narrativeText, setNarrativeText] = useState('')
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [narrativeError, setNarrativeError] = useState<string | null>(null)
+
   useEffect(() => {
     refresh()
     const interval = setInterval(refresh, 1000)
     return () => clearInterval(interval)
   }, [])
+
+  // Whenever the active version changes (user switches V1 vs V2 in the
+  // sidebar), pull its saved narrative into local state. Drop any in-flight
+  // editing state since it belongs to the previous version.
+  useEffect(() => {
+    setNarrativeText(version?.aiNarrative || '')
+    setIsEditing(false)
+    setNarrativeError(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version?.id])
+
   function refresh() {
     const p = getActiveProject()
     setProject(p)
-    // Show the SELECTED version (V1 / V2 / etc. from sidebar), falling back
-    // to the latest version when nothing is explicitly selected. Previously
-    // this always called getLatestVersion which ignored sidebar selection
-    // and caused clicking V1 to still render V2's data on Full Analysis.
     const v = getActiveVersion(p)
     setVersion(v)
     setAnalysis(v?.analysis || null)
   }
+
+  // Generate / Regenerate — calls the on-demand narrative route. The
+  // result is saved back to the version so it persists across reloads
+  // and version switches.
+  async function handleGenerate() {
+    if (!project || !version || !analysis) return
+    setIsGenerating(true)
+    setNarrativeError(null)
+    try {
+      const res = await fetch('/api/generate-narrative', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          analysis,
+          context: version.context || {},
+        }),
+      })
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '')
+        let errMsg = 'Could not generate the Operational Analysis. Try again.'
+        try {
+          const parsed = JSON.parse(errText)
+          if (parsed.error) errMsg = parsed.error
+        } catch {}
+        throw new Error(errMsg)
+      }
+      const data = await res.json()
+      const newNarrative = (data.narrative || '').trim()
+      if (!newNarrative) {
+        throw new Error('Generation returned an empty result. Try again.')
+      }
+      setNarrativeText(newNarrative)
+      updateVersionNarrative(project.id, version.id, newNarrative)
+    } catch (err: any) {
+      console.error('[ControlLens] Operational Analysis generation failed:', err)
+      setNarrativeError(err.message || 'Could not generate the Operational Analysis. Try again.')
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  // PM clicked Edit — switch to textarea mode. They can either Save or
+  // Cancel. Save persists to the version. Cancel restores the last saved
+  // narrative from the version itself.
+  function handleEdit() {
+    setIsEditing(true)
+    setNarrativeError(null)
+  }
+  function handleEditSave() {
+    if (!project || !version) return
+    updateVersionNarrative(project.id, version.id, narrativeText)
+    setIsEditing(false)
+  }
+  function handleEditCancel() {
+    setNarrativeText(version?.aiNarrative || '')
+    setIsEditing(false)
+  }
+
+  // Clear wipes the saved narrative for this version. PM gets a confirm
+  // because regenerating later will cost a fresh API call.
+  function handleClear() {
+    if (!project || !version) return
+    if (!confirm('Clear the Operational Analysis for this version? You can generate a new one anytime.')) return
+    setNarrativeText('')
+    updateVersionNarrative(project.id, version.id, '')
+    setIsEditing(false)
+    setNarrativeError(null)
+  }
+
   function fmtFloat(hours: string | number) {
     const h = typeof hours === 'string' ? parseFloat(hours || '0') : hours
     if (isNaN(h)) return '—'
@@ -202,7 +287,7 @@ export default function NobelPMAnalysisPage() {
     if (cond === 'Monitor Closely') return { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-900' }
     return { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-900' }
   }
-  // No active project or no analysis
+
   if (!analysis || !project) {
     return (
       <div className="flex flex-col h-full">
@@ -218,7 +303,7 @@ export default function NobelPMAnalysisPage() {
               <span className="text-3xl">🔍</span>
             </div>
             <div className="text-lg font-bold text-slate-700 mb-2">No analysis available</div>
-            <div className="text-sm text-slate-500 mb-6">Upload a schedule to see the full 7-tab analysis here. Once analyzed, this page shows the complete breakdown of your active project.</div>
+            <div className="text-sm text-slate-500 mb-6">Upload a schedule to see the full analysis here. Once analyzed, this page shows the complete breakdown of your active project.</div>
             <Link href="/dashboard/upload"
               className="inline-block bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors">
               Upload Schedule →
@@ -228,12 +313,11 @@ export default function NobelPMAnalysisPage() {
       </div>
     )
   }
+
   const a = analysis
   const condColor = conditionColor(a.condition)
-  // AI narrative is stored per-version, not per-project. Read from the
-  // currently selected version's aiNarrative field (not always v0 like
-  // the old code did, which would show V1's narrative even when viewing V2).
-  const aiNarrative = version?.aiNarrative || ''
+  const hasNarrative = !!(narrativeText && narrativeText.trim())
+
   return (
     <div className="flex flex-col h-full">
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0 no-print">
@@ -300,7 +384,7 @@ export default function NobelPMAnalysisPage() {
               { id: 'longlead', label: 'Long Lead Items', icon: '📦' },
               { id: 'field', label: 'Field Reality', icon: '👷' },
               { id: 'plain', label: 'Plain Language', icon: '💬' },
-              { id: 'ai', label: 'Narrative', icon: '📝' },
+              { id: 'ai', label: 'Operational Analysis', icon: '📝' },
             ].map(t => (
               <button key={t.id} onClick={() => setActiveTab(t.id)}
                 className={`px-4 py-3 text-xs font-semibold whitespace-nowrap transition-colors ${activeTab === t.id ? 'text-blue-600 border-b-2 border-blue-600 -mb-px' : 'text-slate-500 hover:text-slate-900'}`}>
@@ -317,19 +401,11 @@ export default function NobelPMAnalysisPage() {
                 <GanttChart activities={a.ganttActivities || []} drivingPath={a.criticalDrivers || []} dataDate={a.dataDate} projectedEnd={a.projectedEnd} />
               </div>
             )}
-            {/* SCHEDULE FILTER — replaces the old Critical Path + 2 Week Lookahead tabs.
-                Single tab with a sub-filter selector. Three filters work today using
-                data already produced by the XER parser; two are placeholders pending
-                the next parser update (act_start_date / act_end_date exposure). */}
+            {/* SCHEDULE FILTER */}
             {activeTab === 'schedule-filter' && (
               <div className="tab-pane">
                 <h3 className="text-sm font-bold mb-3">Schedule Filter</h3>
-                <p className="text-xs text-slate-500 mb-4">
-                  Slice the schedule different ways. Pick a filter below.
-                </p>
-                {/* Sub-filter selector — pill buttons. Disabled state used for
-                    placeholder filters (Not Started, Finished) until parser exposes
-                    the underlying activity lists. */}
+                <p className="text-xs text-slate-500 mb-4">Slice the schedule different ways. Pick a filter below.</p>
                 <div className="flex flex-wrap gap-2 mb-5">
                   {[
                     { id: 'critical',    label: 'Critical Path',          enabled: true,  icon: '🎯' },
@@ -338,29 +414,19 @@ export default function NobelPMAnalysisPage() {
                     { id: 'not-started', label: 'Activities Not Started', enabled: true,  icon: '⏸️' },
                     { id: 'finished',    label: 'Activities Finished',    enabled: true,  icon: '✅' },
                   ].map(f => (
-                    <button
-                      key={f.id}
-                      onClick={() => f.enabled && setScheduleFilter(f.id as any)}
-                      disabled={!f.enabled}
+                    <button key={f.id} onClick={() => f.enabled && setScheduleFilter(f.id as any)} disabled={!f.enabled}
                       className={`text-xs px-3 py-1.5 rounded-full font-semibold transition-colors ${
-                        scheduleFilter === f.id && f.enabled
-                          ? 'bg-blue-600 text-white'
-                          : f.enabled
-                            ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                            : 'bg-slate-50 text-slate-400 cursor-not-allowed'
+                        scheduleFilter === f.id && f.enabled ? 'bg-blue-600 text-white'
+                        : f.enabled ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        : 'bg-slate-50 text-slate-400 cursor-not-allowed'
                       }`}>
                       {f.icon} {f.label}
-                      {!f.enabled && <span className="ml-1 text-[10px] italic">(coming soon)</span>}
                     </button>
                   ))}
                 </div>
-                {/* CRITICAL PATH sub-filter — activities with zero or negative float.
-                    Uses a.criticalDrivers, already computed by the XER parser. */}
                 {scheduleFilter === 'critical' && (
                   <div>
-                    <p className="text-xs text-slate-500 mb-4">
-                      The critical path is the chain of activities controlling project completion. If any of these slips, the whole project slips by that same amount.
-                    </p>
+                    <p className="text-xs text-slate-500 mb-4">The critical path is the chain of activities controlling project completion. If any of these slips, the whole project slips by that same amount.</p>
                     <div className="space-y-2">
                       {(a.criticalDrivers || []).slice(0, 12).map((t: any, i: number) => (
                         <div key={i} className="flex items-center gap-3 py-2 border-b border-slate-100 last:border-0 text-xs">
@@ -377,16 +443,12 @@ export default function NobelPMAnalysisPage() {
                     </div>
                   </div>
                 )}
-                {/* LONGEST PATH sub-filter — uses driving_path_flag='Y' from
-                    P6 (the actual longest-path marker). Falls back to the
-                    Critical Path drivers ONLY if no activities have the
-                    flag set, with a clear amber notice explaining why. */}
                 {scheduleFilter === 'longest' && (
                   <div>
                     {(a.longestPathActivities && a.longestPathActivities.length > 0) ? (
                       <>
                         <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                          The longest path is the chain of activities that determines when the project finishes — the path with the greatest total duration from start to end. P6 flags these activities with the <span className="font-mono">driving_path_flag</span>. NobelPM shows them here in chronological order.
+                          The longest path is the chain of activities that determines when the project finishes — the path with the greatest total duration from start to end. P6 flags these activities with the <span className="font-mono">driving_path_flag</span>. ControlLens shows them here in chronological order.
                         </div>
                         <div className="space-y-2">
                           <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-500 uppercase border-b border-slate-200 pb-2">
@@ -414,9 +476,7 @@ export default function NobelPMAnalysisPage() {
                             )
                           })}
                           {a.longestPathActivities.length > 50 && (
-                            <div className="text-center text-[10px] text-slate-400 pt-3">
-                              Showing first 50 of {a.longestPathActivities.length} activities on the longest path
-                            </div>
+                            <div className="text-center text-[10px] text-slate-400 pt-3">Showing first 50 of {a.longestPathActivities.length} activities on the longest path</div>
                           )}
                         </div>
                       </>
@@ -443,24 +503,17 @@ export default function NobelPMAnalysisPage() {
                     )}
                   </div>
                 )}
-                {/* 2 WEEK LOOKAHEAD sub-filter — activities starting/finishing within 14
-                    calendar days of the schedule's data date. */}
                 {scheduleFilter === 'lookahead' && (
                   <div>
                     <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
                       Activities scheduled to start or finish within 14 calendar days after the data date ({a.dataDate?.slice(0,10) || 'N/A'}). Use this for weekly coordination meetings with field super and trades.
                     </div>
                     {(!a.twoWeekLookahead || a.twoWeekLookahead.length === 0) ? (
-                      <div className="text-center py-8 text-slate-400 text-xs">No activities scheduled in next 14 days. Upload a fresh XER if you expect lookahead data.</div>
+                      <div className="text-center py-8 text-slate-400 text-xs">No activities scheduled in next 14 days.</div>
                     ) : (
                       <div className="space-y-2">
                         <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-500 uppercase border-b border-slate-200 pb-2">
-                          <div className="col-span-1">Code</div>
-                          <div className="col-span-5">Activity</div>
-                          <div className="col-span-2 text-right">Start</div>
-                          <div className="col-span-2 text-right">Finish</div>
-                          <div className="col-span-1 text-right">% Done</div>
-                          <div className="col-span-1 text-right">Float</div>
+                          <div className="col-span-1">Code</div><div className="col-span-5">Activity</div><div className="col-span-2 text-right">Start</div><div className="col-span-2 text-right">Finish</div><div className="col-span-1 text-right">% Done</div><div className="col-span-1 text-right">Float</div>
                         </div>
                         {a.twoWeekLookahead.slice(0, 30).map((t: any, i: number) => {
                           const float = Math.round(parseFloat(t.total_float_hr_cnt || '0') / 8)
@@ -476,43 +529,29 @@ export default function NobelPMAnalysisPage() {
                             </div>
                           )
                         })}
-                        {a.twoWeekLookahead.length > 30 && (
-                          <div className="text-center text-[10px] text-slate-400 pt-3">
-                            Showing first 30 of {a.twoWeekLookahead.length} activities
-                          </div>
-                        )}
                       </div>
                     )}
                   </div>
                 )}
-                {/* ACTIVITIES NOT STARTED — activities with no actual start
-                    date and no physical progress. Sorted by planned start
-                    ascending so the soonest-due-to-start are at the top.
-                    Useful for "what should have started by now" review. */}
                 {scheduleFilter === 'not-started' && (
                   <div>
                     <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                      Activities with no actual start date and no physical progress recorded. Sorted by planned start (soonest first). Milestones are excluded — they appear on the dashboard. Use this for "what should already have started" review with the field super.
+                      Activities with no actual start date and no physical progress recorded. Sorted by planned start (soonest first). Use this for "what should already have started" review with the field super.
                     </div>
                     {(!a.notStartedActivities || a.notStartedActivities.length === 0) ? (
-                      <div className="text-center py-8 text-slate-400 text-xs">No not-started activities detected. Upload a fresh XER if you expect this data.</div>
+                      <div className="text-center py-8 text-slate-400 text-xs">No not-started activities detected.</div>
                     ) : (
                       <div className="space-y-2">
                         <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-500 uppercase border-b border-slate-200 pb-2">
-                          <div className="col-span-1">Code</div>
-                          <div className="col-span-5">Activity</div>
-                          <div className="col-span-2 text-right">Planned Start</div>
-                          <div className="col-span-2 text-right">Planned Finish</div>
-                          <div className="col-span-1 text-right">Duration</div>
-                          <div className="col-span-1 text-right">Float</div>
+                          <div className="col-span-1">Code</div><div className="col-span-5">Activity</div><div className="col-span-2 text-right">Planned Start</div><div className="col-span-2 text-right">Planned Finish</div><div className="col-span-1 text-right">Duration</div><div className="col-span-1 text-right">Float</div>
                         </div>
                         {a.notStartedActivities.slice(0, 100).map((t: any, i: number) => {
                           const float = Math.round(parseFloat(t.total_float_hr_cnt || '0') / 8)
                           const duration = Math.round(parseFloat(t.target_drtn_hr_cnt || t.remain_drtn_hr_cnt || '0') / 8)
                           return (
                             <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 last:border-0 text-xs items-center">
-                              <div className="col-span-1 font-mono font-semibold text-slate-800 truncate" title={t.task_code}>{t.task_code}</div>
-                              <div className="col-span-5 text-slate-700 truncate" title={t.task_name}>{t.task_name}</div>
+                              <div className="col-span-1 font-mono font-semibold text-slate-800 truncate">{t.task_code}</div>
+                              <div className="col-span-5 text-slate-700 truncate">{t.task_name}</div>
                               <div className="col-span-2 text-right text-slate-600">{(t.early_start_date || t.target_start_date || '').slice(0,10) || '—'}</div>
                               <div className="col-span-2 text-right text-slate-600">{(t.early_end_date || t.target_end_date || '').slice(0,10) || '—'}</div>
                               <div className="col-span-1 text-right text-slate-600">{duration}d</div>
@@ -520,39 +559,23 @@ export default function NobelPMAnalysisPage() {
                             </div>
                           )
                         })}
-                        {a.notStartedActivities.length > 100 && (
-                          <div className="text-center text-[10px] text-slate-400 pt-3">
-                            Showing first 100 of {a.notStartedActivities.length} activities · {a.notStartedActivities.length} total not started
-                          </div>
-                        )}
                       </div>
                     )}
                   </div>
                 )}
-                {/* ACTIVITIES FINISHED — activities with a populated actual
-                    finish date. Sorted by actual finish DESCENDING so most
-                    recently completed work appears at the top. Variance
-                    column shows finish vs. baseline (positive = late). */}
                 {scheduleFilter === 'finished' && (
                   <div>
                     <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                      Activities with an actual finish date. Most recently completed appear first. The Variance column shows actual finish vs. planned finish — positive means the activity finished late, negative means it finished early. Milestones are excluded.
+                      Activities with an actual finish date. Most recently completed appear first. The Variance column shows actual finish vs. planned finish — positive means late, negative means early.
                     </div>
                     {(!a.finishedActivities || a.finishedActivities.length === 0) ? (
-                      <div className="text-center py-8 text-slate-400 text-xs">No finished activities detected. Upload a fresh XER if you expect this data.</div>
+                      <div className="text-center py-8 text-slate-400 text-xs">No finished activities detected.</div>
                     ) : (
                       <div className="space-y-2">
                         <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-500 uppercase border-b border-slate-200 pb-2">
-                          <div className="col-span-1">Code</div>
-                          <div className="col-span-5">Activity</div>
-                          <div className="col-span-2 text-right">Actual Start</div>
-                          <div className="col-span-2 text-right">Actual Finish</div>
-                          <div className="col-span-1 text-right">Duration</div>
-                          <div className="col-span-1 text-right">Variance</div>
+                          <div className="col-span-1">Code</div><div className="col-span-5">Activity</div><div className="col-span-2 text-right">Actual Start</div><div className="col-span-2 text-right">Actual Finish</div><div className="col-span-1 text-right">Duration</div><div className="col-span-1 text-right">Variance</div>
                         </div>
                         {a.finishedActivities.slice(0, 100).map((t: any, i: number) => {
-                          // Calculate variance: actual finish vs planned (target) finish
-                          // Positive variance = finished late; negative = early; 0 = on time
                           let variance: number | null = null
                           const actEnd = t.act_end_date
                           const plannedEnd = t.target_end_date || t.early_end_date
@@ -563,7 +586,6 @@ export default function NobelPMAnalysisPage() {
                               variance = Math.round((a1 - p1) / (1000 * 60 * 60 * 24))
                             }
                           }
-                          // Actual duration: actual start → actual finish
                           let actualDuration = 0
                           if (t.act_start_date && t.act_end_date) {
                             const s = new Date(t.act_start_date.replace(' ', 'T')).getTime()
@@ -574,8 +596,8 @@ export default function NobelPMAnalysisPage() {
                           }
                           return (
                             <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 last:border-0 text-xs items-center">
-                              <div className="col-span-1 font-mono font-semibold text-slate-800 truncate" title={t.task_code}>{t.task_code}</div>
-                              <div className="col-span-5 text-slate-700 truncate" title={t.task_name}>{t.task_name}</div>
+                              <div className="col-span-1 font-mono font-semibold text-slate-800 truncate">{t.task_code}</div>
+                              <div className="col-span-5 text-slate-700 truncate">{t.task_name}</div>
                               <div className="col-span-2 text-right text-slate-600">{(t.act_start_date || '').slice(0,10) || '—'}</div>
                               <div className="col-span-2 text-right text-slate-600 font-semibold">{(t.act_end_date || '').slice(0,10) || '—'}</div>
                               <div className="col-span-1 text-right text-slate-600">{actualDuration}d</div>
@@ -585,23 +607,13 @@ export default function NobelPMAnalysisPage() {
                             </div>
                           )
                         })}
-                        {a.finishedActivities.length > 100 && (
-                          <div className="text-center text-[10px] text-slate-400 pt-3">
-                            Showing first 100 of {a.finishedActivities.length} activities · {a.finishedActivities.length} total finished
-                          </div>
-                        )}
                       </div>
                     )}
                   </div>
                 )}
               </div>
             )}
-            {/* CONSTRUCTION SEQUENCE PROBLEMS — formerly "Logic Check"
-                Renamed and reworked to show full per-violation evidence so
-                the PM can review each flagged activity with their scheduler.
-                Each affected activity is listed with every violated
-                relationship: which predecessor, what dates, how many days
-                early, and a plain-language explanation. */}
+            {/* SEQUENCE PROBLEMS */}
             {activeTab === 'logic' && (
               <div>
                 <h3 className="text-sm font-bold mb-3">
@@ -609,16 +621,7 @@ export default function NobelPMAnalysisPage() {
                 </h3>
                 <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
                   <div className="font-bold mb-1">What this shows</div>
-                  Activities whose actual progress conflicts with the relationship logic
-                  in the schedule. For each one, NobelPM lists every violated relationship
-                  with full evidence — what the logic required, what actually happened,
-                  and how many days earlier the work occurred than the logic allowed.
-                  <div className="mt-2">
-                    <strong>Review each with your scheduler.</strong> Legitimate fast-tracking
-                    (intentional acceleration) and true logic gaps both show up here. The
-                    PM and scheduler together decide which is which. Lead values (negative
-                    lag) are already accounted for — what you see is genuinely early work.
-                  </div>
+                  Activities whose actual progress conflicts with the relationship logic in the schedule. For each one, ControlLens lists every violated relationship with full evidence — what the logic required, what actually happened, and how many days earlier the work occurred than the logic allowed.
                 </div>
                 {(!a.outOfSequence || a.outOfSequence.length === 0) ? (
                   <div className="bg-green-50 border border-green-200 rounded-xl p-6 text-center">
@@ -631,59 +634,38 @@ export default function NobelPMAnalysisPage() {
                     {['Procurement', 'Pre-Construction', 'Other'].map(category => {
                       const items = (a.outOfSequence || []).filter((o: any) => o.category === category)
                       if (items.length === 0) return null
-                      const catColor = category === 'Procurement' ? 'text-amber-700'
-                                     : category === 'Pre-Construction' ? 'text-blue-700'
-                                     : 'text-slate-700'
+                      const catColor = category === 'Procurement' ? 'text-amber-700' : category === 'Pre-Construction' ? 'text-blue-700' : 'text-slate-700'
                       return (
                         <div key={category} className="mb-5">
-                          <div className={`text-xs font-bold mb-2 uppercase tracking-wider ${catColor}`}>
-                            {category} · {items.length} {items.length === 1 ? 'activity' : 'activities'}
-                          </div>
+                          <div className={`text-xs font-bold mb-2 uppercase tracking-wider ${catColor}`}>{category} · {items.length} {items.length === 1 ? 'activity' : 'activities'}</div>
                           <div className="space-y-2">
                             {items.slice(0, 30).map((o: any, i: number) => {
-                              // Each entry: activity header + a list of every
-                              // violation (one row per violated relationship)
                               const violations = o.violations || []
                               return (
                                 <div key={i} className="border border-slate-200 rounded-lg overflow-hidden bg-white">
-                                  {/* Activity header */}
                                   <div className="bg-slate-50 px-3 py-2 border-b border-slate-100 flex items-center gap-3">
                                     <div className="font-mono font-bold text-xs text-slate-900">{o.task.task_code}</div>
                                     <div className="flex-1 text-xs text-slate-700 truncate">{o.task.task_name}</div>
-                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
-                                      {violations.length} violation{violations.length === 1 ? '' : 's'}
-                                    </span>
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">{violations.length} violation{violations.length === 1 ? '' : 's'}</span>
                                   </div>
-                                  {/* Per-violation evidence */}
                                   <div className="divide-y divide-slate-100">
                                     {violations.length === 0 ? (
-                                      <div className="px-3 py-2 text-[11px] text-slate-500 italic">
-                                        Predecessor {o.pred?.task_code} — relationship logic violated
-                                      </div>
+                                      <div className="px-3 py-2 text-[11px] text-slate-500 italic">Predecessor {o.pred?.task_code} — relationship logic violated</div>
                                     ) : violations.map((v: any, vi: number) => (
                                       <div key={vi} className="px-3 py-2 text-[11px] leading-relaxed">
                                         <div className="flex items-start gap-2">
                                           <span className="font-mono font-bold text-slate-700 w-24 flex-shrink-0">{v.pred.task_code}</span>
                                           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 flex-shrink-0">{v.relTypeLabel}</span>
                                           <span className="flex-1 text-slate-600">{v.pred.task_name}</span>
-                                          <span className="text-[10px] font-bold text-red-700 flex-shrink-0">
-                                            {v.varianceDays}d early
-                                          </span>
+                                          <span className="text-[10px] font-bold text-red-700 flex-shrink-0">{v.varianceDays}d early</span>
                                         </div>
-                                        <div className="mt-1 ml-26 text-[10px] text-slate-500 leading-snug">
-                                          {v.description}
-                                        </div>
+                                        <div className="mt-1 ml-26 text-[10px] text-slate-500 leading-snug">{v.description}</div>
                                       </div>
                                     ))}
                                   </div>
                                 </div>
                               )
                             })}
-                            {items.length > 30 && (
-                              <div className="text-center text-[10px] text-slate-400 pt-2">
-                                Showing first 30 of {items.length} activities in this category
-                              </div>
-                            )}
                           </div>
                         </div>
                       )
@@ -719,7 +701,7 @@ export default function NobelPMAnalysisPage() {
               <div>
                 <h3 className="text-sm font-bold mb-3">Long lead items ({a.longLeadItems?.length || 0} items, 35+ days duration)</h3>
                 <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                  Long lead items are materials or equipment requiring significant time to fabricate and deliver. These are the items that most commonly cause delays. NobelPM sorts by float — most critical first.
+                  Long lead items are materials or equipment requiring significant time to fabricate and deliver. These are the items that most commonly cause delays. ControlLens sorts by float — most critical first.
                 </div>
                 <div className="space-y-2">
                   {(a.longLeadItems || []).slice(0, 20).map((ll: any, i: number) => (
@@ -806,20 +788,108 @@ export default function NobelPMAnalysisPage() {
                 </div>
               </div>
             )}
-            {/* NARRATIVE */}
+
+            {/* OPERATIONAL ANALYSIS — generate / edit / regenerate / clear flow */}
             {activeTab === 'ai' && (
               <div>
-                <h3 className="text-sm font-bold mb-1">Operational analysis — how to fix this</h3>
-                <p className="text-xs text-slate-500 mb-3">A direct read of what the schedule is telling you, what matters most, and what conversations to have this week.</p>
-                {aiNarrative ? (
-                  <div className="bg-slate-50 border-l-4 border-blue-500 rounded-r-lg p-4 text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
-                    {aiNarrative}
+                <div className="flex items-start justify-between gap-4 mb-3 flex-wrap">
+                  <div>
+                    <h3 className="text-sm font-bold">Operational Analysis</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">A direct read of what the schedule is telling you, what matters most this week, and what conversations to have. Generated on demand — the engine works without it.</p>
                   </div>
-                ) : (
-                  <div className="text-xs text-slate-500 text-center py-8">No narrative available for this version. Upload a new version to generate the narrative.</div>
+                  {/* Header action buttons */}
+                  <div className="flex gap-2 flex-shrink-0">
+                    {!hasNarrative && !isGenerating && (
+                      <button onClick={handleGenerate}
+                        className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-lg flex items-center gap-1.5">
+                        📝 Generate Operational Analysis
+                      </button>
+                    )}
+                    {hasNarrative && !isEditing && !isGenerating && (
+                      <>
+                        <button onClick={handleEdit}
+                          className="border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1">
+                          ✏️ Edit
+                        </button>
+                        <button onClick={handleGenerate}
+                          className="border border-blue-200 hover:bg-blue-50 text-blue-600 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1">
+                          🔄 Regenerate
+                        </button>
+                        <button onClick={handleClear}
+                          className="border border-slate-200 hover:border-red-200 hover:bg-red-50 hover:text-red-600 text-slate-600 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1">
+                          🗑️ Clear
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Error message — only shown after a failed generation attempt */}
+                {narrativeError && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-xs text-red-700">
+                    <div className="font-bold mb-1">Couldn't generate the Operational Analysis</div>
+                    <div>{narrativeError}</div>
+                    <div className="mt-1 text-red-600">The schedule analysis above is unaffected — only the narrative requires the report service.</div>
+                  </div>
+                )}
+
+                {/* Loading state */}
+                {isGenerating && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 text-center">
+                    <div className="text-3xl mb-3 animate-pulse">📝</div>
+                    <div className="text-sm font-bold text-blue-900">Generating Operational Analysis...</div>
+                    <div className="text-xs text-blue-700 mt-1">This usually takes 10-30 seconds. The rest of the page works while this runs.</div>
+                  </div>
+                )}
+
+                {/* Empty state — never generated */}
+                {!isGenerating && !hasNarrative && !narrativeError && (
+                  <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-8 text-center">
+                    <div className="text-4xl mb-3">📝</div>
+                    <div className="text-sm font-bold text-slate-700 mb-1">No Operational Analysis yet</div>
+                    <div className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                      The schedule engine has already analyzed your data above. When you're ready, click <strong>Generate Operational Analysis</strong> to produce a written report with project condition, top three actions, conversations to have this week, and TIA evidence.
+                    </div>
+                    <button onClick={handleGenerate}
+                      className="mt-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg">
+                      📝 Generate Operational Analysis
+                    </button>
+                  </div>
+                )}
+
+                {/* Edit mode — textarea + Save/Cancel */}
+                {hasNarrative && isEditing && !isGenerating && (
+                  <div>
+                    <textarea
+                      value={narrativeText}
+                      onChange={e => setNarrativeText(e.target.value)}
+                      rows={20}
+                      className="w-full p-4 border border-blue-300 rounded-lg text-xs text-slate-800 font-sans leading-relaxed focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 resize-y bg-white"
+                      placeholder="Write your own Operational Analysis here..."
+                    />
+                    <div className="flex gap-2 mt-2 justify-end">
+                      <button onClick={handleEditCancel}
+                        className="px-4 py-2 text-slate-600 text-xs font-semibold border border-slate-200 rounded-lg hover:bg-slate-50">
+                        Cancel
+                      </button>
+                      <button onClick={handleEditSave}
+                        className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg">
+                        Save Changes
+                      </button>
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-2">Your edits are saved to this version. Switching versions or regenerating will not lose them.</div>
+                  </div>
+                )}
+
+                {/* Read mode — show the narrative */}
+                {hasNarrative && !isEditing && !isGenerating && (
+                  <div className="bg-slate-50 border-l-4 border-blue-500 rounded-r-lg p-4 text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
+                    {narrativeText}
+                  </div>
                 )}
               </div>
             )}
+
           </div>
         </div>
       </div>

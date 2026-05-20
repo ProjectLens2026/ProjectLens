@@ -2,197 +2,15 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  getActiveProject, getActiveProjectId, loadProjects,
+  getActiveProjectId, loadProjects,
   createProject, addVersionToProject,
   subscribeToProjects,
   ScheduleVersion
 } from '@/lib/projectStore'
-// XER parser — runs in the browser now to avoid Vercel's serverless function
+// XER parser — runs in the browser to avoid Vercel's serverless function
 // body limit (which was truncating large XER files like the 620 KB DCDGS
 // file from 1,048 activities down to 557). See runAnalysis() below.
 import { parseXER, analyzeXER } from '@/lib/xerParser'
-
-// Gantt Chart Component
-function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
-  activities: any[]  // 0 or negative float activities
-  drivingPath: any[] // driving_path_flag = Y activities (fallback)
-  dataDate: string
-  projectedEnd: string
-}) {
-  const hasZeroNegFloat = activities && activities.length > 0
-  const hasDrivingPath = drivingPath && drivingPath.length > 0
-  const displayActivities = hasZeroNegFloat ? activities : (hasDrivingPath ? drivingPath : [])
-  const mode = hasZeroNegFloat ? 'float' : hasDrivingPath ? 'driving' : 'none'
-  function renderGantt(acts: any[]) {
-    const start = new Date(dataDate?.replace(' ', 'T') || new Date())
-    const end = new Date(projectedEnd?.replace(' ', 'T') || new Date())
-    const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)))
-    function getLeft(dateStr?: string) {
-      if (!dateStr) return 0
-      const d = new Date(dateStr.replace(' ', 'T'))
-      const days = Math.round((d.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
-      return Math.max(0, Math.min(100, (days / totalDays) * 100))
-    }
-    function getWidth(startStr?: string, endStr?: string) {
-      if (!startStr || !endStr) return 1
-      const s = new Date(startStr.replace(' ', 'T'))
-      const e = new Date(endStr.replace(' ', 'T'))
-      const days = Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24))
-      return Math.max(0.5, Math.min(100, (days / totalDays) * 100))
-    }
-    function shortDate(d?: string) { return d ? d.slice(0, 10) : '—' }
-    const months: { label: string; left: number }[] = []
-    const cur = new Date(start)
-    cur.setDate(1)
-    while (cur <= end) {
-      const left = getLeft(cur.toISOString())
-      if (left >= 0 && left <= 100) {
-        months.push({ label: cur.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }), left })
-      }
-      cur.setMonth(cur.getMonth() + 1)
-    }
-    const displayed = acts.slice(0, 100)
-    return (
-      <div className="overflow-auto max-h-[550px] border border-slate-200 rounded-xl">
-        <div className="sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
-          <div className="flex">
-            <div className="w-80 flex-shrink-0 px-3 py-2 text-[10px] font-bold text-slate-500 uppercase border-r border-slate-200">Activity</div>
-            <div className="flex-1 relative h-8 min-w-[600px]">
-              {months.map((m, i) => (
-                <div key={i} className="absolute top-0 h-full flex items-center" style={{ left: `${m.left}%` }}>
-                  <div className="h-full border-l border-slate-300 border-dashed" />
-                  <span className="text-[9px] text-slate-400 ml-1 whitespace-nowrap">{m.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-        {displayed.map((t: any, i: number) => {
-          const taskStart = t.act_start_date || t.early_start_date || t.target_start_date || ''
-          const taskEnd = t.early_end_date || t.act_end_date || t.target_end_date || ''
-          const float = parseFloat(t.total_float_hr_cnt || '0')
-          const isComplete = t.status_code === 'TK_Complete'
-          const barColor = isComplete ? 'bg-slate-400' : mode === 'driving' ? 'bg-blue-500' : float < 0 ? 'bg-red-500' : 'bg-amber-500'
-          const left = getLeft(taskStart)
-          const width = getWidth(taskStart, taskEnd)
-          const pct = parseFloat(t.phys_complete_pct || '0')
-          return (
-            <div key={i} className={`flex border-b border-slate-100 hover:bg-blue-50/30 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
-              <div className="w-80 flex-shrink-0 px-3 py-2 border-r border-slate-100 flex items-center gap-2">
-                <div className="min-w-0">
-                  <div className="text-[11px] font-mono font-bold text-slate-800 truncate">{t.task_code}</div>
-                  <div className="text-[10px] text-slate-500 truncate">{t.task_name}</div>
-                </div>
-                <div className={`ml-auto text-[10px] font-bold flex-shrink-0 ${float < 0 ? 'text-red-600' : float === 0 ? 'text-amber-600' : 'text-green-600'}`}>
-                  {Math.round(float / 8)}d
-                </div>
-              </div>
-              <div className="flex-1 relative py-2 min-w-[600px] h-10">
-                <div className="absolute inset-y-0 flex items-center" style={{ left: `${left}%`, width: `${width}%`, minWidth: '4px' }}>
-                  <div className={`relative h-5 w-full rounded-sm ${barColor} opacity-80 overflow-hidden`}>
-                    <div className="absolute inset-y-0 left-0 bg-black/20 rounded-l-sm" style={{ width: `${pct}%` }} />
-                    {width > 8 && (
-                      <div className="absolute inset-0 flex items-center px-1">
-                        <span className="text-[9px] text-white font-semibold truncate">{shortDate(taskEnd)}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )
-        })}
-        {acts.length > 100 && (
-          <div className="text-center py-3 text-xs text-slate-400 border-t border-slate-200">
-            Showing first 100 of {acts.length} activities
-          </div>
-        )}
-      </div>
-    )
-  }
-  // Case 1: No activities at all
-  if (mode === 'none') {
-    return (
-      <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
-        <div className="flex gap-3 items-start">
-          <div className="text-2xl">⚠️</div>
-          <div>
-            <div className="font-bold text-amber-900 mb-1">Gantt chart cannot be displayed</div>
-            <div className="text-sm text-amber-800 leading-relaxed mb-3">
-              NobelPM could not find any activities with driving path or float data in this schedule.
-              This usually means the schedule has not been calculated in P6, or the XER was exported before
-              a schedule calculation was run.
-            </div>
-            <div className="text-xs font-bold text-amber-700 mb-1">What to do:</div>
-            <div className="text-xs text-amber-700 leading-relaxed">
-              Open the schedule in Primavera P6, run Schedule (F9), then re-export the XER and upload again.
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-  // Case 2: No 0/negative float but has driving path — explain why and show driving path
-  if (mode === 'driving') {
-    return (
-      <div className="space-y-4">
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
-          <div className="flex gap-3 items-start">
-            <div className="text-2xl">ℹ️</div>
-            <div>
-              <div className="font-bold text-blue-900 mb-1">
-                Critical path is showing positive float — here is why
-              </div>
-              <div className="text-sm text-blue-800 leading-relaxed mb-3">
-                All activities in this schedule carry positive total float — meaning no activity is technically
-                "late" according to the schedule calculation. This is usually caused by one of the following:
-              </div>
-              <div className="space-y-2 text-sm text-blue-800">
-                <div className="flex gap-2">
-                  <span className="font-bold flex-shrink-0">1.</span>
-                  <span><span className="font-semibold">No "Must Finish By" constraint on the completion milestone.</span> If the project finish milestone has no hard constraint date, P6 calculates float against an open-ended horizon — so everything appears to have float even if the project is running late against the contract date.</span>
-                </div>
-                <div className="flex gap-2">
-                  <span className="font-bold flex-shrink-0">2.</span>
-                  <span><span className="font-semibold">Schedule calculated without a project deadline.</span> The scheduler may not have set the contract completion date as a constraint in P6. The network drives the dates but there is no fixed end date to calculate float against.</span>
-                </div>
-                <div className="flex gap-2">
-                  <span className="font-bold flex-shrink-0">3.</span>
-                  <span><span className="font-semibold">Float type set to "Finish Float" instead of "Total Float."</span> Some P6 configurations calculate float differently, which can show positive values even on a driving path.</span>
-                </div>
-              </div>
-              <div className="mt-4 p-3 bg-blue-100 rounded-lg text-xs text-blue-900 leading-relaxed">
-                <span className="font-bold">What this means operationally:</span> The schedule is showing a longest path but not a true critical path with float enforcement. 
-                The PM should verify in P6 that a "Must Finish By" constraint is set on the contract completion milestone (MM-125 or equivalent). 
-                Without this, the schedule cannot accurately calculate negative float or show the true delay condition.
-                This is an important finding to discuss with the project scheduler and document in the schedule narrative.
-              </div>
-              <div className="mt-3 text-xs text-blue-700 font-semibold">
-                NobelPM is showing the Longest Path (driving path flag = Y) as the best available substitute:
-              </div>
-            </div>
-          </div>
-        </div>
-        {renderGantt(displayActivities)}
-        <div className="text-xs text-slate-400 text-center">
-          Bars shown in blue = longest path activities · Float values shown are positive (no finish constraint detected)
-        </div>
-      </div>
-    )
-  }
-  // Case 3: Normal — show 0/negative float activities
-  return (
-    <div className="space-y-3">
-      <div className="flex gap-4 text-xs">
-        <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-red-500" /><span className="text-slate-600">Negative float (behind schedule)</span></div>
-        <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-amber-500" /><span className="text-slate-600">Zero float (on the critical path)</span></div>
-        <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-slate-400" /><span className="text-slate-600">Complete</span></div>
-        <div className="ml-auto text-slate-400">{activities.length} activities · sorted by early finish date</div>
-      </div>
-      {renderGantt(displayActivities)}
-    </div>
-  )
-}
 
 type Step = 'upload' | 'context' | 'analyzing' | 'done'
 
@@ -213,22 +31,16 @@ interface ProjectContext {
 // Primavera P6 exports XER files as UTF-16LE by default. Other tools and
 // some scripts export as UTF-8. We auto-detect by looking at the BOM and,
 // when no BOM is present, by sampling the first 100 byte-pairs for the
-// characteristic UTF-16 "every other byte is zero" pattern. This mirrors
-// the encoding-detection logic previously running on the server.
+// characteristic UTF-16 "every other byte is zero" pattern.
 async function readXERFileAsText(file: File): Promise<string> {
   const buffer = await file.arrayBuffer()
   const bytes = new Uint8Array(buffer)
-
-  // UTF-16LE with BOM (FF FE) — Primavera P6 default export
   if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
     return new TextDecoder('utf-16le').decode(bytes.slice(2))
   }
-  // UTF-16BE with BOM (FE FF)
   if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
     return new TextDecoder('utf-16be').decode(bytes.slice(2))
   }
-  // UTF-16LE without BOM — detect by counting zero bytes in odd positions.
-  // A pure ASCII file encoded as UTF-16LE has 0x00 at every odd index.
   let zeroByteCount = 0
   const sampleSize = Math.min(200, bytes.length)
   for (let i = 1; i < sampleSize; i += 2) {
@@ -237,7 +49,6 @@ async function readXERFileAsText(file: File): Promise<string> {
   if (zeroByteCount > sampleSize / 4) {
     return new TextDecoder('utf-16le').decode(bytes)
   }
-  // Default: UTF-8
   return new TextDecoder('utf-8').decode(bytes)
 }
 
@@ -248,29 +59,27 @@ export default function UploadPage() {
   const [dragging, setDragging] = useState(false)
   const [progress, setProgress] = useState(0)
   const [result, setResult] = useState<any>(null)
-  const [activeTab, setActiveTab] = useState('critical')
   const [ctx, setCtx] = useState<ProjectContext>({
     projectName: '', phase: 'Commissioning & Closeout', contractValue: '',
     completionDate: '', owner: '', gc: '', procurementIssues: '',
     keyConstraints: '', criticalConcerns: ''
   })
+
   // Project assignment state
   const [existingProjects, setExistingProjects] = useState<any[]>([])
   const [projectMode, setProjectMode] = useState<'new' | 'existing'>('new')
   const [selectedProjectId, setSelectedProjectId] = useState<string>('')
   const [newProjectId, setNewProjectId] = useState<string>('')
+
   useEffect(() => {
-    // Initial load — IndexedDB may not be hydrated yet, in which case
-    // loadProjects() returns []. The subscription below will fire when
-    // hydration completes (and on any subsequent writes).
     refreshProjectsList()
     const unsubscribe = subscribeToProjects(refreshProjectsList)
     return unsubscribe
   }, [])
+
   function refreshProjectsList() {
     const all = loadProjects()
     setExistingProjects(all)
-    // Always sync to currently active project from sidebar
     const activeId = getActiveProjectId()
     if (activeId && all.find(p => p.id === activeId)) {
       setSelectedProjectId(activeId)
@@ -280,15 +89,17 @@ export default function UploadPage() {
       setProjectMode('new')
     }
   }
+
   const fileRef = useRef<HTMLInputElement>(null)
   const accept = '.xer,.xml,.mpp,.pdf,.xlsx,.xls,.csv'
   const phases = ['Pre-Construction','Foundation & Sitework','Structure','MEP Rough-In','Interior Finishes','Commissioning & Closeout','Punch & Turnover']
+
   function onDrop(e: React.DragEvent) {
     e.preventDefault(); setDragging(false)
     const f = e.dataTransfer.files[0]
     if (f) {
       setFile(f)
-      refreshProjectsList()  // Re-sync with current active project
+      refreshProjectsList()
       setStep('context')
     }
   }
@@ -296,7 +107,7 @@ export default function UploadPage() {
     const f = e.target.files?.[0]
     if (f) {
       setFile(f)
-      refreshProjectsList()  // Re-sync with current active project
+      refreshProjectsList()
       setStep('context')
     }
   }
@@ -304,43 +115,31 @@ export default function UploadPage() {
   async function runAnalysis() {
     setStep('analyzing')
     setProgress(0)
-
-    // Progress bar animation — parsing is fast (under a second even for
-    // a 3,000-activity XER), the network call for the AI narrative is
-    // what takes time. We tick up to ~85% during work, then snap to 100%
-    // when the response comes back.
+    // Engine-only now — much faster. Parsing is done client-side in
+    // seconds, server-side analyze just acknowledges. No more 30-sec
+    // wait for AI generation on every upload.
     const progInterval = setInterval(() => {
-      setProgress(p => p < 85 ? p + Math.random() * 8 : p)
-    }, 400)
-
+      setProgress(p => p < 85 ? p + Math.random() * 12 : p)
+    }, 200)
     try {
       if (!file) {
         throw new Error('No file selected')
       }
-
       const ext = file.name.split('.').pop()?.toLowerCase()
       let analysis: any
       let rawXER: string | undefined
-
       if (ext === 'xer') {
         // CLIENT-SIDE XER PARSING — bypasses Vercel's serverless function
-        // upload size limit (~256 KB practical for multipart form-data,
-        // which was truncating the 620 KB DCDGS file from 1,048 activities
-        // down to 557).
-        //
-        // The browser reads the entire file into memory using FileReader,
-        // auto-detects encoding (Primavera P6 defaults to UTF-16LE), then
-        // runs the same parseXER + analyzeXER functions the server used
-        // to call. Only the small parsed analysis JSON is sent to the
-        // server, where it's used purely as input to the AI narrative.
-        setProgress(10)
+        // upload size limit. The browser reads the entire file into
+        // memory, auto-detects encoding (Primavera P6 defaults to
+        // UTF-16LE), then runs parseXER + analyzeXER. Only the small
+        // parsed analysis JSON is sent to the server.
+        setProgress(15)
         const text = await readXERFileAsText(file)
-        rawXER = text  // Saved with the version for TIA comparison later
-
-        setProgress(35)
+        rawXER = text
+        setProgress(45)
         const parsed = parseXER(text)
         const result = analyzeXER(parsed)
-
         analysis = {
           ...result,
           projectName: parsed.projectName || ctx.projectName || file.name,
@@ -349,16 +148,15 @@ export default function UploadPage() {
           projectedEnd: parsed.projectedEnd,
           fileType: 'Primavera P6 XER',
         }
-        setProgress(55)
+        setProgress(70)
       } else {
-        // Non-XER files — build the fallback analysis the server used to
-        // generate. No parsing happens (we don't yet support these formats
-        // deeply). The narrative still runs, using the project context the
-        // user typed in to give general operational advice.
+        // Non-XER files — build a fallback analysis. No parsing happens
+        // for these formats yet. The project context the user typed in
+        // is preserved for later use.
         analysis = {
           fileType: ext?.toUpperCase() || 'UNKNOWN',
           projectName: ctx.projectName || file.name,
-          message: 'File received. Detailed parsing is currently optimized for Primavera P6 XER files. Narrative will use the project context you provided.',
+          message: 'File received. Detailed parsing is currently optimized for Primavera P6 XER files.',
           healthScore: 65,
           condition: 'Monitor Closely',
           totalActivities: 0,
@@ -375,9 +173,10 @@ export default function UploadPage() {
         }
       }
 
-      // Send the parsed analysis JSON to the server for AI narrative.
-      // The payload is small (KBs, not MB) regardless of how big the
-      // original XER was — that's how we bypass the upload size cap.
+      // Send parsed analysis to server for acknowledgement. Engine-only
+      // now — no AI call here. Operational Analysis is generated on
+      // demand via /api/generate-narrative when the PM requests it
+      // on the Schedule Analysis page.
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -387,7 +186,6 @@ export default function UploadPage() {
           fileName: file.name,
         }),
       })
-
       clearInterval(progInterval)
       setProgress(100)
 
@@ -395,42 +193,27 @@ export default function UploadPage() {
         const errText = await res.text().catch(() => 'Unknown error')
         throw new Error(`Server error: ${errText}`)
       }
-
       const data = await res.json()
       setResult(data)
 
-      // Save as a project version based on user selection.
-      // This logic is unchanged from before — we just feed it the analysis
-      // that's already in hand (no need to re-read the file from a server
-      // round-trip).
-      //
-      // If the save fails (typically QuotaExceededError on big XERs), we
-      // SHOW the user an alert rather than silently dropping the project.
-      // Without this, the analysis would display fine on-screen but the
-      // project would never appear in their projects list — the symptom
-      // we saw with 1,040-activity XERs filling localStorage.
+      // Save as a project version. No aiNarrative on initial save —
+      // the PM generates it on-demand from the Schedule Analysis page.
       try {
         const version: ScheduleVersion = {
           id: 'ver_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
           uploadedAt: new Date().toISOString(),
-          // dataDate = the schedule's actual "as-of" date from inside the XER
-          // (PROJECT.last_recalc_date). Falls back to undefined if the parser
-          // couldn't read it from this XER. The trend analyzer uses this for
-          // proper chronological ordering, not upload time.
           dataDate: data.analysis?.dataDate || undefined,
           fileName: file?.name || 'schedule.xer',
           analysis: data.analysis,
-          aiNarrative: data.aiNarrative,
+          // aiNarrative intentionally omitted. PM generates on demand.
           context: ctx,
           rawXER,
         }
-        console.log('[NobelPM] Saving version', { projectMode, selectedProjectId, versionId: version.id })
+        console.log('[ControlLens] Saving version', { projectMode, selectedProjectId, versionId: version.id })
         if (projectMode === 'existing' && selectedProjectId) {
-          // Add as new version to existing project
           const updated = addVersionToProject(selectedProjectId, version)
-          console.log('[NobelPM] Added version to existing project', { success: !!updated, totalVersions: updated?.versions.length })
+          console.log('[ControlLens] Added version to existing project', { success: !!updated, totalVersions: updated?.versions.length })
         } else {
-          // Create a new project
           const projectName = ctx.projectName || data.analysis?.projectName || file?.name?.replace(/\.[a-z]+$/i, '') || 'Untitled Project'
           const newProj = createProject({
             name: projectName,
@@ -438,22 +221,15 @@ export default function UploadPage() {
             owner: ctx.owner,
             version,
           })
-          console.log('[NobelPM] Created new project', { id: newProj.id, name: newProj.name })
+          console.log('[ControlLens] Created new project', { id: newProj.id, name: newProj.name })
         }
-        // Keep legacy keys for backward compat. Wrapped in its own try/catch
-        // so a quota error here (less critical than the project save above)
-        // doesn't prevent the user from reaching their results.
         try {
           localStorage.setItem('pl_last_analysis', JSON.stringify(data.analysis))
         } catch (legacyErr) {
-          console.warn('[NobelPM] Could not write legacy pl_last_analysis key (non-critical):', legacyErr)
+          console.warn('[ControlLens] Could not write legacy pl_last_analysis key (non-critical):', legacyErr)
         }
       } catch (err: any) {
-        console.error('[NobelPM] Failed to save project:', err)
-        // Surface the save failure to the user. With IndexedDB this is
-        // rare — only happens if the disk is genuinely full or the
-        // browser is in private mode without IndexedDB. The analysis
-        // displayed on-screen is still accurate, it just won't persist.
+        console.error('[ControlLens] Failed to save project:', err)
         const userMessage = err?.message ||
           'Failed to save this project. The analysis displayed above is correct, but it was not saved.'
         alert(
@@ -462,318 +238,18 @@ export default function UploadPage() {
           '\n\nThe analysis below is still accurate — but it will not appear in your Projects list unless saving succeeds.'
         )
       }
-      setTimeout(() => setStep('done'), 500)
+      // Send the user straight to the Schedule Analysis page so they can
+      // review the full analysis and choose whether to generate the
+      // operational analysis narrative when they want it.
+      setTimeout(() => router.push('/dashboard/lens'), 300)
     } catch (err: any) {
       clearInterval(progInterval)
-      console.error('[NobelPM] Analysis error:', err)
+      console.error('[ControlLens] Analysis error:', err)
       alert('Analysis failed: ' + (err.message || 'Unknown error'))
       setStep('context')
     }
   }
 
-  function fmtFloat(hours: string | number) {
-    const h = typeof hours === 'string' ? parseFloat(hours || '0') : hours
-    if (isNaN(h)) return '—'
-    return Math.round(h / 8) + 'd'
-  }
-  function conditionColor(cond: string) {
-    if (cond === 'Recovery Required') return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-900' }
-    if (cond === 'Attention Needed') return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-900' }
-    if (cond === 'Monitor Closely') return { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-900' }
-    return { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-900' }
-  }
-  if (step === 'done' && result?.analysis) {
-    const a = result.analysis
-    const condColor = conditionColor(a.condition)
-    return (
-      <div className="flex flex-col h-full">
-        <style jsx global>{`
-          @media print {
-            .no-print { display: none !important; }
-            .print-show { display: block !important; }
-            .tab-pane { display: block !important; }
-            .tab-bar { display: none !important; }
-          }
-        `}</style>
-        
-        <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0 no-print">
-          <div>
-            <span className="font-bold text-slate-900 text-base">Full Analysis</span>
-            <span className="text-slate-400 text-sm ml-2">· {a.projectName}</span>
-          </div>
-          <div className="ml-auto flex gap-2">
-            <button onClick={() => window.print()} className="text-xs border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg hover:border-slate-400 transition-colors font-semibold flex items-center gap-1.5">
-              🖨 Print / Save PDF
-            </button>
-            <button onClick={() => { setStep('upload'); setFile(null); setResult(null) }} className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400 hover:text-blue-600 transition-colors">
-              Analyze Another File
-            </button>
-            <button onClick={() => router.push('/dashboard')} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition-colors font-semibold">
-              Dashboard →
-            </button>
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto p-5 space-y-3">
-          {/* Header */}
-          <div className="bg-white border border-slate-200 rounded-xl p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-base font-bold text-slate-900">{a.projectName}</div>
-                <div className="text-xs text-slate-500 mt-0.5">{a.fileType} · Data date: {a.dataDate?.slice(0,10) || 'N/A'}</div>
-              </div>
-              <div className="text-right">
-                <div className="text-xs text-slate-500">Contract completion</div>
-                <div className="text-sm font-bold text-red-600">{a.contractEnd?.slice(0,10) || 'N/A'} <span className="text-xs font-normal text-slate-500">· Projected {a.projectedEnd?.slice(0,10) || 'N/A'}</span></div>
-              </div>
-            </div>
-          </div>
-          {/* Condition Banner */}
-          <div className={`${condColor.bg} ${condColor.border} border rounded-xl p-4 flex items-center gap-4`}>
-            <div className="text-3xl">{a.condition === 'Recovery Required' ? '🔴' : a.condition === 'Attention Needed' ? '⚠️' : '🟢'}</div>
-            <div className="flex-1">
-              <div className={`font-bold text-sm ${condColor.text}`}>
-                {a.condition.toUpperCase()} {a.delayDays > 0 && `— PROJECT IS ${a.delayDays} DAYS BEHIND CONTRACT`}
-              </div>
-              <div className="text-xs mt-1 opacity-80">
-                {a.negativeFloat} of {a.totalActivities} activities carry negative float · {a.notStarted} activities not yet started · {a.outOfSequence?.length || 0} out-of-sequence
-              </div>
-            </div>
-            <div className="text-center flex-shrink-0">
-              <div className={`text-3xl font-extrabold ${condColor.text}`}>{a.healthScore}</div>
-              <div className="text-[10px] opacity-70">Health Score / 100</div>
-            </div>
-          </div>
-          {/* KPI Grid */}
-          <div className="grid grid-cols-5 gap-2">
-            <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Total activities</div><div className="text-xl font-bold">{a.totalActivities}</div></div>
-            <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Complete</div><div className="text-xl font-bold text-green-600">{a.complete}</div></div>
-            <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">In progress</div><div className="text-xl font-bold text-amber-600">{a.inProgress}</div></div>
-            <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Negative float</div><div className="text-xl font-bold text-red-600">{a.negativeFloat}</div></div>
-            <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Out-of-sequence</div><div className="text-xl font-bold text-red-600">{a.outOfSequence?.length || 0}</div></div>
-          </div>
-          {/* Tabs */}
-          <div className="bg-white border border-slate-200 rounded-xl">
-            <div className="tab-bar flex gap-0 border-b border-slate-100 overflow-x-auto no-print">
-              {[
-                { id: 'gantt', label: 'Gantt Chart', icon: '📊' },
-              { id: 'critical', label: 'Critical Path', icon: '🎯' },
-                { id: 'logic', label: 'Logic Check', icon: '🔧' },
-                { id: 'noties', label: 'No Logic Ties', icon: '⛓️' },
-                { id: 'longlead', label: 'Long Lead Items', icon: '📦' },
-                { id: 'field', label: 'Field Reality', icon: '👷' },
-                { id: 'plain', label: 'Plain Language', icon: '💬' },
-                { id: 'ai', label: 'Narrative', icon: '📝' },
-              ].map(t => (
-                <button key={t.id} onClick={() => setActiveTab(t.id)}
-                  className={`px-4 py-3 text-xs font-semibold whitespace-nowrap transition-colors ${activeTab === t.id ? 'text-blue-600 border-b-2 border-blue-600 -mb-px' : 'text-slate-500 hover:text-slate-900'}`}>
-                  {t.icon} {t.label}
-                </button>
-              ))}
-            </div>
-            <div className="p-5">
-              {/* GANTT CHART */}
-              {activeTab === 'gantt' && (
-                <div>
-                  <h3 className="text-sm font-bold mb-1">Critical Path Gantt — activities with 0 or negative float</h3>
-                  <p className="text-xs text-slate-500 mb-4">Sorted by early finish date. Red = negative float, Orange = zero float, Gray = complete.</p>
-                  <GanttChart activities={a.ganttActivities || []} drivingPath={a.criticalDrivers || []} dataDate={a.dataDate} projectedEnd={a.projectedEnd} />
-                </div>
-              )}
-              {/* CRITICAL PATH */}
-              {(activeTab === 'critical' || typeof window !== 'undefined' && window.matchMedia?.('print').matches) && (
-                <div className="tab-pane">
-                  <h3 className="text-sm font-bold mb-3">Critical path drivers — what is driving project completion</h3>
-                  <p className="text-xs text-slate-500 mb-4">The critical path is the chain of activities that controls when the project finishes. If any of these slips, the whole project slips by that same amount.</p>
-                  <div className="space-y-2">
-                    {(a.criticalDrivers || []).slice(0, 12).map((t: any, i: number) => (
-                      <div key={i} className="flex items-center gap-3 py-2 border-b border-slate-100 last:border-0 text-xs">
-                        <div className="font-mono font-semibold text-slate-900 w-32 flex-shrink-0">{t.task_code}</div>
-                        <div className="flex-1 text-slate-700">{t.task_name}</div>
-                        <div className="text-red-600 font-bold w-14 text-right">{fmtFloat(t.total_float_hr_cnt)}</div>
-                        <div className="w-16 text-slate-500">{fmtFloat(t.remain_drtn_hr_cnt)}</div>
-                        <div className="w-20"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${t.status_code === 'TK_Complete' ? 'bg-green-100 text-green-700' : t.status_code === 'TK_Active' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{t.status_code === 'TK_Complete' ? 'Done' : t.status_code === 'TK_Active' ? `${t.phys_complete_pct}%` : 'Not started'}</span></div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {/* LOGIC CHECK */}
-              {activeTab === 'logic' && (
-                <div>
-                  <h3 className="text-sm font-bold mb-3">Schedule logic check — out-of-sequence work ({a.outOfSequence?.length || 0} violations)</h3>
-                  <div className="bg-red-50 border-l-4 border-red-500 p-3 text-xs text-red-900 mb-4 leading-relaxed">
-                    Out-of-sequence means an activity started before its predecessor was finished. This makes float calculations unreliable and creates rework risk — if the review comes back with changes after fabrication has started, materials may need to be remade.
-                  </div>
-                  {['Procurement', 'Pre-Construction', 'Other'].map(category => {
-                    const items = (a.outOfSequence || []).filter((o: any) => o.category === category)
-                    if (items.length === 0) return null
-                    return (
-                      <div key={category} className="mb-4">
-                        <div className="text-xs font-bold mb-2 text-slate-700">{category} violations ({items.length})</div>
-                        {items.slice(0, 10).map((o: any, i: number) => (
-                          <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 text-xs">
-                            <div className="col-span-3 font-mono font-semibold">{o.task.task_code}</div>
-                            <div className="col-span-7 text-slate-600">{o.task.task_name} started before predecessor {o.pred.task_code} finished</div>
-                            <div className="col-span-2 text-right"><span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">Sequence error</span></div>
-                          </div>
-                        ))}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-              {/* NO TIES */}
-              {activeTab === 'noties' && (
-                <div>
-                  <h3 className="text-sm font-bold mb-3">Activities with no logic ties ({a.noTies?.length || 0} found)</h3>
-                  <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                    Every activity should be connected — at least one predecessor and one successor. Activities with no ties are "floating" in the schedule. Delays to them will not show up in the analysis. This is a schedule quality problem.
-                  </div>
-                  <div className="space-y-2">
-                    {(a.noTies || []).slice(0, 20).map((t: any, i: number) => (
-                      <div key={i} className="flex items-center gap-3 py-2 border-b border-slate-100 text-xs">
-                        <div className="font-mono font-semibold w-32 flex-shrink-0">{t.task_code}</div>
-                        <div className="flex-1 text-slate-700">{t.task_name}</div>
-                        <div className="text-red-600 font-bold w-14 text-right">{fmtFloat(t.total_float_hr_cnt)}</div>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">Logic gap</span>
-                      </div>
-                    ))}
-                    {(!a.noTies || a.noTies.length === 0) && (
-                      <div className="text-sm text-green-700 text-center py-6">✓ All activities have proper logic ties</div>
-                    )}
-                  </div>
-                </div>
-              )}
-              {/* LONG LEAD */}
-              {activeTab === 'longlead' && (
-                <div>
-                  <h3 className="text-sm font-bold mb-3">Long lead items ({a.longLeadItems?.length || 0} items, 20+ days duration)</h3>
-                  <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                    Long lead items are materials or equipment requiring significant time to fabricate and deliver. These are the items that most commonly cause delays. NobelPM sorts by float — most critical first.
-                  </div>
-                  <div className="space-y-2">
-                    {(a.longLeadItems || []).slice(0, 20).map((ll: any, i: number) => (
-                      <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 text-xs">
-                        <div className="col-span-2 font-mono font-semibold">{ll.task_code}</div>
-                        <div className="col-span-5 text-slate-700">{ll.task_name}</div>
-                        <div className="col-span-1 text-right">{ll.durationDays}d</div>
-                        <div className="col-span-1 text-right">{ll.remainingDays}d</div>
-                        <div className={`col-span-1 text-right font-bold ${ll.floatDays < 0 ? 'text-red-600' : ll.floatDays < 10 ? 'text-amber-600' : 'text-green-600'}`}>{ll.floatDays}d</div>
-                        <div className="col-span-2 text-right"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ll.status_code === 'TK_Complete' ? 'bg-green-100 text-green-700' : ll.status_code === 'TK_Active' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{ll.status_code === 'TK_Complete' ? 'Delivered' : ll.status_code === 'TK_Active' ? `${ll.phys_complete_pct}%` : 'Not ordered'}</span></div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {/* FIELD REALITY */}
-              {activeTab === 'field' && (
-                <div>
-                  <h3 className="text-sm font-bold mb-3">Field reality — activities in progress right now ({a.inProgress})</h3>
-                  <div className="bg-amber-50 border-l-4 border-amber-500 p-3 text-xs text-amber-900 mb-4 leading-relaxed">
-                    These are activities the schedule says are being worked right now. Verify with your superintendent that progress matches what is physically happening on site.
-                  </div>
-                  <div className="space-y-2">
-                    {(a.inProgressActivities || []).slice(0, 25).map((t: any, i: number) => {
-                      const pct = parseFloat(t.phys_complete_pct || '0')
-                      const fl = parseFloat(t.total_float_hr_cnt || '0')
-                      return (
-                        <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 text-xs items-center">
-                          <div className="col-span-3 font-mono font-semibold">{t.task_code}</div>
-                          <div className="col-span-5 text-slate-700">{t.task_name}</div>
-                          <div className="col-span-2">
-                            <div className="flex items-center gap-2"><span className="font-bold w-8">{pct}%</span>
-                            <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden"><div className={`h-full rounded-full ${pct > 90 ? 'bg-green-500' : pct > 50 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${pct}%` }} /></div></div>
-                          </div>
-                          <div className="col-span-1 text-right text-slate-500">{fmtFloat(t.remain_drtn_hr_cnt)}</div>
-                          <div className={`col-span-1 text-right font-bold ${fl < 0 ? 'text-red-600' : 'text-green-600'}`}>{fmtFloat(t.total_float_hr_cnt)}</div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-              {/* PLAIN LANGUAGE */}
-              {activeTab === 'plain' && (
-                <div>
-                  <h3 className="text-sm font-bold mb-3">Plain language summary</h3>
-                  <div className="space-y-4 text-xs">
-                    {a.delayDays > 30 && (
-                      <div className="flex gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">🚨</div>
-                        <div>
-                          <div className="font-bold text-slate-900">The project is {a.delayDays} days behind contract</div>
-                          <div className="text-slate-600 mt-1 leading-relaxed">Contract completion was {a.contractEnd?.slice(0,10)}. Projected completion is now {a.projectedEnd?.slice(0,10)}. {a.negativeFloat} activities carry negative float, and {a.notStarted} have not yet started.</div>
-                        </div>
-                      </div>
-                    )}
-                    {a.outOfSequence?.length > 0 && (
-                      <div className="flex gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center flex-shrink-0">📦</div>
-                        <div>
-                          <div className="font-bold text-slate-900">{a.outOfSequence.length} activities started in the wrong order</div>
-                          <div className="text-slate-600 mt-1 leading-relaxed">In these cases, work began before its predecessor was finished. This usually means the contractor was trying to make up time — which is TIA evidence of schedule disruption from earlier delay events.</div>
-                        </div>
-                      </div>
-                    )}
-                    {(a.longLeadItems || []).filter((l: any) => l.status_code === 'TK_NotStart' && l.floatDays < 0).length > 0 && (
-                      <div className="flex gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">⚡</div>
-                        <div>
-                          <div className="font-bold text-slate-900">Critical long lead items not yet ordered</div>
-                          <div className="text-slate-600 mt-1 leading-relaxed">{(a.longLeadItems || []).filter((l: any) => l.status_code === 'TK_NotStart' && l.floatDays < 0).length} long lead items have negative float and have not been ordered yet. Each day they sit unordered adds another day to the delay.</div>
-                        </div>
-                      </div>
-                    )}
-                    {a.noTies?.length > 0 && (
-                      <div className="flex gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">⛓️</div>
-                        <div>
-                          <div className="font-bold text-slate-900">{a.noTies.length} activities have no logic ties</div>
-                          <div className="text-slate-600 mt-1 leading-relaxed">These activities are not properly connected to predecessors or successors. The float calculations for them are unreliable and they may not show up correctly in critical path analysis.</div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-              {/* NARRATIVE */}
-              {activeTab === 'ai' && (
-                <div>
-                  <h3 className="text-sm font-bold mb-1">Operational analysis — how to fix this</h3>
-                  <p className="text-xs text-slate-500 mb-3">A direct read of what the schedule is telling you, what matters most, and what conversations to have this week.</p>
-                  {result.aiNarrative ? (
-                    <div className="bg-slate-50 border-l-4 border-blue-500 rounded-r-lg p-4 text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
-                      {result.aiNarrative}
-                    </div>
-                  ) : (
-                    <div className="text-xs text-slate-500 text-center py-8">Narrative generation requires the ANTHROPIC_API_KEY environment variable to be set.</div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-          {/* Action buttons */}
-          <div className="grid grid-cols-3 gap-3 no-print">
-            <button className="bg-white border border-slate-200 rounded-xl p-4 text-left hover:border-blue-300 transition-colors">
-              <div className="text-lg mb-1">✉️</div>
-              <div className="text-xs font-bold">Draft Owner Letter</div>
-              <div className="text-[10px] text-slate-500 mt-0.5">Professional status update</div>
-            </button>
-            <button className="bg-white border border-slate-200 rounded-xl p-4 text-left hover:border-blue-300 transition-colors">
-              <div className="text-lg mb-1">📋</div>
-              <div className="text-xs font-bold">Start TIA Outline</div>
-              <div className="text-[10px] text-slate-500 mt-0.5">Time Impact Analysis</div>
-            </button>
-            <button onClick={() => router.push('/dashboard/lens')} className="bg-white border border-slate-200 rounded-xl p-4 text-left hover:border-blue-300 transition-colors">
-              <div className="text-lg mb-1">🔍</div>
-              <div className="text-xs font-bold">Save to NobelPM</div>
-              <div className="text-[10px] text-slate-500 mt-0.5">Add to project record</div>
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
   return (
     <div className="flex flex-col h-full">
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0">
@@ -798,10 +274,11 @@ export default function UploadPage() {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-6">
+
         {step === 'upload' && (
           <div className="max-w-2xl mx-auto">
             <h2 className="text-xl font-extrabold text-slate-900 mb-1">Upload your project schedule</h2>
-            <p className="text-slate-500 text-sm mb-6">NobelPM reads Primavera P6 XER files and interprets them like an experienced project controls advisor — including logic checks, long lead detection, and TIA evidence.</p>
+            <p className="text-slate-500 text-sm mb-6">ControlLens reads Primavera P6 XER files and interprets them like an experienced project controls advisor — including logic checks, long lead detection, and TIA evidence.</p>
             <div
               className={`upload-zone ${dragging ? 'dragging' : ''}`}
               onDragOver={e => { e.preventDefault(); setDragging(true) }}
@@ -819,7 +296,7 @@ export default function UploadPage() {
               </div>
             </div>
             <div className="mt-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
-              <div className="text-xs font-bold text-slate-500 mb-2">WHAT NOBELPM WILL ANALYZE</div>
+              <div className="text-xs font-bold text-slate-500 mb-2">WHAT CONTROLLENS WILL ANALYZE</div>
               <div className="space-y-1.5 text-xs text-slate-600">
                 <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Critical path drivers and float condition</div>
                 <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Logic violations and out-of-sequence work</div>
@@ -827,22 +304,23 @@ export default function UploadPage() {
                 <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Activities with no logic ties (schedule quality)</div>
                 <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Field reality check on in-progress activities</div>
                 <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Plain language summary and TIA evidence</div>
-                <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Operational narrative — how to fix this</div>
+                <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Operational Analysis available on demand</div>
               </div>
             </div>
           </div>
         )}
+
         {step === 'context' && (
           <div className="max-w-2xl mx-auto">
             <div className="flex items-center gap-3 mb-6 p-4 bg-green-50 border border-green-200 rounded-xl">
               <span className="text-2xl">✅</span>
               <div>
                 <div className="font-bold text-green-800 text-sm">File ready: {file?.name}</div>
-                <div className="text-green-600 text-xs mt-0.5">{file ? (file.size / 1024).toFixed(0) + ' KB' : ''} · Now tell NobelPM about your project</div>
+                <div className="text-green-600 text-xs mt-0.5">{file ? (file.size / 1024).toFixed(0) + ' KB' : ''} · Add context to enrich the analysis</div>
               </div>
             </div>
             <h2 className="text-xl font-extrabold text-slate-900 mb-1">Tell us about your project</h2>
-            <p className="text-slate-500 text-sm mb-5">Takes 2 minutes. The more context you give, the more accurate the analysis.</p>
+            <p className="text-slate-500 text-sm mb-5">Takes 2 minutes. The more context you give, the more accurate the analysis — and the Operational Analysis you can generate later.</p>
             {/* Project assignment */}
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5">
               <div className="text-xs font-bold text-blue-900 uppercase tracking-wider mb-3">Assign this schedule to:</div>
@@ -961,10 +439,11 @@ export default function UploadPage() {
             </div>
           </div>
         )}
+
         {step === 'analyzing' && (
           <div className="max-w-2xl mx-auto text-center py-16">
             <div className="text-6xl mb-6 animate-pulse">🔍</div>
-            <h2 className="text-xl font-extrabold text-slate-900 mb-2">NobelPM is reading your schedule</h2>
+            <h2 className="text-xl font-extrabold text-slate-900 mb-2">ControlLens is reading your schedule</h2>
             <p className="text-slate-500 text-sm mb-8">Parsing activities, relationships, logic, and critical path...</p>
             <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
               <div className="bg-slate-100 rounded-full h-2 overflow-hidden mb-3">
@@ -974,12 +453,12 @@ export default function UploadPage() {
             </div>
             <div className="space-y-2 text-left max-w-md mx-auto">
               {[
-                { label: 'Parsing XER structure...', done: progress > 15 },
-                { label: 'Building relationship maps...', done: progress > 30 },
-                { label: 'Identifying critical path...', done: progress > 45 },
-                { label: 'Detecting logic violations...', done: progress > 60 },
-                { label: 'Flagging long lead items...', done: progress > 75 },
-                { label: 'Generating narrative...', done: progress > 90 },
+                { label: 'Parsing XER structure...', done: progress > 20 },
+                { label: 'Building relationship maps...', done: progress > 40 },
+                { label: 'Identifying critical path...', done: progress > 55 },
+                { label: 'Detecting logic violations...', done: progress > 70 },
+                { label: 'Flagging long lead items...', done: progress > 85 },
+                { label: 'Finalizing analysis...', done: progress > 95 },
               ].map(item => (
                 <div key={item.label} className={`flex items-center gap-3 text-xs ${item.done ? 'text-green-600' : 'text-slate-400'}`}>
                   <span>{item.done ? '✅' : '⏳'}</span>
@@ -989,6 +468,7 @@ export default function UploadPage() {
             </div>
           </div>
         )}
+
       </div>
     </div>
   )
