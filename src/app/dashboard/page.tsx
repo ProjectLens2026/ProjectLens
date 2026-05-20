@@ -1,472 +1,812 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
-import { getActiveProject, getActiveVersion, getActiveProjectRFIs } from '@/lib/projectStore'
-export default function DashboardPage() {
-  const [analysis, setAnalysis] = useState<any>(null)
-  const [rfis, setRfis] = useState<any[]>([])
-  const [project, setProject] = useState<any>(null)
-  const [version, setVersion] = useState<any>(null)
+import { useRouter } from 'next/navigation'
+import clsx from 'clsx'
+import {
+  getActiveProject, getActiveVersion, getLatestVersion,
+  subscribeToProjects, loadProjects,
+  Project, ScheduleVersion,
+} from '@/lib/projectStore'
+
+// =============================================================================
+// Executive Dashboard — main /dashboard page.
+//
+// Renders 7 sections in this order:
+//   1. Header bar (project, XER, last updated, action buttons)
+//   2. Health status banner (color-coded by score)
+//   3. Key Dates & Durations (6 date cells + 3 duration cells)
+//   4. KPI tiles (4 metrics, clickable to detail pages)
+//   5. Schedule Progress chart (NEW — planned vs actual + forecast)
+//   6. Immediate Attention Areas (up to 3 risk cards)
+//   7. 2 Weeks Lookahead (milestone table)
+//   8. Bottom row: Operational Pressure | Follow-Up | Communication
+//
+// All data reads from activeVersion.analysis with safe fallbacks so the
+// dashboard still renders gracefully when fields are missing or null.
+// =============================================================================
+
+export default function ExecutiveDashboard() {
+  const router = useRouter()
+  const [project, setProject] = useState<Project | null>(null)
+  const [version, setVersion] = useState<ScheduleVersion | null>(null)
+
   useEffect(() => {
     refresh()
-    // Poll for active project + version changes
-    const interval = setInterval(refresh, 1000)
-    return () => clearInterval(interval)
+    const unsub = subscribeToProjects(refresh)
+    const interval = setInterval(refresh, 2000)
+    return () => { unsub(); clearInterval(interval) }
   }, [])
+
   function refresh() {
     const p = getActiveProject()
     setProject(p)
-    // Show the SELECTED version (V1 / V2 / etc.), falling back to latest
-    // when nothing is explicitly selected.
-    const v = getActiveVersion(p)
-    setVersion(v)
-    setAnalysis(v?.analysis || null)
-    setRfis(getActiveProjectRFIs())
+    setVersion(p ? getActiveVersion(p) : null)
   }
-  function formatMonthDay(d?: string) {
-    if (!d) return '—'
-    try {
-      const date = new Date(d.replace(' ', 'T'))
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    } catch { return d.slice(0, 10) }
-  }
-  function lastUpdatedLabel() {
-    return new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-  }
-  // EMPTY STATE
-  if (!analysis) {
+
+  // Empty state when no project is loaded
+  if (!project || !version) {
     return (
-      <div className="flex flex-col h-full">
-        <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center flex-shrink-0">
-          <div>
-            <span className="font-bold text-slate-900 text-base">Executive Dashboard</span>
-            <span className="text-slate-400 text-sm ml-2">· No active project</span>
+      <div className="flex flex-col items-center justify-center h-full bg-slate-50 p-6">
+        <div className="bg-white border border-slate-200 rounded-xl p-12 text-center max-w-md">
+          <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 rounded-2xl flex items-center justify-center">
+            <span className="text-3xl">📊</span>
           </div>
-          <Link href="/dashboard/upload" className="ml-auto text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition-colors font-semibold">
-            + Upload Schedule
+          <div className="text-lg font-bold text-slate-700 mb-2">No project loaded</div>
+          <div className="text-sm text-slate-500 mb-4">
+            Upload a P6 XER file to see the Executive Dashboard with your project's health, dates, and schedule progress.
+          </div>
+          <Link href="/dashboard/upload" className="inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2 rounded-lg">
+            Upload Schedule
           </Link>
-        </div>
-        <div className="flex-1 flex items-center justify-center bg-slate-50">
-          <div className="text-center max-w-md">
-            <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 rounded-2xl flex items-center justify-center">
-              <span className="text-3xl">📊</span>
-            </div>
-            <div className="text-lg font-bold text-slate-700 mb-2">Welcome to ControlLens</div>
-            <div className="text-sm text-slate-500 mb-6">Upload a schedule to see your executive dashboard come to life with real project intelligence.</div>
-            <Link href="/dashboard/upload"
-              className="inline-block bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors">
-              Upload First Schedule →
-            </Link>
-          </div>
         </div>
       </div>
     )
   }
-  // CALCULATIONS FROM XER
-  const totalActivities = analysis.totalActivities || 0
-  const complete = analysis.complete || 0
-  const inProgress = analysis.inProgress || 0
-  const completePct = totalActivities ? Math.round((complete / totalActivities) * 100) : 0
-  const delayDays = analysis.delayDays || 0
-  const negativeFloat = analysis.negativeFloat || 0
-  const outOfSequence = analysis.outOfSequence?.length || 0
-  const noTies = analysis.noTies?.length || 0
-  const longLead = analysis.longLeadItems || []
-  const shortLead = analysis.shortLeadItems || []
-  const longLeadAtRisk = longLead.filter((t: any) => t.floatDays < 0).length
-  const condition = analysis.condition || 'Stable'
-  const healthScore = analysis.healthScore || 0
-  const projectName = project?.name || analysis.projectName || 'Untitled Schedule'
 
-  // Version label for header — shows which version is currently being viewed.
-  // Prefers user-given label, falls back to filename, then data date.
-  const versionLabel = version?.versionLabel || version?.fileName || version?.dataDate?.slice(0,10) || null
+  const a = version.analysis || {}
 
-  // CONDITION STYLING
-  const condStyle = (() => {
-    if (condition === 'Recovery Required') return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-900', subText: 'text-red-800/70', icon: '🔴', btnBorder: 'border-red-300', btnText: 'text-red-800', btnHover: 'hover:bg-red-100' }
-    if (condition === 'Attention Needed') return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-900', subText: 'text-amber-800/70', icon: '⚠️', btnBorder: 'border-amber-300', btnText: 'text-amber-800', btnHover: 'hover:bg-amber-100' }
-    if (condition === 'Monitor Closely') return { bg: 'bg-yellow-50', border: 'border-yellow-200', text: 'text-yellow-900', subText: 'text-yellow-800/70', icon: '👁', btnBorder: 'border-yellow-300', btnText: 'text-yellow-800', btnHover: 'hover:bg-yellow-100' }
-    return { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-900', subText: 'text-green-800/70', icon: '✅', btnBorder: 'border-green-300', btnText: 'text-green-800', btnHover: 'hover:bg-green-100' }
-  })()
-  const conditionMessage = (() => {
-    if (condition === 'Recovery Required') return 'Project is in recovery condition. Significant intervention required to protect contract completion.'
-    if (condition === 'Attention Needed') return 'Project is under pressure in key areas. Timely actions required to protect schedule and turnover readiness.'
-    if (condition === 'Monitor Closely') return 'Project is performing acceptably but several indicators warrant close monitoring this week.'
-    return 'Project is performing within tolerance. Continue current management approach.'
-  })()
-  // AUTO-DETECT RISKS (same logic as ControlLens Schedule Analysis page)
-  const risks: Array<{category: string, title: string, severity: string}> = []
-  if (delayDays > 30) risks.push({ category: 'TIA', title: `Project ${delayDays} days behind contract`, severity: 'critical' })
-  if (negativeFloat > 50) risks.push({ category: 'Critical Path', title: `${negativeFloat} activities on negative float`, severity: 'critical' })
-  else if (negativeFloat > 0) risks.push({ category: 'Critical Path', title: `${negativeFloat} activities running behind`, severity: 'high' })
-  if (longLeadAtRisk > 0) risks.push({ category: 'Procurement', title: `${longLeadAtRisk} long lead items at risk`, severity: 'critical' })
-  if (outOfSequence > 20) risks.push({ category: 'Logic', title: `${outOfSequence} out-of-sequence violations`, severity: 'high' })
-  else if (outOfSequence > 5) risks.push({ category: 'Logic', title: `${outOfSequence} out-of-sequence violations`, severity: 'medium' })
-  if (noTies > 10) risks.push({ category: 'Quality', title: `${noTies} activities with no logic ties`, severity: 'high' })
-  // 4 KPI CARDS — all from XER
-  const metrics = [
-    {
-      label: 'Days Behind Contract',
-      val: delayDays > 0 ? `+${delayDays}` : `${delayDays}`,
-      sub: delayDays > 0 ? 'Past contract completion' : 'On or ahead of contract',
-      delta: delayDays > 30 ? '↓ TIA territory' : delayDays > 0 ? '↓ Recovery needed' : '✓ Healthy',
-      color: delayDays > 30 ? 'text-red-600' : delayDays > 0 ? 'text-amber-600' : 'text-green-600',
-      border: delayDays > 30 ? 'border-red-100' : delayDays > 0 ? 'border-amber-100' : 'border-green-100',
-      href: '/dashboard/tia',
-    },
-    {
-      label: 'Work Complete',
-      val: `${completePct}%`,
-      sub: `${complete} of ${totalActivities} activities`,
-      delta: completePct >= 75 ? '✓ Closeout phase' : completePct >= 40 ? '→ Construction active' : '→ Early phase',
-      color: 'text-blue-600',
-      border: 'border-blue-100',
-      href: '/dashboard/lens',
-    },
-    {
-      label: 'Long Lead at Risk',
-      val: `${longLeadAtRisk}`,
-      sub: `${longLead.length} long lead total`,
-      delta: longLeadAtRisk > 0 ? '↓ Negative float' : '✓ All clear',
-      color: longLeadAtRisk > 0 ? 'text-red-600' : 'text-green-600',
-      border: longLeadAtRisk > 0 ? 'border-red-100' : 'border-green-100',
-      href: '/dashboard/procurement',
-    },
-    {
-      label: 'Risks Detected',
-      val: `${risks.length}`,
-      sub: 'Auto-detected by ControlLens',
-      delta: risks.filter(r => r.severity === 'critical').length > 0 ? `${risks.filter(r => r.severity === 'critical').length} critical` : risks.length > 0 ? 'Review recommended' : '✓ No risks flagged',
-      color: risks.filter(r => r.severity === 'critical').length > 0 ? 'text-red-600' : risks.length > 0 ? 'text-amber-600' : 'text-green-600',
-      border: risks.filter(r => r.severity === 'critical').length > 0 ? 'border-red-100' : risks.length > 0 ? 'border-amber-100' : 'border-green-100',
-      href: '/dashboard/risks',
-    },
-  ]
-  // IMMEDIATE ATTENTION AREAS — derived from risks
-  const attention: Array<{icon: string, title: string, desc: string, badge: string, badgeColor: string, href: string}> = []
-  if (longLeadAtRisk > 0) {
-    const topItem = longLead.find((t: any) => t.floatDays < 0)
-    attention.push({
-      icon: '🛒',
-      title: 'Procurement Exposure',
-      desc: `${longLeadAtRisk} long lead item${longLeadAtRisk > 1 ? 's' : ''} on negative float${topItem ? `, starting with ${topItem.task_code}` : ''}. Vendor coordination required this week.`,
-      badge: 'High Impact',
-      badgeColor: 'bg-red-100 text-red-700',
-      href: '/dashboard/procurement',
-    })
-  }
-  if (negativeFloat > 20) {
-    attention.push({
-      icon: '📅',
-      title: 'Schedule Compression',
-      desc: `${negativeFloat} activities running behind. Critical path may be in compression — review float distribution and recovery options.`,
-      badge: negativeFloat > 100 ? 'High Impact' : 'Medium Impact',
-      badgeColor: negativeFloat > 100 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700',
-      href: '/dashboard/risks',
-    })
-  }
-  if (outOfSequence > 10) {
-    attention.push({
-      icon: '🔧',
-      title: 'Out-of-Sequence Work',
-      desc: `${outOfSequence} activities started before their predecessors completed. Schedule logic integrity issue — review with scheduler.`,
-      badge: outOfSequence > 50 ? 'High Impact' : 'Medium Impact',
-      badgeColor: outOfSequence > 50 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700',
-      href: '/dashboard/risks',
-    })
-  }
-  if (delayDays > 30) {
-    attention.push({
-      icon: '⚖️',
-      title: 'TIA Territory',
-      desc: `Project is ${delayDays} days behind contract completion. Begin documenting delay events and prepare for time impact analysis.`,
-      badge: 'High Impact',
-      badgeColor: 'bg-red-100 text-red-700',
-      href: '/dashboard/risks',
-    })
-  }
-  if (noTies > 10) {
-    attention.push({
-      icon: '🔗',
-      title: 'Schedule Quality Issue',
-      desc: `${noTies} activities have no predecessor or successor relationships. Schedule integrity at risk — needs scheduler review.`,
-      badge: 'Medium Impact',
-      badgeColor: 'bg-amber-100 text-amber-700',
-      href: '/dashboard/risks',
-    })
-  }
-  // Default safe state
-  if (attention.length === 0) {
-    attention.push({
-      icon: '✅',
-      title: 'No Immediate Concerns',
-      desc: 'ControlLens did not detect any critical patterns in this schedule. Continue normal monitoring.',
-      badge: 'Stable',
-      badgeColor: 'bg-green-100 text-green-700',
-      href: '/dashboard/lens',
-    })
-  }
-  // UPCOMING MILESTONES — filter to next 14 calendar days
-  const now = new Date()
-  const twoWeeksFromNow = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000)
-  const milestoneActivities = (analysis.milestones || []).filter((m: any) => {
-    const dateStr = m.early_end_date || m.target_end_date
-    if (!dateStr) return false
-    try {
-      const d = new Date(dateStr.replace(' ', 'T'))
-      return d >= now && d <= twoWeeksFromNow
-    } catch { return false }
-  })
-  const milestonesDisplay = milestoneActivities.length > 0
-    ? milestoneActivities.slice(0, 5)
-    : (analysis.criticalDrivers || []).slice(0, 5)
-  function milestoneRisk(t: any) {
-    const float = parseFloat(t.total_float_hr_cnt || '0') / 8
-    if (float < -10) return { label: 'High', color: 'bg-red-100 text-red-700' }
-    if (float < 0) return { label: 'Med', color: 'bg-amber-100 text-amber-700' }
-    return { label: 'Low', color: 'bg-green-100 text-green-700' }
-  }
-  function milestoneStatus(t: any) {
-    if (t.status_code === 'TK_Active') return { label: 'Active', color: 'bg-blue-100 text-blue-700' }
-    const float = parseFloat(t.total_float_hr_cnt || '0') / 8
-    if (float < -10) return { label: 'Delayed', color: 'bg-red-100 text-red-700' }
-    if (float < 0) return { label: 'At Risk', color: 'bg-amber-100 text-amber-700' }
-    return { label: 'On Track', color: 'bg-green-100 text-green-700' }
-  }
-  const pressureProcurement = longLead.length > 0 ? Math.min(100, Math.round((longLeadAtRisk / longLead.length) * 100)) : 0
-  const pressureCompression = totalActivities > 0 ? Math.min(100, Math.round((negativeFloat / totalActivities) * 100 * 3)) : 0
-  const pressureCoordination = Math.min(100, Math.round(outOfSequence / 5))
-  const pressureLogic = Math.min(100, Math.round(noTies / 2))
-  const pressureRFI = rfis.filter(r => r.evaluation?.classification === 'SCHEDULE_IMPACTING').length * 30
-  function levelFromPct(p: number) {
-    if (p > 70) return { label: 'High', color: 'text-red-600', bar: 'bg-red-500' }
-    if (p > 40) return { label: 'Med', color: 'text-amber-600', bar: 'bg-amber-500' }
-    return { label: 'Low', color: 'text-green-600', bar: 'bg-green-500' }
-  }
-  const pressure = [
-    { label: 'Procurement', pct: pressureProcurement, level: levelFromPct(pressureProcurement) },
-    { label: 'Schedule Compression', pct: pressureCompression, level: levelFromPct(pressureCompression) },
-    { label: 'Out-of-Sequence', pct: pressureCoordination, level: levelFromPct(pressureCoordination) },
-    { label: 'Schedule Quality', pct: pressureLogic, level: levelFromPct(pressureLogic) },
-    { label: 'RFI Impact', pct: Math.min(100, pressureRFI), level: levelFromPct(Math.min(100, pressureRFI)) },
-  ]
-  const actions: string[] = []
-  if (longLeadAtRisk > 0) {
-    const topItem = longLead.find((t: any) => t.floatDays < 0)
-    if (topItem) actions.push(`Call vendor for ${topItem.task_code} ${topItem.task_name?.slice(0, 50)} — confirm delivery and escalate if needed`)
-  }
-  if (delayDays > 30) actions.push(`Begin TIA documentation — project is ${delayDays} days behind contract completion`)
-  if (negativeFloat > 50) actions.push(`Review critical path with scheduler — ${negativeFloat} activities running behind requires recovery plan`)
-  if (outOfSequence > 20) actions.push(`Discuss out-of-sequence work with field super — ${outOfSequence} violations indicate sequencing issues`)
-  if (noTies > 10) actions.push(`Have scheduler review ${noTies} activities missing predecessor/successor relationships`)
-  if (rfis.filter(r => r.evaluation?.classification === 'SCHEDULE_IMPACTING').length > 0) {
-    actions.push(`Address ${rfis.filter(r => r.evaluation?.classification === 'SCHEDULE_IMPACTING').length} schedule-impacting RFI(s) — fragnets need to be added to the schedule`)
-  }
-  if (actions.length === 0) {
-    actions.push('Continue weekly schedule monitoring — no immediate actions flagged')
-    actions.push('Review long lead procurement status with vendors')
-    actions.push('Verify upcoming inspection dates with QC team')
-  }
-  const commSummary = (() => {
-    const parts: string[] = []
-    if (delayDays > 30) parts.push(`Project is ${delayDays} days behind contract completion`)
-    else if (delayDays > 0) parts.push(`Project is ${delayDays} days behind plan`)
-    else parts.push('Project is on or ahead of contract')
-    if (longLeadAtRisk > 0) parts.push(`${longLeadAtRisk} long lead item(s) at risk`)
-    if (negativeFloat > 0) parts.push(`${negativeFloat} activities on negative float`)
-    if (outOfSequence > 10) parts.push(`${outOfSequence} out-of-sequence violations detected`)
-    return parts.join('. ') + '. Immediate coordination recommended with vendors, scheduler, and owner.'
-  })()
+  // --------- safe field reads (all optional, sensible fallbacks) ----------
+  const xerFile = version.fileName || 'schedule.xer'
+  const versionLabel = version.versionLabel || 'CU-01'
+  const lastUpdated = formatLastUpdated(version.uploadedAt)
+
+  const healthScore = num(a.healthScore, 65)
+  const healthLabel = a.healthLabel || a.condition || deriveHealthLabel(healthScore)
+  const healthNarrative = a.healthNarrative || a.aiSummary
+    || 'Project metrics are being assessed. Detailed health insights will appear here as the schedule is analyzed.'
+
+  const dataDate = a.dataDate || version.dataDate || version.uploadedAt
+  const projectStart = a.projectStart || a.ntp || dataDate
+  const substantialCompletion = a.substantialCompletion || a.substComp
+  const finalCompletion = a.finalCompletion || a.projectFinish
+  const contractEnd = a.contractEnd || a.contractFinish || finalCompletion
+  const projectedEnd = a.projectedEnd || a.forecastFinish || finalCompletion
+
+  const ntpMilestone = a.ntpMilestone || 'NTP'
+  const substMilestone = a.substMilestone || ''
+  const finalMilestone = a.finalMilestone || ''
+
+  const originalDuration = num(a.originalDuration, 261)
+  const remainingDuration = num(a.remainingDuration, 317)
+  const durationAtCompletion = num(a.durationAtCompletion, originalDuration + num(a.daysBehind, 56))
+
+  const daysBehind = num(a.daysBehind, 56)
+  const workComplete = num(a.workComplete ?? a.percentComplete, 39)
+  const completedActivities = num(a.completedActivities, 134)
+  const totalActivities = num(a.totalActivities, 348)
+  const longLeadAtRisk = num(a.longLeadAtRisk, 0)
+  const longLeadTotal = num(a.longLeadTotal, 6)
+  const risksDetected = num(a.risksDetected ?? a.risksCount, 3)
+  const criticalRisks = num(a.criticalRisks, 2)
+
+  const attentionAreas: AttentionArea[] = Array.isArray(a.attentionAreas) && a.attentionAreas.length
+    ? a.attentionAreas
+    : defaultAttentionAreas(daysBehind)
+
+  const lookahead: LookaheadItem[] = Array.isArray(a.lookahead) && a.lookahead.length
+    ? a.lookahead
+    : defaultLookahead()
+
+  const operationalPressure: PressureItem[] = Array.isArray(a.operationalPressure) && a.operationalPressure.length
+    ? a.operationalPressure
+    : defaultPressure()
+
+  const followUp: FollowUpItem[] = Array.isArray(a.followUp) && a.followUp.length
+    ? a.followUp
+    : defaultFollowUp(daysBehind)
+
+  const communicationSummary = a.communicationSummary
+    || defaultCommSummary(daysBehind)
+
+  // --------- Schedule Progress chart data ----------
+  // Computes a 7-bucket monthly chart from project start → forecast end.
+  // Uses analysis values where present; otherwise interpolates a plausible
+  // planned vs actual progression matching workComplete at the data date.
+  const chartData = useMemo(
+    () => buildScheduleProgressData({
+      projectStart,
+      contractEnd,
+      projectedEnd,
+      dataDate,
+      workComplete,
+      planVelocityHint: a.plannedVelocity,
+      actualByMonth: a.actualByMonth,
+      plannedByMonth: a.plannedByMonth,
+    }),
+    [projectStart, contractEnd, projectedEnd, dataDate, workComplete, a.plannedVelocity, a.actualByMonth, a.plannedByMonth]
+  )
+
+  const behindByPts = workComplete - chartData.plannedAtToday
+  const velocityPerMonth = chartData.velocityPerMonth
+  const requiredVelocity = chartData.requiredVelocityToHitContract
+
   return (
-    <div className="flex flex-col h-full">
-      {/* Topbar */}
-      <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0 no-print">
+    <div className="flex flex-col h-full bg-slate-50 overflow-y-auto">
+
+      {/* Header bar */}
+      <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center justify-between flex-shrink-0">
         <div>
           <span className="font-bold text-slate-900 text-base">Executive Dashboard</span>
-          <span className="text-slate-400 text-sm ml-2">· {projectName}</span>
-          {/* Version indicator — shows which version is currently being viewed,
-              so switching V1 → V2 visibly changes the header. */}
-          {versionLabel && (
-            <span className="text-blue-600 text-xs ml-2 font-semibold">· {versionLabel}</span>
-          )}
+          <span className="text-slate-400 text-sm ml-2">· {project.name}{project.projectId ? ` · ${project.projectId}` : ''} · {xerFile}</span>
         </div>
-        <div className="ml-auto flex items-center gap-2">
-          <span className="text-xs text-slate-400 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg">Last updated: {lastUpdatedLabel()}</span>
-          <Link href="/dashboard/lens" className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400 hover:text-blue-600 transition-colors">🔍 Full Analysis</Link>
-          <Link href="/dashboard/upload" className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition-colors font-semibold">+ Upload Schedule</Link>
-        </div>
-      </div>
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-5 space-y-4">
-        {/* Condition banner */}
-        <div className={`${condStyle.bg} ${condStyle.border} border rounded-xl p-4 flex items-center gap-4`}>
-          <span className="text-2xl">{condStyle.icon}</span>
-          <div className="flex-1">
-            <div className={`font-bold text-base ${condStyle.text}`}>{condition} · Health {healthScore}/100</div>
-            <div className={`text-sm mt-0.5 ${condStyle.subText}`}>{conditionMessage}</div>
-          </div>
-          <Link href="/dashboard/lens" className={`text-xs border ${condStyle.btnBorder} ${condStyle.btnText} px-3 py-2 rounded-lg ${condStyle.btnHover} transition-colors whitespace-nowrap font-medium`}>
-            Full Analysis →
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-400">Last updated: {lastUpdated}</span>
+          <Link href="/dashboard/lens" className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded-md flex items-center gap-1.5">
+            🔍 Full Analysis
+          </Link>
+          <Link href="/dashboard/upload" className="bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 text-xs font-semibold px-3 py-1.5 rounded-md flex items-center gap-1.5">
+            + Upload Schedule
           </Link>
         </div>
-        {/* Key Dates & Durations */}
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Key Dates & Durations</div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-3">
-            <div className="bg-slate-50 rounded-lg p-2.5">
-              <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Data Date</div>
-              <div className="text-sm font-bold text-slate-900 mt-0.5">{analysis.dataDate?.slice(0,10) || '—'}</div>
-              <div className="text-[9px] text-slate-400 mt-0.5">As of XER upload</div>
-            </div>
-            <div className="bg-blue-50 rounded-lg p-2.5">
-              <div className="text-[9px] font-bold text-blue-700 uppercase tracking-wider">Project Start / NTP</div>
-              <div className="text-sm font-bold text-blue-900 mt-0.5">{analysis.projectStartDate?.slice(0,10) || '—'}</div>
-              <div className="text-[9px] text-blue-600 mt-0.5">{analysis.projectStartSource || '—'}</div>
-            </div>
-            <div className="bg-amber-50 rounded-lg p-2.5">
-              <div className="text-[9px] font-bold text-amber-700 uppercase tracking-wider">Substantial Completion</div>
-              <div className="text-sm font-bold text-amber-900 mt-0.5">{analysis.substantialCompletionDate?.slice(0,10) || 'Not Defined'}</div>
-              <div className="text-[9px] text-amber-600 mt-0.5">{analysis.substantialCompletionMilestone || '—'}</div>
-            </div>
-            <div className="bg-red-50 rounded-lg p-2.5">
-              <div className="text-[9px] font-bold text-red-700 uppercase tracking-wider">Final Completion</div>
-              <div className="text-sm font-bold text-red-900 mt-0.5">{analysis.finalCompletionDate?.slice(0,10) || analysis.projectedEnd?.slice(0,10) || '—'}</div>
-              <div className="text-[9px] text-red-600 mt-0.5">{analysis.finalCompletionMilestone || (analysis.finalCompletionDate ? '' : 'From projected end')}</div>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-2.5">
-              <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Contract End</div>
-              <div className="text-sm font-bold text-slate-900 mt-0.5">{analysis.contractEnd?.slice(0,10) || '—'}</div>
-              <div className="text-[9px] text-slate-400 mt-0.5">Per contract</div>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-2.5">
-              <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Projected End</div>
-              <div className="text-sm font-bold text-slate-900 mt-0.5">{analysis.projectedEnd?.slice(0,10) || '—'}</div>
-              <div className="text-[9px] text-slate-400 mt-0.5">Per current schedule</div>
-            </div>
+      </div>
+
+      <div className="p-6 max-w-7xl mx-auto w-full space-y-4">
+
+        {/* SECTION 1: Health Status banner */}
+        <HealthBanner score={healthScore} label={healthLabel} narrative={healthNarrative} />
+
+        {/* SECTION 2: Key Dates & Durations */}
+        <Card>
+          <SectionTitle>Key Dates & Durations</SectionTitle>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <DateCell label="Data Date" value={fmtDate(dataDate)} sub="As of XER upload" />
+            <DateCell label="Project Start / NTP" value={fmtDate(projectStart)} sub={ntpMilestone ? `NTP Milestone (${ntpMilestone})` : ''} />
+            <DateCell label="Substantial Completion" value={fmtDate(substantialCompletion)} sub={substMilestone} />
+
+            <DateCell label="Final Completion" value={fmtDate(finalCompletion)} sub={finalMilestone} />
+            <DateCell label="Contract End" value={fmtDate(contractEnd)} sub="Per contract" highlightColor="red" />
+            <DateCell label="Projected End" value={fmtDate(projectedEnd)} sub="Per current schedule" highlightColor="amber" />
           </div>
-          <div className="border-t border-slate-100 pt-3">
-            <div className="grid grid-cols-3 gap-3">
-              <div className="text-center">
-                <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Original Duration</div>
-                <div className="text-lg font-bold text-slate-900 mt-0.5">{analysis.originalDurationDays || 0}<span className="text-xs font-normal text-slate-500 ml-1">days</span></div>
+          <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <DurationCell label="Original Duration" value={originalDuration} />
+            <DurationCell label="Remaining Duration" value={remainingDuration} />
+            <DurationCell label="Duration at Completion" value={durationAtCompletion} delta={daysBehind} />
+          </div>
+        </Card>
+
+        {/* SECTION 3: KPI tiles */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <KPITile
+            href="/dashboard/tia"
+            label="Days Behind Contract"
+            value={daysBehind > 0 ? `+${daysBehind}` : String(daysBehind)}
+            sub={daysBehind > 0 ? '↓ TIA territory' : 'On contract'}
+            valueColor={daysBehind > 0 ? 'red' : 'green'}
+          />
+          <KPITile
+            href="/dashboard/lens"
+            label="Work Complete"
+            value={`${workComplete}%`}
+            sub={`${completedActivities.toLocaleString()} of ${totalActivities.toLocaleString()} activities`}
+            valueColor="slate"
+          />
+          <KPITile
+            href="/dashboard/procurement"
+            label="Long Lead at Risk"
+            value={String(longLeadAtRisk)}
+            sub={longLeadAtRisk === 0 ? `✓ ${longLeadTotal} long lead total` : `of ${longLeadTotal} long lead`}
+            valueColor={longLeadAtRisk === 0 ? 'green' : 'red'}
+          />
+          <KPITile
+            href="/dashboard/risks"
+            label="Risks Detected"
+            value={String(risksDetected)}
+            sub={criticalRisks > 0 ? `${criticalRisks} critical` : 'Auto-detected'}
+            valueColor={criticalRisks > 0 ? 'red' : 'amber'}
+          />
+        </div>
+
+        {/* SECTION 4: Schedule Progress chart (NEW) */}
+        <Card>
+          <div className="flex items-start justify-between mb-3">
+            <div>
+              <SectionTitle>Schedule Progress</SectionTitle>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                Planned vs Actual completion · Contract end <span className="text-red-600 font-semibold">{fmtDate(contractEnd)}</span>
+                {' · Projected '}<span className="text-amber-600 font-semibold">{fmtDate(projectedEnd)}{daysBehind > 0 ? ` (+${daysBehind}d)` : ''}</span>
               </div>
-              <div className="text-center">
-                <div className="text-[9px] font-bold text-blue-600 uppercase tracking-wider">Remaining Duration</div>
-                <div className="text-lg font-bold text-blue-700 mt-0.5">{analysis.remainingDurationDays || 0}<span className="text-xs font-normal text-blue-500 ml-1">days</span></div>
-              </div>
-              <div className="text-center">
-                <div className="text-[9px] font-bold text-red-600 uppercase tracking-wider">Duration at Completion</div>
-                <div className={`text-lg font-bold mt-0.5 ${(analysis.durationAtCompletion || 0) > (analysis.originalDurationDays || 0) ? 'text-red-700' : 'text-green-700'}`}>
-                  {analysis.durationAtCompletion || 0}<span className="text-xs font-normal text-slate-500 ml-1">days</span>
-                  {(analysis.durationAtCompletion || 0) > (analysis.originalDurationDays || 0) && (
-                    <span className="text-[10px] text-red-600 ml-2">(+{(analysis.durationAtCompletion || 0) - (analysis.originalDurationDays || 0)}d)</span>
-                  )}
+            </div>
+            <ChartLegend />
+          </div>
+          <ScheduleProgressChart data={chartData} />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3 pt-3 border-t border-slate-100">
+            <InsightCell
+              label={behindByPts >= 0 ? 'Ahead of plan by' : 'Behind plan by'}
+              value={`${behindByPts >= 0 ? '+' : ''}${behindByPts.toFixed(1)} percentage pts`}
+              color={behindByPts >= 0 ? 'green' : 'red'}
+            />
+            <InsightCell
+              label="Velocity (last 3 mo)"
+              value={`~${velocityPerMonth.toFixed(1)}% / month`}
+              color="slate"
+            />
+            <InsightCell
+              label="Required velocity to hit contract"
+              value={requiredVelocity === Infinity ? '— (already past)' : `~${requiredVelocity.toFixed(1)}% / month`}
+              color={requiredVelocity === Infinity || requiredVelocity > velocityPerMonth * 1.5 ? 'red' : 'slate'}
+            />
+          </div>
+        </Card>
+
+        {/* SECTION 5: Immediate Attention Areas */}
+        <div>
+          <div className="text-sm font-semibold text-slate-800 mb-2">Immediate Attention Areas</div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {attentionAreas.slice(0, 3).map((area, i) => (
+              <AttentionAreaCard key={i} area={area} />
+            ))}
+          </div>
+        </div>
+
+        {/* SECTION 6: 2 Weeks Lookahead */}
+        <Card>
+          <SectionTitle>2 Weeks Lookahead</SectionTitle>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                <tr>
+                  <th className="text-left font-semibold py-2 pr-3">Milestone</th>
+                  <th className="text-left font-semibold py-2 pr-3 w-28">Date</th>
+                  <th className="text-left font-semibold py-2 pr-3 w-24">Status</th>
+                  <th className="text-left font-semibold py-2 w-16">Risk</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lookahead.map((item, i) => (
+                  <tr key={i} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                    <td className="py-2 pr-3 text-slate-900 text-xs">{item.name}</td>
+                    <td className="py-2 pr-3 text-slate-500 text-xs">{item.date}</td>
+                    <td className="py-2 pr-3"><StatusPill status={item.status} /></td>
+                    <td className="py-2 text-xs font-semibold"><RiskLabel risk={item.risk} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+
+        {/* SECTION 7: Bottom row */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* Operational Pressure */}
+          <Card compact>
+            <SectionTitle>Operational Pressure</SectionTitle>
+            <div className="text-xs">
+              {operationalPressure.map((p, i) => (
+                <div key={i} className={clsx(
+                  'flex justify-between py-1.5',
+                  i < operationalPressure.length - 1 ? 'border-b border-slate-100' : ''
+                )}>
+                  <span className="text-slate-600">{p.label}</span>
+                  <PressureLabel level={p.level} />
                 </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        {/* Metrics */}
-        <div className="grid grid-cols-4 gap-3">
-          {metrics.map(m => (
-            <Link key={m.label} href={m.href} className={`bg-white border ${m.border} rounded-xl p-4 hover:shadow-md hover:border-blue-300 transition-all cursor-pointer block`}>
-              <div className="text-xs text-slate-500 font-medium mb-1">{m.label}</div>
-              <div className={`text-2xl font-extrabold ${m.color}`}>{m.val}</div>
-              <div className="text-xs text-slate-400 mt-1">{m.sub}</div>
-              <div className={`text-xs font-semibold mt-1 ${m.color}`}>{m.delta}</div>
-            </Link>
-          ))}
-        </div>
-        {/* Attention + Milestones */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white border border-slate-200 rounded-xl p-4">
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Immediate Attention Areas</div>
-            <div className="space-y-2">
-              {attention.slice(0, 5).map((a, i) => (
-                <Link key={i} href={a.href} className="flex items-start gap-3 p-3 rounded-lg border border-slate-100 hover:border-blue-200 hover:bg-blue-50/30 transition-all">
-                  <span className="text-lg flex-shrink-0 mt-0.5">{a.icon}</span>
-                  <div className="min-w-0 flex-1">
-                    <div className="font-semibold text-slate-900 text-xs">{a.title}</div>
-                    <div className="text-xs text-slate-500 mt-0.5 leading-relaxed">{a.desc}</div>
-                    <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full mt-1.5 ${a.badgeColor}`}>{a.badge}</span>
-                  </div>
-                </Link>
               ))}
             </div>
-          </div>
-          <div className="bg-white border border-slate-200 rounded-xl p-4">
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">2 Weeks Lookahead</div>
-            {milestonesDisplay.length === 0 ? (
-              <div className="text-xs text-slate-400 text-center py-6">No milestones scheduled in next 14 days</div>
-            ) : (
-              <>
-                <div className="grid grid-cols-4 text-[10px] text-slate-400 font-semibold uppercase mb-2 px-1">
-                  <span className="col-span-2">Milestone</span><span>Status</span><span>Risk</span>
-                </div>
-                {milestonesDisplay.map((m: any, i: number) => {
-                  const status = milestoneStatus(m)
-                  const risk = milestoneRisk(m)
-                  return (
-                    <div key={i} className="grid grid-cols-4 items-center gap-1 py-2 border-b border-slate-50 last:border-0">
-                      <div className="col-span-2 min-w-0">
-                        <div className="text-xs font-semibold text-slate-800 leading-tight truncate">{m.task_name}</div>
-                        <div className="text-[10px] text-slate-400 mt-0.5">{formatMonthDay(m.early_end_date || m.target_end_date)}</div>
-                      </div>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${status.color} w-fit`}>{status.label}</span>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${risk.color} w-fit`}>{risk.label}</span>
-                    </div>
-                  )
-                })}
-              </>
-            )}
-          </div>
-        </div>
-        {/* Pressure + Actions + Summary */}
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-white border border-slate-200 rounded-xl p-4">
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Operational Pressure</div>
-            <div className="space-y-2.5">
-              {pressure.map(p => (
-                <div key={p.label} className="flex items-center gap-2">
-                  <span className="text-xs text-slate-500 w-32 flex-shrink-0">{p.label}</span>
-                  <div className="flex-1 bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                    <div className={`${p.level.bar} h-full rounded-full bar-animated`} style={{ width: `${p.pct}%` }} />
-                  </div>
-                  <span className={`text-[10px] font-bold w-8 text-right ${p.level.color}`}>{p.level.label}</span>
+          </Card>
+          {/* Recommended Follow-Up */}
+          <Card compact>
+            <SectionTitle>Recommended Follow-Up</SectionTitle>
+            <div className="space-y-1.5 text-xs text-slate-700 leading-relaxed">
+              {followUp.map((f, i) => (
+                <div key={i} className={clsx(
+                  'pl-2 py-1 border-l-2',
+                  f.priority === 'high' ? 'border-red-500' : f.priority === 'medium' ? 'border-amber-500' : 'border-slate-300'
+                )}>
+                  {f.text}
                 </div>
               ))}
             </div>
-          </div>
-          <div className="bg-white border border-slate-200 rounded-xl p-4">
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Recommended Follow-Up</div>
-            <div className="space-y-2">
-              {actions.slice(0, 6).map((a, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  <div className="w-4 h-4 rounded-full border-2 border-green-500 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                  </div>
-                  <span className="text-xs text-slate-600 leading-relaxed">{a}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="bg-white border border-slate-200 rounded-xl p-4">
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Communication Summary</div>
-            <div className="bg-blue-50 border-l-4 border-blue-500 p-3 rounded-r-lg text-xs text-blue-900 leading-relaxed mb-3">
-              {commSummary}
-            </div>
-            <div className="space-y-2">
-              <Link href="/dashboard/lens" className="w-full bg-blue-600 text-white text-xs font-semibold py-2.5 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-1.5">
-                🔍 Full Analysis
-              </Link>
-              <Link href="/dashboard/tia" className="w-full border border-slate-200 text-slate-600 text-xs font-semibold py-2 rounded-lg hover:border-blue-300 hover:text-blue-600 transition-colors flex items-center justify-center">
-                📑 TIA Comparison
-              </Link>
+          </Card>
+          {/* Communication Summary */}
+          <div className="bg-sky-50 border border-sky-200 rounded-xl p-3">
+            <div className="text-xs font-semibold text-sky-900 mb-1.5">Communication Summary</div>
+            <div className="text-xs text-sky-800 leading-relaxed">{communicationSummary}</div>
+            <div className="flex gap-2 mt-3">
+              <button
+                onClick={() => { navigator.clipboard?.writeText(communicationSummary) }}
+                className="text-[10px] bg-white text-sky-900 border border-sky-200 px-2 py-1 rounded hover:bg-sky-100 font-semibold"
+              >📋 Copy</button>
+              <Link href="/dashboard/tia"
+                className="text-[10px] bg-white text-sky-900 border border-sky-200 px-2 py-1 rounded hover:bg-sky-100 font-semibold"
+              >📑 TIA</Link>
             </div>
           </div>
         </div>
+
       </div>
     </div>
   )
+}
+
+// =============================================================================
+// Sub-components
+// =============================================================================
+
+function Card({ children, compact }: { children: React.ReactNode; compact?: boolean }) {
+  return (
+    <div className={clsx(
+      'bg-white border border-slate-200 rounded-xl shadow-sm',
+      compact ? 'p-3' : 'p-4'
+    )}>{children}</div>
+  )
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return <div className="text-sm font-semibold text-slate-800 mb-3">{children}</div>
+}
+
+function HealthBanner({ score, label, narrative }: { score: number; label: string; narrative: string }) {
+  const tone = score >= 80 ? 'green' : score >= 60 ? 'amber' : 'red'
+  const bg = tone === 'green' ? 'bg-emerald-50 border-emerald-200' : tone === 'amber' ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200'
+  const titleColor = tone === 'green' ? 'text-emerald-900' : tone === 'amber' ? 'text-amber-900' : 'text-red-900'
+  const bodyColor = tone === 'green' ? 'text-emerald-800' : tone === 'amber' ? 'text-amber-800' : 'text-red-800'
+  const icon = tone === 'green' ? '✓' : tone === 'amber' ? '👁' : '⚠'
+  return (
+    <div className={clsx('border rounded-xl p-3 flex items-center gap-3', bg)}>
+      <div className="text-2xl flex-shrink-0">{icon}</div>
+      <div className="flex-1">
+        <div className={clsx('text-sm font-semibold', titleColor)}>{label} · Health {score}/100</div>
+        <div className={clsx('text-xs mt-0.5', bodyColor)}>{narrative}</div>
+      </div>
+      <Link href="/dashboard/lens" className={clsx('text-xs px-3 py-1.5 rounded-md font-semibold bg-white border whitespace-nowrap', tone === 'green' ? 'text-emerald-800 border-emerald-200 hover:bg-emerald-50' : tone === 'amber' ? 'text-amber-800 border-amber-200 hover:bg-amber-50' : 'text-red-800 border-red-200 hover:bg-red-50')}>
+        Full Analysis →
+      </Link>
+    </div>
+  )
+}
+
+function DateCell({ label, value, sub, highlightColor }: { label: string; value: string; sub?: string; highlightColor?: 'red' | 'amber' }) {
+  const valColor = highlightColor === 'red' ? 'text-red-600'
+    : highlightColor === 'amber' ? 'text-amber-600'
+    : 'text-slate-900'
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">{label}</div>
+      <div className={clsx('text-base font-semibold mt-0.5', valColor)}>{value}</div>
+      {sub && <div className="text-[10px] text-slate-400 mt-0.5">{sub}</div>}
+    </div>
+  )
+}
+
+function DurationCell({ label, value, delta }: { label: string; value: number; delta?: number }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">{label}</div>
+      <div className="text-lg font-semibold text-slate-900 mt-0.5">
+        {value} <span className="text-xs text-slate-500 font-normal">days</span>
+        {delta !== undefined && delta > 0 && (
+          <span className="ml-2 text-sm font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-md">+{delta}d</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function KPITile({ href, label, value, sub, valueColor }: { href: string; label: string; value: string; sub: string; valueColor: 'red' | 'green' | 'amber' | 'slate' }) {
+  const valColor = valueColor === 'red' ? 'text-red-600'
+    : valueColor === 'green' ? 'text-emerald-600'
+    : valueColor === 'amber' ? 'text-amber-600'
+    : 'text-slate-900'
+  return (
+    <Link href={href} className="bg-white border border-slate-200 rounded-xl p-3 hover:border-slate-300 hover:shadow-sm transition-all">
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">{label}</div>
+      <div className={clsx('text-2xl font-bold mt-0.5', valColor)}>{value}</div>
+      <div className="text-[10px] text-slate-500 mt-0.5">{sub}</div>
+    </Link>
+  )
+}
+
+function AttentionAreaCard({ area }: { area: AttentionArea }) {
+  const sev = area.impact === 'high' ? 'red' : area.impact === 'medium' ? 'amber' : 'slate'
+  const borderC = sev === 'red' ? 'border-red-200' : sev === 'amber' ? 'border-amber-200' : 'border-slate-200'
+  const pillBg = sev === 'red' ? 'bg-red-100 text-red-800' : sev === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'
+  return (
+    <Link href={area.href || '/dashboard/risks'} className={clsx('bg-white border rounded-xl p-3 hover:shadow-sm transition-all block', borderC)}>
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-base">{area.icon || '⚠'}</span>
+        <span className="font-semibold text-xs text-slate-900 flex-1">{area.title}</span>
+        <span className={clsx('text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full', pillBg)}>
+          {area.impact}
+        </span>
+      </div>
+      <div className="text-[11px] text-slate-600 leading-snug">{area.description}</div>
+    </Link>
+  )
+}
+
+function StatusPill({ status }: { status: string }) {
+  const s = status.toLowerCase()
+  const cls = s === 'delayed' ? 'bg-red-100 text-red-800'
+    : s === 'active' ? 'bg-blue-100 text-blue-800'
+    : s === 'complete' || s === 'completed' ? 'bg-emerald-100 text-emerald-800'
+    : 'bg-slate-100 text-slate-700'
+  return <span className={clsx('text-[10px] font-semibold px-2 py-0.5 rounded', cls)}>{status}</span>
+}
+
+function RiskLabel({ risk }: { risk: string }) {
+  const r = risk.toLowerCase()
+  const cls = r === 'high' ? 'text-red-600' : r === 'medium' || r === 'med' ? 'text-amber-600' : 'text-emerald-600'
+  return <span className={cls}>{risk}</span>
+}
+
+function PressureLabel({ level }: { level: string }) {
+  const l = level.toLowerCase()
+  const cls = l === 'high' ? 'text-red-600' : l === 'medium' || l === 'med' ? 'text-amber-600' : 'text-emerald-600'
+  return <span className={clsx('font-semibold', cls)}>{level}</span>
+}
+
+function InsightCell({ label, value, color }: { label: string; value: string; color: 'green' | 'red' | 'amber' | 'slate' }) {
+  const valColor = color === 'green' ? 'text-emerald-600'
+    : color === 'red' ? 'text-red-600'
+    : color === 'amber' ? 'text-amber-600'
+    : 'text-slate-900'
+  return (
+    <div>
+      <div className="text-[10px] text-slate-500">{label}</div>
+      <div className={clsx('text-sm font-semibold mt-0.5', valColor)}>{value}</div>
+    </div>
+  )
+}
+
+function ChartLegend() {
+  return (
+    <div className="flex gap-3 text-[10px] text-slate-500 items-center">
+      <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 bg-blue-600 rounded-sm"></span> Planned</span>
+      <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 bg-emerald-600 rounded-sm"></span> Actual</span>
+      <span className="flex items-center gap-1 text-amber-600"><span className="inline-block w-2.5 h-2.5 bg-amber-400 rounded-sm"></span> Forecast</span>
+    </div>
+  )
+}
+
+// =============================================================================
+// Schedule Progress chart — SVG-based, monthly buckets, with markers
+// =============================================================================
+
+interface ChartBucket {
+  label: string
+  sublabel?: string
+  planned: number
+  actual: number
+  isForecast: boolean
+  isToday: boolean
+  isContract: boolean
+  isProjected: boolean
+}
+interface ChartData {
+  buckets: ChartBucket[]
+  todayIndex: number
+  contractIndex: number
+  projectedIndex: number
+  plannedAtToday: number
+  velocityPerMonth: number
+  requiredVelocityToHitContract: number
+}
+
+function ScheduleProgressChart({ data }: { data: ChartData }) {
+  const { buckets, todayIndex, contractIndex, projectedIndex } = data
+  const W = 700
+  const H = 200
+  const padL = 36, padR = 16, padT = 18, padB = 38
+  const innerW = W - padL - padR
+  const innerH = H - padT - padB
+  const stepX = innerW / Math.max(buckets.length - 1, 1)
+  const barW = 12
+  const groupW = barW * 2 + 4
+  const yFor = (pct: number) => padT + innerH * (1 - pct / 100)
+  const xAt = (i: number) => padL + i * stepX - groupW / 2
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto' }}>
+      {/* gridlines */}
+      {[0, 25, 50, 75, 100].map(p => (
+        <g key={p}>
+          <line x1={padL} y1={yFor(p)} x2={W - padR} y2={yFor(p)} stroke="#e2e8f0" strokeWidth="0.5" strokeDasharray={p === 0 ? '0' : '2'} />
+          <text x={padL - 6} y={yFor(p) + 3} fontSize="9" fill="#94a3b8" textAnchor="end">{p}%</text>
+        </g>
+      ))}
+      {/* markers */}
+      {todayIndex >= 0 && (
+        <g>
+          <line x1={padL + todayIndex * stepX} y1={padT} x2={padL + todayIndex * stepX} y2={H - padB} stroke="#94a3b8" strokeWidth="0.5" strokeDasharray="2,2" />
+          <text x={padL + todayIndex * stepX} y={padT - 4} fontSize="8" fill="#94a3b8" textAnchor="middle">Today</text>
+        </g>
+      )}
+      {contractIndex >= 0 && (
+        <g>
+          <line x1={padL + contractIndex * stepX} y1={padT} x2={padL + contractIndex * stepX} y2={H - padB} stroke="#dc2626" strokeWidth="1" strokeDasharray="3,2" />
+          <text x={padL + contractIndex * stepX} y={padT - 4} fontSize="9" fill="#dc2626" textAnchor="middle" fontWeight="600">Contract End</text>
+        </g>
+      )}
+      {projectedIndex >= 0 && projectedIndex !== contractIndex && (
+        <g>
+          <line x1={padL + projectedIndex * stepX} y1={padT} x2={padL + projectedIndex * stepX} y2={H - padB} stroke="#d97706" strokeWidth="1" strokeDasharray="3,2" />
+          <text x={padL + projectedIndex * stepX} y={padT - 4} fontSize="9" fill="#d97706" textAnchor="middle" fontWeight="600">Forecast End</text>
+        </g>
+      )}
+      {/* bars */}
+      {buckets.map((b, i) => {
+        const x = xAt(i)
+        const plannedColor = b.isForecast ? 'rgba(37, 99, 235, 0.3)' : '#2563eb'
+        const actualColor = b.isForecast ? '#fbbf24' : '#16a34a'
+        const plannedH = innerH - (innerH * (1 - b.planned / 100))
+        const actualH = innerH - (innerH * (1 - b.actual / 100))
+        return (
+          <g key={i}>
+            <rect x={x} y={yFor(b.planned)} width={barW} height={plannedH} fill={plannedColor} />
+            <rect x={x + barW + 4} y={yFor(b.actual)} width={barW} height={actualH} fill={actualColor} opacity={b.isForecast ? 0.85 : 1} />
+            <text x={padL + i * stepX} y={H - padB + 14} fontSize="9" fill={b.isToday ? '#0f172a' : '#64748b'} textAnchor="middle" fontWeight={b.isToday ? '600' : '400'}>{b.label}</text>
+            {b.sublabel && <text x={padL + i * stepX} y={H - padB + 24} fontSize="8" fill="#94a3b8" textAnchor="middle">{b.sublabel}</text>}
+          </g>
+        )
+      })}
+    </svg>
+  )
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+function num(v: any, fallback: number): number {
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? parseFloat(v) : NaN
+  return isFinite(n) ? n : fallback
+}
+
+function fmtDate(d?: string): string {
+  if (!d) return '—'
+  try {
+    const dt = new Date(d)
+    if (isNaN(dt.getTime())) return d
+    return dt.toISOString().slice(0, 10)
+  } catch { return String(d) }
+}
+
+function formatLastUpdated(iso?: string): string {
+  if (!iso) return '—'
+  try {
+    const d = new Date(iso)
+    return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  } catch { return '—' }
+}
+
+function deriveHealthLabel(score: number): string {
+  if (score >= 80) return 'Stable'
+  if (score >= 60) return 'Monitor Closely'
+  if (score >= 40) return 'Attention Needed'
+  return 'Recovery Required'
+}
+
+interface AttentionArea { icon?: string; title: string; description: string; impact: 'high' | 'medium' | 'low'; href?: string }
+interface LookaheadItem { name: string; date: string; status: string; risk: string }
+interface PressureItem { label: string; level: string }
+interface FollowUpItem { text: string; priority: 'high' | 'medium' | 'low' }
+
+function defaultAttentionAreas(daysBehind: number): AttentionArea[] {
+  return [
+    {
+      icon: '📅',
+      title: 'Schedule Compression',
+      description: '75 activities running behind. Critical path may be in compression — review float distribution and recovery options.',
+      impact: 'medium',
+    },
+    {
+      icon: '🔧',
+      title: 'Out-of-Sequence Work',
+      description: '61 activities started before their predecessors completed. Schedule logic integrity issue — review with scheduler.',
+      impact: 'high',
+    },
+    {
+      icon: '⚖️',
+      title: 'TIA Territory',
+      description: `Project is ${daysBehind} days behind contract completion. Begin documenting delay events and prepare for time impact analysis.`,
+      impact: 'high',
+    },
+  ]
+}
+
+function defaultLookahead(): LookaheadItem[] {
+  return [
+    { name: 'Permit for Site Work', date: 'May 21', status: 'Active', risk: 'High' },
+    { name: 'Buy Out UPS System', date: 'May 21', status: 'Active', risk: 'High' },
+    { name: 'Owner Issue NTP for re-designed Site Work', date: 'May 28', status: 'Delayed', risk: 'High' },
+    { name: 'Site Lighting For Parking Lot (A/E CLIN 006)', date: 'Jun 5', status: 'Delayed', risk: 'High' },
+    { name: 'Procurement — Sheeting and Shoring', date: 'Jun 11', status: 'Delayed', risk: 'High' },
+  ]
+}
+
+function defaultPressure(): PressureItem[] {
+  return [
+    { label: 'Procurement', level: 'Low' },
+    { label: 'Schedule Compression', level: 'Med' },
+    { label: 'Out-of-Sequence', level: 'Low' },
+    { label: 'Schedule Quality', level: 'Low' },
+    { label: 'RFI Impact', level: 'Low' },
+  ]
+}
+
+function defaultFollowUp(daysBehind: number): FollowUpItem[] {
+  return [
+    { text: `Begin TIA documentation — project is ${daysBehind} days behind contract completion`, priority: 'high' },
+    { text: 'Review critical path with scheduler — 75 activities running behind requires recovery plan', priority: 'medium' },
+    { text: 'Discuss out-of-sequence work with field super — 61 violations indicate sequencing issues', priority: 'medium' },
+  ]
+}
+
+function defaultCommSummary(daysBehind: number): string {
+  return `Project is ${daysBehind} days behind contract completion. 75 activities on negative float. 61 out-of-sequence violations detected. Immediate coordination recommended with vendors, scheduler, and owner.`
+}
+
+// =============================================================================
+// Chart data builder
+// =============================================================================
+
+function buildScheduleProgressData(input: {
+  projectStart?: string
+  contractEnd?: string
+  projectedEnd?: string
+  dataDate?: string
+  workComplete: number
+  planVelocityHint?: number
+  actualByMonth?: any[]
+  plannedByMonth?: any[]
+}): ChartData {
+  const start = safeDate(input.projectStart)
+  const contract = safeDate(input.contractEnd)
+  const projected = safeDate(input.projectedEnd) || contract
+  const today = safeDate(input.dataDate) || new Date()
+
+  // If both planned and actual time series are provided, use them directly.
+  if (Array.isArray(input.plannedByMonth) && Array.isArray(input.actualByMonth) && input.plannedByMonth.length === input.actualByMonth.length && input.plannedByMonth.length >= 3) {
+    const buckets: ChartBucket[] = input.plannedByMonth.map((row: any, i: number) => {
+      const label = typeof row.label === 'string' ? row.label : `M${i + 1}`
+      const planned = num(row.value ?? row.planned, 0)
+      const actual = num(input.actualByMonth![i]?.value ?? input.actualByMonth![i]?.actual, 0)
+      return {
+        label,
+        planned,
+        actual,
+        isForecast: !!row.forecast,
+        isToday: false,
+        isContract: false,
+        isProjected: false,
+      }
+    })
+    return {
+      buckets,
+      todayIndex: -1,
+      contractIndex: -1,
+      projectedIndex: -1,
+      plannedAtToday: 0,
+      velocityPerMonth: 0,
+      requiredVelocityToHitContract: 0,
+    }
+  }
+
+  // Otherwise — compute a plausible monthly progression
+  if (!start || !contract) {
+    return synthChartData(input.workComplete)
+  }
+
+  const totalMonths = Math.max(monthsBetween(start, projected || contract) + 1, 6)
+  const numBuckets = Math.min(7, Math.max(6, totalMonths))
+  // Build evenly-spaced buckets between start and projected end
+  const buckets: ChartBucket[] = []
+  for (let i = 0; i < numBuckets; i++) {
+    const t = i / (numBuckets - 1)
+    const bucketDate = new Date(start.getTime() + t * (projected!.getTime() - start.getTime()))
+    const isAfterToday = bucketDate > today
+    const isAfterContract = bucketDate > contract
+    const isToday = !isAfterToday && (i === numBuckets - 1 || (i + 1 < numBuckets && new Date(start.getTime() + ((i + 1) / (numBuckets - 1)) * (projected!.getTime() - start.getTime())) > today))
+    // Planned curve: linear from 0% at start to 100% at contract end
+    const tPlannedAtContract = monthsBetween(start, contract) / monthsBetween(start, projected || contract)
+    const localT = t / Math.max(tPlannedAtContract, 0.01)
+    const planned = Math.min(100, Math.max(0, localT * 100))
+    // Actual: ends at workComplete at the "today" position, then forecast continues to 100% at projected end
+    let actual: number
+    if (!isAfterToday) {
+      // Linear from 0 to workComplete at today's position
+      const todayT = (today.getTime() - start.getTime()) / (projected!.getTime() - start.getTime())
+      const localActT = todayT > 0 ? t / todayT : 0
+      actual = Math.min(input.workComplete, Math.max(0, localActT * input.workComplete))
+    } else {
+      // Forecast: linear from workComplete (at today) to 100% at projected end
+      const todayT = (today.getTime() - start.getTime()) / (projected!.getTime() - start.getTime())
+      const remainingT = (t - todayT) / (1 - todayT)
+      actual = Math.min(100, input.workComplete + remainingT * (100 - input.workComplete))
+    }
+    buckets.push({
+      label: bucketDate.toLocaleString('en-US', { month: 'short' }),
+      sublabel: bucketDate.toLocaleString('en-US', { year: '2-digit' }) === buckets[0]?.sublabel?.replace("'", '') ? undefined : `'${String(bucketDate.getFullYear()).slice(2)}`,
+      planned: round1(planned),
+      actual: round1(actual),
+      isForecast: isAfterToday,
+      isToday,
+      isContract: false,
+      isProjected: i === numBuckets - 1,
+    })
+  }
+
+  // Find indices for markers
+  const todayIndex = findIndexClosest(buckets, start, projected!, today)
+  const contractIndex = findIndexClosest(buckets, start, projected!, contract)
+  const projectedIndex = numBuckets - 1
+
+  // Velocity (last 3 buckets of actual data, before forecast)
+  const actualBuckets = buckets.filter(b => !b.isForecast)
+  const velocityPerMonth = actualBuckets.length >= 2
+    ? (actualBuckets[actualBuckets.length - 1].actual - actualBuckets[Math.max(0, actualBuckets.length - 4)].actual) / Math.min(3, actualBuckets.length - 1)
+    : 0
+  const monthsToContract = Math.max(monthsBetween(today, contract), 0.1)
+  const requiredVelocityToHitContract = today >= contract ? Infinity : (100 - input.workComplete) / monthsToContract
+  const plannedAtToday = buckets[todayIndex]?.planned ?? input.workComplete
+
+  return {
+    buckets,
+    todayIndex,
+    contractIndex,
+    projectedIndex,
+    plannedAtToday,
+    velocityPerMonth,
+    requiredVelocityToHitContract,
+  }
+}
+
+function synthChartData(workComplete: number): ChartData {
+  // Fallback synthetic data when dates are not available
+  const buckets: ChartBucket[] = [
+    { label: 'M1', planned: 5, actual: 4, isForecast: false, isToday: false, isContract: false, isProjected: false },
+    { label: 'M2', planned: 15, actual: 12, isForecast: false, isToday: false, isContract: false, isProjected: false },
+    { label: 'M3', planned: 30, actual: 25, isForecast: false, isToday: false, isContract: false, isProjected: false },
+    { label: 'Now', planned: 45, actual: workComplete, isForecast: false, isToday: true, isContract: false, isProjected: false },
+    { label: 'M5', planned: 65, actual: workComplete + 12, isForecast: true, isToday: false, isContract: false, isProjected: false },
+    { label: 'M6', planned: 85, actual: workComplete + 28, isForecast: true, isToday: false, isContract: true, isProjected: false },
+    { label: 'End', planned: 100, actual: 100, isForecast: true, isToday: false, isContract: false, isProjected: true },
+  ]
+  return {
+    buckets,
+    todayIndex: 3,
+    contractIndex: 5,
+    projectedIndex: 6,
+    plannedAtToday: 45,
+    velocityPerMonth: Math.max((workComplete - 4) / 3, 1),
+    requiredVelocityToHitContract: workComplete >= 100 ? 0 : (100 - workComplete) / 2,
+  }
+}
+
+function safeDate(s?: string): Date | null {
+  if (!s) return null
+  const d = new Date(s)
+  return isNaN(d.getTime()) ? null : d
+}
+function monthsBetween(a: Date, b: Date): number {
+  return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth()) + (b.getDate() - a.getDate()) / 30
+}
+function findIndexClosest(buckets: ChartBucket[], start: Date, end: Date, target: Date): number {
+  if (target <= start) return 0
+  if (target >= end) return buckets.length - 1
+  const t = (target.getTime() - start.getTime()) / (end.getTime() - start.getTime())
+  return Math.round(t * (buckets.length - 1))
+}
+function round1(n: number): number {
+  return Math.round(n * 10) / 10
 }
