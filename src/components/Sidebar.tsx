@@ -161,17 +161,23 @@ export default function Sidebar({ user }: SidebarProps) {
     refresh()
   }
 
-  // Counts for the Workspace section badges
-  const archivedCount = projects.filter(p => getProjectStatus(p) === 'Archived').length
+  // Counts for the Workspace section badges.
+  // Archive count now includes BOTH Archived AND Completed projects, since
+  // completed projects also live in the Archive page (they're no longer active work).
+  const archivedCount = projects.filter(p => {
+    const s = getProjectStatus(p)
+    return s === 'Archived' || s === 'Completed'
+  }).length
   const deletedCount = projects.filter(p => getProjectStatus(p) === 'Deleted').length
 
-  // Project tree shows ONLY active-side projects: Active, Completed, On Hold
-  // (Archived and Deleted are accessed via dedicated pages)
+  // Project tree shows ONLY active-work projects: Active and On Hold.
+  // Completed projects move to the Archive page so the sidebar stays focused
+  // on what the user is currently working on.
   const filteredProjects = (() => {
     const q = searchQuery.trim().toLowerCase()
     let pool = projects.filter(p => {
       const s = getProjectStatus(p)
-      return s !== 'Archived' && s !== 'Deleted'
+      return s !== 'Archived' && s !== 'Deleted' && s !== 'Completed'
     })
     if (!q) return pool
     return pool.filter(p => {
