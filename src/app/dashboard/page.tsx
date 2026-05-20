@@ -133,16 +133,35 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   const healthNarrative = a.healthNarrative || a.aiSummary
     || 'Project metrics are being assessed. Detailed health insights will appear here as the schedule is analyzed.'
 
-  const dataDate = a.dataDate || version.dataDate || version.uploadedAt
-  const projectStart = a.projectStart || a.ntp || dataDate
-  const substantialCompletion = a.substantialCompletion || a.substComp
-  const finalCompletion = a.finalCompletion || a.projectFinish
-  const contractEnd = a.contractEnd || a.contractFinish || finalCompletion
-  const projectedEnd = a.projectedEnd || a.forecastFinish || finalCompletion
+  const dataDate = a.dataDate || a.data_date || version.dataDate || version.uploadedAt
+  const projectStart = a.projectStart || a.project_start || a.ntp || a.ntpDate || dataDate
+
+  // Try direct fields first, then fall back to scanning the milestones array
+  // by common milestone codes (MILE-195 = substantial, MILE-200 = final, etc.)
+  // and by name keywords. This handles different XER analysis output shapes.
+  const milestones = Array.isArray(a.milestones) ? a.milestones : []
+  const findMilestone = (codes: string[], nameKeywords: string[]) => {
+    for (const m of milestones) {
+      const code = String(m?.code || m?.id || m?.activityId || '').toUpperCase()
+      const name = String(m?.name || m?.label || m?.activityName || '').toLowerCase()
+      if (codes.some(c => code.includes(c))) return m
+      if (nameKeywords.some(k => name.includes(k))) return m
+    }
+    return null
+  }
+  const findMilestoneDate = (m: any) => m?.date || m?.finish || m?.actualFinish || m?.scheduledFinish || m?.early_finish || null
+
+  const substMilestoneObj = findMilestone(['MILE-195', 'MS-195', '195'], ['substantial', 'subst comp', 'sub completion'])
+  const finalMilestoneObj = findMilestone(['MILE-200', 'MS-200', '200'], ['final completion', 'final compl', 'project finish'])
+
+  const substantialCompletion = a.substantialCompletion || a.substantial_completion || a.substComp || a.subComp || a.substantialComp || a.substCompletion || findMilestoneDate(substMilestoneObj)
+  const finalCompletion = a.finalCompletion || a.final_completion || a.projectFinish || a.project_finish || a.finalComp || findMilestoneDate(finalMilestoneObj)
+  const contractEnd = a.contractEnd || a.contract_end || a.contractFinish || a.contract_finish || a.contractCompletion || finalCompletion
+  const projectedEnd = a.projectedEnd || a.projected_end || a.forecastFinish || a.forecast_finish || a.projectedFinish || finalCompletion
 
   const ntpMilestone = a.ntpMilestone || 'NTP'
-  const substMilestone = a.substMilestone || ''
-  const finalMilestone = a.finalMilestone || ''
+  const substMilestone = a.substMilestone || (substMilestoneObj?.code || substMilestoneObj?.id || '')
+  const finalMilestone = a.finalMilestone || (finalMilestoneObj?.code || finalMilestoneObj?.id || '')
 
   const originalDuration = num(a.originalDuration, 261)
   const remainingDuration = num(a.remainingDuration, 317)
@@ -650,8 +669,12 @@ function fmtDate(d?: string): string {
   if (!d) return '—'
   try {
     const dt = new Date(d)
-    if (isNaN(dt.getTime())) return d
-    return dt.toISOString().slice(0, 10)
+    if (isNaN(dt.getTime())) return String(d)
+    // MM/DD/YYYY format
+    const mm = String(dt.getMonth() + 1).padStart(2, '0')
+    const dd = String(dt.getDate()).padStart(2, '0')
+    const yyyy = dt.getFullYear()
+    return `${mm}/${dd}/${yyyy}`
   } catch { return String(d) }
 }
 
