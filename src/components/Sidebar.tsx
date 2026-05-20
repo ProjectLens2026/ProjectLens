@@ -310,6 +310,7 @@ export default function Sidebar({ user }: SidebarProps) {
           const status = getProjectStatus(p)
           const isCompleted = status === 'Completed'
           const isOnHold = status === 'On Hold'
+          const isActiveStatus = status === 'Active'
 
           return (
             <div key={p.id} className="mb-0.5">
@@ -374,6 +375,9 @@ export default function Sidebar({ user }: SidebarProps) {
                         'text-xs font-medium truncate',
                         isCompleted ? 'text-white/60' : 'text-white'
                       )}>{p.name}</span>
+                      {isActiveStatus && (
+                        <span className="text-[8px] font-bold px-1.5 py-px rounded-full bg-green-500/25 text-green-300 uppercase tracking-wide flex-shrink-0">Active</span>
+                      )}
                       {isOnHold && (
                         <span className="text-[8px] font-bold px-1.5 py-px rounded-full bg-amber-500/25 text-amber-300 uppercase tracking-wide flex-shrink-0">On Hold</span>
                       )}
