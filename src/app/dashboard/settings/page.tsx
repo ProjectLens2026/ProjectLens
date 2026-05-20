@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import type { ReactNode } from 'react'
 import { loadProjects, Project } from '@/lib/projectStore'
 
 // =============================================================================
@@ -282,7 +283,7 @@ function ProfileTab() {
   )
 }
 
-function SectionCard({ title, subtitle, children, accent }: { title: string; subtitle?: string; children: React.ReactNode; accent?: 'amber' | 'red' | 'blue' }) {
+function SectionCard({ title, subtitle, children, accent }: { title: string; subtitle?: string; children: ReactNode; accent?: 'amber' | 'red' | 'blue' }) {
   const accentBorder = accent === 'amber' ? 'border-l-amber-500' : accent === 'red' ? 'border-l-red-500' : accent === 'blue' ? 'border-l-blue-500' : 'border-l-slate-200'
   const accentClass = accent ? `border-l-4 ${accentBorder}` : ''
   return (
