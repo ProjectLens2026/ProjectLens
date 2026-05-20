@@ -17,6 +17,14 @@
 // A subscription mechanism lets pages that mount BEFORE hydration finishes
 // re-render once the cache is populated.
 
+// =============================================================================
+// Project status — added 2026-05-20.
+// 4-state model: Active (default), Completed, On Hold, Archived.
+// Optional field for backward compat — existing projects without a status
+// are treated as Active via getProjectStatus().
+// =============================================================================
+export type ProjectStatus = 'Active' | 'Completed' | 'On Hold' | 'Archived'
+
 export interface ScheduleVersion {
   id: string
   uploadedAt: string
@@ -43,6 +51,9 @@ export interface Project {
   phase?: string
   createdAt: string
   updatedAt: string
+  // Status — optional for backward compat. Use getProjectStatus() to read
+  // safely (treats undefined as 'Active'). Set via setProjectStatus().
+  status?: ProjectStatus
   versions: ScheduleVersion[]
   rfis: any[]
   changeOrders: any[]
@@ -194,6 +205,17 @@ export function loadProjects(): Project[] {
 export function getVersionEffectiveDate(v: ScheduleVersion): string {
   return v.dataDate || v.analysis?.dataDate || v.uploadedAt
 }
+
+// =============================================================================
+// Status helpers — added 2026-05-20.
+// getProjectStatus safely returns 'Active' for projects that pre-date the
+// status field. Use this everywhere instead of accessing project.status
+// directly to avoid undefined checks scattered through the UI.
+// =============================================================================
+export function getProjectStatus(project: Project): ProjectStatus {
+  return project.status || 'Active'
+}
+
 export function getActiveProjectId(): string | null {
   if (typeof window === 'undefined') return null
   try { return localStorage.getItem(ACTIVE_PROJECT_KEY) } catch { return null }
@@ -306,6 +328,7 @@ export function createProject(opts: {
     owner: opts.owner,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    status: 'Active',  // New projects default to Active (added 2026-05-20)
     versions: [opts.version],
     rfis: [],
     changeOrders: [],
@@ -450,6 +473,38 @@ export function renameProject(id: string, newName: string, projectId?: string) {
 }
 
 // =============================================================================
+// setProjectStatus — change the status of a project (Active/Completed/On Hold/
+// Archived). Bumps updatedAt so recently-changed projects bubble to the top.
+//
+// Edge case: if archiving the project that's currently active, switch the
+// active project to the first non-archived one so the dashboard doesn't keep
+// showing an archived project in the Active tab.
+//
+// Added 2026-05-20.
+// =============================================================================
+export function setProjectStatus(id: string, status: ProjectStatus) {
+  const idx = _projects.findIndex(p => p.id === id)
+  if (idx === -1) return
+  const updated: Project = {
+    ..._projects[idx],
+    status,
+    updatedAt: new Date().toISOString(),
+  }
+  _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
+  notifyListeners()
+  idbPutProject(updated).catch(err => {
+    console.error('[ControlLens] setProjectStatus: IndexedDB persist failed:', err)
+  })
+  // If we just archived the active project, switch the active project to the
+  // first non-archived one so the user isn't stuck viewing an archived project
+  // in the Active tab. They can still navigate to it via the Archived tab.
+  if (status === 'Archived' && getActiveProjectId() === id) {
+    const firstNonArchived = _projects.find(p => p.id !== id && getProjectStatus(p) !== 'Archived')
+    setActiveProjectId(firstNonArchived?.id || null)
+  }
+}
+
+// =============================================================================
 // updateVersionNarrative — write/update/clear the operational analysis for
 // a specific version. Called by the Schedule Analysis page when the PM
 // clicks Generate, Edit-Save, or Clear on the Operational Analysis tab.
@@ -487,7 +542,6 @@ export function updateVersionNarrative(
   })
   return true
 }
-
 // Legacy migration is now handled inside hydrate(). This function exists
 // for backward compat with any code that called it directly — it's a no-op.
 export function migrateLegacyData() {
