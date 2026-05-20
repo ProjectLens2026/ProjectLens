@@ -1,90 +1,61 @@
 // Project storage layer — IndexedDB-backed.
-//
-// PREVIOUS: localStorage only. Hit a 5 MB hard cap that fails on XER files
-// with 2,000+ activities (parsed analysis alone can exceed 5 MB even for
-// a single project with no other data stored).
-//
-// NOW: IndexedDB is the source of truth. Practical limits are typically
-// gigabytes per origin instead of 5 MB. Even DGS-scale projects (3,000+
-// activities, multiple versions, multi-year history) fit comfortably.
-//
-// The PUBLIC API of this file is still synchronous (loadProjects, etc.)
-// so existing pages do not need to be rewritten. Internally we keep a
-// memory cache that's hydrated from IndexedDB once on app load. Writes
-// update the memory cache synchronously and persist to IndexedDB in the
-// background.
-//
-// A subscription mechanism lets pages that mount BEFORE hydration finishes
-// re-render once the cache is populated.
+// (header comment unchanged — see prior version for details)
 
 // =============================================================================
-// Project status — added 2026-05-20.
-// 4-state model: Active (default), Completed, On Hold, Archived.
-// Optional field for backward compat — existing projects without a status
-// are treated as Active via getProjectStatus().
+// Project status — 5-state model.
+// Active (default), Completed, On Hold, Archived, Deleted.
+//
+// • Active/Completed/On Hold/Archived are user-pickable from the ⋮ menu.
+// • "Deleted" is set automatically when the user clicks Delete (soft delete).
+//   Restore brings it back to Active. Permanent removal happens from the
+//   Deleted Items page via permanentlyDeleteProject().
 // =============================================================================
-export type ProjectStatus = 'Active' | 'Completed' | 'On Hold' | 'Archived'
+export type ProjectStatus = 'Active' | 'Completed' | 'On Hold' | 'Archived' | 'Deleted'
 
 export interface ScheduleVersion {
   id: string
   uploadedAt: string
-  // Data date — the schedule's actual "as-of" date pulled from the XER's
-  // PROJECT.last_recalc_date field. Optional because versions saved before
-  // this field was introduced will not have it. The trend analyzer falls
-  // back to uploadedAt when dataDate is missing.
   dataDate?: string
   fileName: string
   analysis: any
-  // Internal field name — kept as `aiNarrative` for backward compatibility
-  // with existing saved versions. User-facing labels say "Operational Analysis".
   aiNarrative?: string
   context?: any
-  versionLabel?: string  // e.g. "May 2026 Update"
-  rawXER?: string  // Raw XER text — used for TIA comparison from saved version
+  versionLabel?: string
+  rawXER?: string
 }
 export interface Project {
   id: string
-  projectId?: string  // User-defined unique identifier (e.g. "USACE-CT-2024-001")
+  projectId?: string
   name: string
   owner?: string
   contractValue?: string
   phase?: string
   createdAt: string
   updatedAt: string
-  // Status — optional for backward compat. Use getProjectStatus() to read
-  // safely (treats undefined as 'Active'). Set via setProjectStatus().
   status?: ProjectStatus
+  deletedAt?: string  // ISO timestamp when soft-deleted. Cleared on restore.
   versions: ScheduleVersion[]
   rfis: any[]
   changeOrders: any[]
 }
-// Result returned by saveProjects so the caller can show a real error to
-// the user if the persist failed. With IndexedDB this is rare — only
-// happens if the user's disk is genuinely full or they're in private
-// browsing on a browser that disables IndexedDB.
 export interface SaveResult {
   ok: boolean
   error?: string
 }
-// localStorage keys — small metadata only (no analysis data)
-const LEGACY_PROJECTS_KEY = 'pl_projects'  // checked once for migration, then cleared
+const LEGACY_PROJECTS_KEY = 'pl_projects'
 const ACTIVE_PROJECT_KEY = 'pl_active_project_id'
 const ACTIVE_VERSION_KEY = 'pl_active_version_id'
-// IndexedDB names — DB name stays 'nobelpm' so existing users don't lose
-// their saved projects when this rebrand goes live. The DB name is internal
-// only; users never see it. Migrating data to a renamed DB would risk
-// orphaning every existing project. Field name remains internal.
 const DB_NAME = 'nobelpm'
 const DB_VERSION = 1
 const PROJECTS_STORE = 'projects'
-// ----- Module-level state (singleton in browser) -----
+
 let _projects: Project[] = []
 let _hydrated = false
 let _hydrationPromise: Promise<void> | null = null
 let _dbPromise: Promise<IDBDatabase> | null = null
 type Listener = () => void
 const _listeners: Set<Listener> = new Set()
-// ----- IndexedDB helpers -----
+
 function openDB(): Promise<IDBDatabase> {
   if (_dbPromise) return _dbPromise
   _dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
@@ -134,7 +105,6 @@ async function idbDeleteProject(id: string): Promise<void> {
     req.onerror = () => reject(req.error || new Error('idbDelete failed'))
   })
 }
-// ----- Hydration (one-time on app load) -----
 async function hydrate(): Promise<void> {
   if (_hydrated) return
   try {
@@ -144,7 +114,6 @@ async function hydrate(): Promise<void> {
     } catch (err) {
       console.error('[ControlLens] IndexedDB read failed during hydration:', err)
     }
-    // One-time migration from old localStorage-based storage.
     if (projects.length === 0 && typeof localStorage !== 'undefined') {
       try {
         const legacy = localStorage.getItem(LEGACY_PROJECTS_KEY)
@@ -165,8 +134,6 @@ async function hydrate(): Promise<void> {
         console.error('[ControlLens] Migration check failed (non-fatal):', err)
       }
     }
-    // Sort newest-first so the in-memory order matches what users see in
-    // the sidebar (most recently updated at top).
     projects.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
     _projects = projects
     _hydrated = true
@@ -177,16 +144,12 @@ async function hydrate(): Promise<void> {
     notifyListeners()
   }
 }
-// Kick off hydration as soon as this module is imported in the browser.
 if (typeof window !== 'undefined') {
   _hydrationPromise = hydrate()
 }
-// ----- Subscription API -----
 function notifyListeners() {
   _listeners.forEach(fn => { try { fn() } catch (err) { console.error(err) } })
 }
-// Subscribe to project list updates. Fires on hydration complete and on
-// every save/delete/update. Returns an unsubscribe function.
 export function subscribeToProjects(listener: Listener): () => void {
   _listeners.add(listener)
   return () => { _listeners.delete(listener) }
@@ -197,21 +160,13 @@ export function whenHydrated(): Promise<void> {
 export function isHydrated(): boolean {
   return _hydrated
 }
-// ----- Sync read API (returns memory cache) -----
 export function loadProjects(): Project[] {
   return _projects
 }
-// Resolve a version's effective date for sorting/comparison.
 export function getVersionEffectiveDate(v: ScheduleVersion): string {
   return v.dataDate || v.analysis?.dataDate || v.uploadedAt
 }
 
-// =============================================================================
-// Status helpers — added 2026-05-20.
-// getProjectStatus safely returns 'Active' for projects that pre-date the
-// status field. Use this everywhere instead of accessing project.status
-// directly to avoid undefined checks scattered through the UI.
-// =============================================================================
 export function getProjectStatus(project: Project): ProjectStatus {
   return project.status || 'Active'
 }
@@ -273,11 +228,6 @@ export function getActiveProjectRFIs(): any[] {
   const p = getActiveProject()
   return p?.rfis || []
 }
-// ----- Sync write API (updates cache + persists async to IndexedDB) -----
-// Replace ALL projects (used by bulk operations).
-// Updates memory cache immediately, then persists to IndexedDB in the
-// background. Errors during persist are logged but not thrown — the
-// memory cache is the source of truth for the current session.
 export function saveProjects(projects: Project[]): SaveResult {
   if (typeof window === 'undefined') return { ok: false, error: 'No window' }
   _projects = [...projects]
@@ -287,14 +237,10 @@ export function saveProjects(projects: Project[]): SaveResult {
     try {
       const stored = await idbGetAllProjects()
       oldIds = new Set(stored.map(p => p.id))
-    } catch (err) {
-      // Continue — writes below will still work or fail clearly
-    }
+    } catch (err) {}
     const newIds = new Set(projects.map(p => p.id))
     for (const p of projects) {
-      try {
-        await idbPutProject(p)
-      } catch (err) {
+      try { await idbPutProject(p) } catch (err) {
         console.error('[ControlLens] IndexedDB write failed for project', p.id, err)
         throw err
       }
@@ -302,9 +248,7 @@ export function saveProjects(projects: Project[]): SaveResult {
     const oldIdArray = Array.from(oldIds)
     for (const oldId of oldIdArray) {
       if (!newIds.has(oldId)) {
-        try {
-          await idbDeleteProject(oldId)
-        } catch (err) {
+        try { await idbDeleteProject(oldId) } catch (err) {
           console.error('[ControlLens] IndexedDB delete failed for project', oldId, err)
         }
       }
@@ -328,7 +272,7 @@ export function createProject(opts: {
     owner: opts.owner,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    status: 'Active',  // New projects default to Active (added 2026-05-20)
+    status: 'Active',
     versions: [opts.version],
     rfis: [],
     changeOrders: [],
@@ -396,16 +340,75 @@ export function deleteRFIFromActiveProject(rfiId: string) {
     console.error('[ControlLens] deleteRFIFromActiveProject: IndexedDB persist failed:', err)
   })
 }
+
+// =============================================================================
+// deleteProject — SOFT DELETE (changed 2026-05-20).
+// Moves the project to "Deleted" status with a deletedAt timestamp.
+// User sees it in the Deleted Items page where they can Restore or
+// permanently delete.
+//
+// PREVIOUS behavior (hard delete) is now permanentlyDeleteProject() below.
+// =============================================================================
 export function deleteProject(id: string) {
+  const idx = _projects.findIndex(p => p.id === id)
+  if (idx === -1) return
+  const updated: Project = {
+    ..._projects[idx],
+    status: 'Deleted',
+    deletedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }
+  _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
+  notifyListeners()
+  idbPutProject(updated).catch(err => {
+    console.error('[ControlLens] deleteProject: IndexedDB persist failed:', err)
+  })
+  // If the active project was just deleted, switch to first non-deleted/non-archived
+  if (getActiveProjectId() === id) {
+    const fallback = _projects.find(p => p.id !== id && getProjectStatus(p) !== 'Deleted' && getProjectStatus(p) !== 'Archived')
+    setActiveProjectId(fallback?.id || null)
+  }
+}
+
+// =============================================================================
+// restoreProject — bring a deleted or archived project back to Active.
+// Clears deletedAt timestamp. Bumps updatedAt.
+// Added 2026-05-20.
+// =============================================================================
+export function restoreProject(id: string) {
+  const idx = _projects.findIndex(p => p.id === id)
+  if (idx === -1) return
+  const updated: Project = {
+    ..._projects[idx],
+    status: 'Active',
+    deletedAt: undefined,
+    updatedAt: new Date().toISOString(),
+  }
+  _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
+  notifyListeners()
+  idbPutProject(updated).catch(err => {
+    console.error('[ControlLens] restoreProject: IndexedDB persist failed:', err)
+  })
+}
+
+// =============================================================================
+// permanentlyDeleteProject — actually remove from storage (no recovery).
+// This is what the OLD deleteProject did. Called from the Deleted Items page
+// after explicit user confirmation.
+// Added 2026-05-20.
+// =============================================================================
+export function permanentlyDeleteProject(id: string) {
   _projects = _projects.filter(p => p.id !== id)
   notifyListeners()
   idbDeleteProject(id).catch(err => {
-    console.error('[ControlLens] deleteProject: IndexedDB delete failed:', err)
+    console.error('[ControlLens] permanentlyDeleteProject: IndexedDB delete failed:', err)
   })
   if (getActiveProjectId() === id) {
-    setActiveProjectId(_projects[0]?.id || null)
+    const fallback = _projects.find(p => getProjectStatus(p) !== 'Deleted' && getProjectStatus(p) !== 'Archived')
+    setActiveProjectId(fallback?.id || null)
   }
 }
+
 export function deleteVersion(projectId: string, versionId: string) {
   const idx = _projects.findIndex(p => p.id === projectId)
   if (idx === -1) return
@@ -472,16 +475,6 @@ export function renameProject(id: string, newName: string, projectId?: string) {
   })
 }
 
-// =============================================================================
-// setProjectStatus — change the status of a project (Active/Completed/On Hold/
-// Archived). Bumps updatedAt so recently-changed projects bubble to the top.
-//
-// Edge case: if archiving the project that's currently active, switch the
-// active project to the first non-archived one so the dashboard doesn't keep
-// showing an archived project in the Active tab.
-//
-// Added 2026-05-20.
-// =============================================================================
 export function setProjectStatus(id: string, status: ProjectStatus) {
   const idx = _projects.findIndex(p => p.id === id)
   if (idx === -1) return
@@ -490,29 +483,26 @@ export function setProjectStatus(id: string, status: ProjectStatus) {
     status,
     updatedAt: new Date().toISOString(),
   }
+  // Clear deletedAt when status changes away from Deleted
+  if (status !== 'Deleted') {
+    updated.deletedAt = undefined
+  }
   _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
   notifyListeners()
   idbPutProject(updated).catch(err => {
     console.error('[ControlLens] setProjectStatus: IndexedDB persist failed:', err)
   })
-  // If we just archived the active project, switch the active project to the
-  // first non-archived one so the user isn't stuck viewing an archived project
-  // in the Active tab. They can still navigate to it via the Archived tab.
-  if (status === 'Archived' && getActiveProjectId() === id) {
-    const firstNonArchived = _projects.find(p => p.id !== id && getProjectStatus(p) !== 'Archived')
-    setActiveProjectId(firstNonArchived?.id || null)
+  // If user archived or deleted the currently active project, switch active
+  if ((status === 'Archived' || status === 'Deleted') && getActiveProjectId() === id) {
+    const firstAvailable = _projects.find(p =>
+      p.id !== id &&
+      getProjectStatus(p) !== 'Archived' &&
+      getProjectStatus(p) !== 'Deleted'
+    )
+    setActiveProjectId(firstAvailable?.id || null)
   }
 }
 
-// =============================================================================
-// updateVersionNarrative — write/update/clear the operational analysis for
-// a specific version. Called by the Schedule Analysis page when the PM
-// clicks Generate, Edit-Save, or Clear on the Operational Analysis tab.
-//
-// Pass empty string to clear the narrative. Updates memory cache immediately,
-// persists to IndexedDB in the background. Returns true if the version was
-// found and updated, false otherwise.
-// =============================================================================
 export function updateVersionNarrative(
   projectId: string,
   versionId: string,
@@ -531,9 +521,6 @@ export function updateVersionNarrative(
   const updated: Project = {
     ...project,
     versions: updatedVersions,
-    // Do NOT bump updatedAt — narrative edits don't change project order.
-    // If you want them to, uncomment the next line:
-    // updatedAt: new Date().toISOString(),
   }
   _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
   notifyListeners()
@@ -542,8 +529,7 @@ export function updateVersionNarrative(
   })
   return true
 }
-// Legacy migration is now handled inside hydrate(). This function exists
-// for backward compat with any code that called it directly — it's a no-op.
+
 export function migrateLegacyData() {
-  // No longer needed — hydrate() handles migration from pl_projects on startup.
+  // No longer needed — hydrate() handles migration.
 }

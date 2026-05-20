@@ -24,8 +24,9 @@ const DEMO_USER = {
   initials: 'MA',
   company: 'Nobel Project Control Services, LLC',
 }
-const DEMO_TEAM_MEMBER_COUNT = 4
 
+// Statuses pickable from the ⋮ menu. NOTE: 'Deleted' is intentionally excluded —
+// users get to Deleted via the Delete action, not by picking it as a status.
 const STATUS_OPTIONS: ProjectStatus[] = ['Active', 'Completed', 'On Hold', 'Archived']
 
 export default function Sidebar({ user }: SidebarProps) {
@@ -37,7 +38,6 @@ export default function Sidebar({ user }: SidebarProps) {
   const [projects, setProjects] = useState<Project[]>([])
 
   const [searchQuery, setSearchQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'active' | 'archived'>('active')
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(new Set())
 
   const [openActionMenu, setOpenActionMenu] = useState<string | null>(null)
@@ -138,7 +138,7 @@ export default function Sidebar({ user }: SidebarProps) {
   }
 
   function handleDeleteProject(id: string) {
-    deleteProject(id)
+    deleteProject(id)  // Soft delete now — moves to "Deleted" status
     refresh()
     setConfirmDeleteProjectId(null)
   }
@@ -161,21 +161,18 @@ export default function Sidebar({ user }: SidebarProps) {
     refresh()
   }
 
-  const activeCount = projects.filter(p => getProjectStatus(p) !== 'Archived').length
+  // Counts for the Workspace section badges
   const archivedCount = projects.filter(p => getProjectStatus(p) === 'Archived').length
+  const deletedCount = projects.filter(p => getProjectStatus(p) === 'Deleted').length
 
+  // Project tree shows ONLY active-side projects: Active, Completed, On Hold
+  // (Archived and Deleted are accessed via dedicated pages)
   const filteredProjects = (() => {
     const q = searchQuery.trim().toLowerCase()
-    let pool: Project[]
-    if (q) {
-      pool = projects
-    } else {
-      pool = projects.filter(p => {
-        const status = getProjectStatus(p)
-        if (statusFilter === 'archived') return status === 'Archived'
-        return status !== 'Archived'
-      })
-    }
+    let pool = projects.filter(p => {
+      const s = getProjectStatus(p)
+      return s !== 'Archived' && s !== 'Deleted'
+    })
     if (!q) return pool
     return pool.filter(p => {
       if (p.name.toLowerCase().includes(q)) return true
@@ -220,7 +217,8 @@ export default function Sidebar({ user }: SidebarProps) {
     { href: '/dashboard/tia', icon: '📑', label: 'TIA Comparison' },
   ] : []
 
-  // Helper for highlighting settings tab nav
+  const isArchiveActive = pathname.startsWith('/dashboard/archive')
+  const isDeletedActive = pathname.startsWith('/dashboard/deleted')
   const isSettingsActive = pathname.startsWith('/dashboard/settings')
 
   return (
@@ -277,35 +275,7 @@ export default function Sidebar({ user }: SidebarProps) {
         <span className="absolute left-5 top-1/2 -translate-y-1/2 text-white/40 text-[11px] pointer-events-none">🔍</span>
       </div>
 
-      {/* Filter tabs */}
-      {!searchQuery.trim() && (
-        <div className="flex gap-1 px-2.5 py-1.5 border-b border-white/5 flex-shrink-0">
-          <button
-            onClick={() => setStatusFilter('active')}
-            className={clsx(
-              'flex-1 text-[10px] font-semibold py-1.5 rounded border transition-colors',
-              statusFilter === 'active'
-                ? 'bg-blue-600/20 text-white border-blue-500/50'
-                : 'bg-transparent text-white/50 border-white/8 hover:text-white/70'
-            )}
-          >
-            Active <span className="ml-1 text-[9px] opacity-60">{activeCount}</span>
-          </button>
-          <button
-            onClick={() => setStatusFilter('archived')}
-            className={clsx(
-              'flex-1 text-[10px] font-semibold py-1.5 rounded border transition-colors',
-              statusFilter === 'archived'
-                ? 'bg-blue-600/20 text-white border-blue-500/50'
-                : 'bg-transparent text-white/50 border-white/8 hover:text-white/70'
-            )}
-          >
-            Archived <span className="ml-1 text-[9px] opacity-60">{archivedCount}</span>
-          </button>
-        </div>
-      )}
-
-      {/* Scrollable projects tree */}
+      {/* Scrollable projects tree — shows only Active/Completed/On Hold */}
       <div className="flex-1 overflow-y-auto px-2 py-1.5">
         {projects.length === 0 && (
           <div className="text-center py-4 text-white/40 text-xs">No projects yet</div>
@@ -317,19 +287,9 @@ export default function Sidebar({ user }: SidebarProps) {
           </div>
         )}
 
-        {!searchQuery && statusFilter === 'archived' && filteredProjects.length === 0 && projects.length > 0 && (
-          <div className="text-center py-4 text-white/40 text-xs italic">No archived projects</div>
-        )}
-
         {searchQuery && filteredProjects.length > 0 && (
           <div className="px-2 pt-1 pb-2 text-[9px] text-white/40 uppercase tracking-widest">
             {filteredProjects.length} match{filteredProjects.length !== 1 ? 'es' : ''}
-          </div>
-        )}
-
-        {!searchQuery && statusFilter === 'archived' && filteredProjects.length > 0 && (
-          <div className="px-2 pt-1 pb-2 text-[9px] text-white/40 uppercase tracking-widest italic">
-            Archived projects · read-only history
           </div>
         )}
 
@@ -343,7 +303,6 @@ export default function Sidebar({ user }: SidebarProps) {
           const condition = latest?.analysis?.condition
           const status = getProjectStatus(p)
           const isCompleted = status === 'Completed'
-          const isArchived = status === 'Archived'
           const isOnHold = status === 'On Hold'
 
           return (
@@ -371,14 +330,14 @@ export default function Sidebar({ user }: SidebarProps) {
                   </div>
                 </div>
               ) : isConfirmingDelete ? (
-                <div className="bg-red-500/15 border border-red-500/40 rounded-md p-2 mx-0.5">
-                  <div className="text-red-200 text-[10px] font-semibold mb-1">Delete project?</div>
-                  <div className="text-red-300/80 text-[9px] mb-2 truncate" title={p.name}>
-                    {p.name} · {p.versions.length} version{p.versions.length !== 1 ? 's' : ''} removed
+                <div className="bg-amber-500/15 border border-amber-500/40 rounded-md p-2 mx-0.5">
+                  <div className="text-amber-200 text-[10px] font-semibold mb-1">Move to Deleted Items?</div>
+                  <div className="text-amber-300/80 text-[9px] mb-2 truncate" title={p.name}>
+                    {p.name} · restorable from Deleted Items
                   </div>
                   <div className="flex gap-1">
                     <button onClick={() => handleDeleteProject(p.id)}
-                      className="flex-1 bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold py-1 rounded">Delete</button>
+                      className="flex-1 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold py-1 rounded">Delete</button>
                     <button onClick={() => setConfirmDeleteProjectId(null)}
                       className="flex-1 bg-white/10 hover:bg-white/15 text-white text-[10px] font-bold py-1 rounded">Cancel</button>
                   </div>
@@ -407,7 +366,7 @@ export default function Sidebar({ user }: SidebarProps) {
                       )}
                       <span className={clsx(
                         'text-xs font-medium truncate',
-                        isArchived ? 'text-white/45 italic' : isCompleted ? 'text-white/60' : 'text-white'
+                        isCompleted ? 'text-white/60' : 'text-white'
                       )}>{p.name}</span>
                       {isOnHold && (
                         <span className="text-[8px] font-bold px-1.5 py-px rounded-full bg-amber-500/25 text-amber-300 uppercase tracking-wide flex-shrink-0">On Hold</span>
@@ -417,10 +376,7 @@ export default function Sidebar({ user }: SidebarProps) {
                       )}
                     </div>
                     {p.projectId && (
-                      <div className={clsx(
-                        'text-[9px] font-mono mt-0.5 truncate',
-                        isArchived ? 'text-white/30' : 'text-white/40'
-                      )}>{p.projectId}</div>
+                      <div className="text-[9px] font-mono mt-0.5 truncate text-white/40">{p.projectId}</div>
                     )}
                   </div>
                   <span className="text-white/40 text-[9px] flex-shrink-0 font-mono">{p.versions.length}</span>
@@ -514,7 +470,7 @@ export default function Sidebar({ user }: SidebarProps) {
                       }
 
                       if (isMovingThisVer) {
-                        const otherProjects = projects.filter(op => op.id !== p.id)
+                        const otherProjects = projects.filter(op => op.id !== p.id && getProjectStatus(op) !== 'Deleted')
                         return (
                           <div key={v.id} className="bg-blue-500/15 border border-blue-500/40 rounded-md p-1.5 my-0.5">
                             <div className="text-blue-200 text-[10px] font-semibold mb-0.5">Move to project:</div>
@@ -577,7 +533,7 @@ export default function Sidebar({ user }: SidebarProps) {
                                 onClick={e => e.stopPropagation()}
                                 className="absolute right-0 top-6 z-30 bg-slate-800 border border-white/10 rounded-md shadow-xl py-1 min-w-[140px]"
                               >
-                                {projects.length > 1 && (
+                                {projects.filter(op => op.id !== p.id && getProjectStatus(op) !== 'Deleted').length > 0 && (
                                   <button
                                     onClick={() => {
                                       setMovePickerForVersionId(v.id)
@@ -595,9 +551,6 @@ export default function Sidebar({ user }: SidebarProps) {
                                     className="w-full text-left px-3 py-1.5 text-[11px] text-red-400 hover:bg-white/10"
                                   >🗑️ Delete</button>
                                 )}
-                                {projects.length <= 1 && p.versions.length <= 1 && (
-                                  <div className="px-3 py-1.5 text-[10px] text-white/40">No actions available</div>
-                                )}
                               </div>
                             )}
                           </div>
@@ -611,7 +564,7 @@ export default function Sidebar({ user }: SidebarProps) {
           )
         })}
 
-        {statusFilter === 'active' && !searchQuery && (
+        {!searchQuery && (
           <Link href="/dashboard/upload"
             className="flex items-center gap-1.5 px-2 py-2 mt-2 text-blue-400 hover:text-blue-300 hover:bg-white/5 rounded-md text-xs font-medium"
           >
@@ -649,35 +602,41 @@ export default function Sidebar({ user }: SidebarProps) {
         </div>
       )}
 
-      {/* ====================================================================== */}
-      {/* WORKSPACE NAV — Members / Invite / Settings (restored from earlier demo) */}
-      {/* ====================================================================== */}
+      {/* WORKSPACE NAV — Archive / Deleted / Settings */}
       <div className="border-t border-white/10 px-2 py-2 flex-shrink-0">
         <div className="text-white/30 text-[9px] uppercase tracking-widest px-2 py-1">
           Workspace
         </div>
-        {showTeamMode && (
-          <>
-            <Link href="/dashboard/settings?tab=members"
-              className={clsx(
-                'flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2',
-                pathname === '/dashboard/settings'
-                  ? 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
-                  : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
-              )}>
-              <span className="text-sm w-4 text-center">👥</span>
-              <span className="flex-1">Members</span>
-              <span className="bg-white/10 text-white/60 text-[9px] font-bold px-1.5 py-0.5 rounded-full">
-                {DEMO_TEAM_MEMBER_COUNT}
-              </span>
-            </Link>
-            <Link href="/dashboard/settings?tab=invitations"
-              className="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2 text-slate-400 border-transparent hover:text-white hover:bg-white/5">
-              <span className="text-sm w-4 text-center">✉</span>
-              <span className="flex-1">Invite people</span>
-            </Link>
-          </>
-        )}
+        <Link href="/dashboard/archive"
+          className={clsx(
+            'flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2',
+            isArchiveActive
+              ? 'bg-blue-600/20 text-white border-blue-500'
+              : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
+          )}>
+          <span className="text-sm w-4 text-center">📁</span>
+          <span className="flex-1">Archive Projects</span>
+          {archivedCount > 0 && (
+            <span className="bg-white/10 text-white/60 text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+              {archivedCount}
+            </span>
+          )}
+        </Link>
+        <Link href="/dashboard/deleted"
+          className={clsx(
+            'flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2',
+            isDeletedActive
+              ? 'bg-blue-600/20 text-white border-blue-500'
+              : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
+          )}>
+          <span className="text-sm w-4 text-center">🗑</span>
+          <span className="flex-1">Deleted Items</span>
+          {deletedCount > 0 && (
+            <span className="bg-red-500/30 text-red-300 text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+              {deletedCount}
+            </span>
+          )}
+        </Link>
         <Link href="/dashboard/settings"
           className={clsx(
             'flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2',
