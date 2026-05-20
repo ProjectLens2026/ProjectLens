@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, Component, ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import clsx from 'clsx'
@@ -27,6 +27,52 @@ import {
 // =============================================================================
 
 export default function ExecutiveDashboard() {
+  return (
+    <ErrorBoundary>
+      <ExecutiveDashboardInner />
+    </ErrorBoundary>
+  )
+}
+
+// Inline error boundary — catches any render error in the dashboard
+// and shows a friendly fallback instead of crashing the whole app.
+class ErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean; message: string }
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props)
+    this.state = { hasError: false, message: '' }
+  }
+  static getDerivedStateFromError(err: any) {
+    return { hasError: true, message: err?.message || String(err) }
+  }
+  componentDidCatch(error: any, info: any) {
+    console.error('[ExecutiveDashboard] render error:', error, info)
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full bg-slate-50 p-6">
+          <div className="bg-white border border-red-200 rounded-xl p-8 text-center max-w-lg">
+            <div className="w-12 h-12 mx-auto mb-3 bg-red-100 rounded-2xl flex items-center justify-center">
+              <span className="text-2xl">⚠️</span>
+            </div>
+            <div className="text-base font-bold text-slate-800 mb-2">Dashboard failed to render</div>
+            <div className="text-xs text-slate-500 mb-3">A piece of the data is in an unexpected format. The error is logged in the browser console.</div>
+            <div className="text-[11px] text-red-600 font-mono bg-red-50 border border-red-100 rounded p-2 mb-4 text-left overflow-x-auto">{this.state.message}</div>
+            <Link href="/dashboard/upload" className="inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+              Re-upload Schedule
+            </Link>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+function ExecutiveDashboardInner() {
   const router = useRouter()
   const [project, setProject] = useState<Project | null>(null)
   const [version, setVersion] = useState<ScheduleVersion | null>(null)
@@ -503,7 +549,19 @@ interface ChartData {
 }
 
 function ScheduleProgressChart({ data }: { data: ChartData }) {
-  const { buckets, todayIndex, contractIndex, projectedIndex } = data
+  const buckets = Array.isArray(data?.buckets) ? data.buckets : []
+  const todayIndex = typeof data?.todayIndex === 'number' ? data.todayIndex : -1
+  const contractIndex = typeof data?.contractIndex === 'number' ? data.contractIndex : -1
+  const projectedIndex = typeof data?.projectedIndex === 'number' ? data.projectedIndex : -1
+
+  if (buckets.length === 0) {
+    return (
+      <div className="text-center py-8 text-xs text-slate-400 italic">
+        Schedule progress chart will appear here once project dates are available.
+      </div>
+    )
+  }
+
   const W = 700
   const H = 200
   const padL = 36, padR = 16, padT = 18, padB = 38
@@ -512,7 +570,10 @@ function ScheduleProgressChart({ data }: { data: ChartData }) {
   const stepX = innerW / Math.max(buckets.length - 1, 1)
   const barW = 12
   const groupW = barW * 2 + 4
-  const yFor = (pct: number) => padT + innerH * (1 - pct / 100)
+  const yFor = (pct: number) => {
+    const safe = isFinite(pct) ? Math.max(0, Math.min(100, pct)) : 0
+    return padT + innerH * (1 - safe / 100)
+  }
   const xAt = (i: number) => padL + i * stepX - groupW / 2
 
   return (
@@ -525,19 +586,19 @@ function ScheduleProgressChart({ data }: { data: ChartData }) {
         </g>
       ))}
       {/* markers */}
-      {todayIndex >= 0 && (
+      {todayIndex >= 0 && todayIndex < buckets.length && (
         <g>
           <line x1={padL + todayIndex * stepX} y1={padT} x2={padL + todayIndex * stepX} y2={H - padB} stroke="#94a3b8" strokeWidth="0.5" strokeDasharray="2,2" />
           <text x={padL + todayIndex * stepX} y={padT - 4} fontSize="8" fill="#94a3b8" textAnchor="middle">Today</text>
         </g>
       )}
-      {contractIndex >= 0 && (
+      {contractIndex >= 0 && contractIndex < buckets.length && (
         <g>
           <line x1={padL + contractIndex * stepX} y1={padT} x2={padL + contractIndex * stepX} y2={H - padB} stroke="#dc2626" strokeWidth="1" strokeDasharray="3,2" />
           <text x={padL + contractIndex * stepX} y={padT - 4} fontSize="9" fill="#dc2626" textAnchor="middle" fontWeight="600">Contract End</text>
         </g>
       )}
-      {projectedIndex >= 0 && projectedIndex !== contractIndex && (
+      {projectedIndex >= 0 && projectedIndex < buckets.length && projectedIndex !== contractIndex && (
         <g>
           <line x1={padL + projectedIndex * stepX} y1={padT} x2={padL + projectedIndex * stepX} y2={H - padB} stroke="#d97706" strokeWidth="1" strokeDasharray="3,2" />
           <text x={padL + projectedIndex * stepX} y={padT - 4} fontSize="9" fill="#d97706" textAnchor="middle" fontWeight="600">Forecast End</text>
@@ -548,13 +609,15 @@ function ScheduleProgressChart({ data }: { data: ChartData }) {
         const x = xAt(i)
         const plannedColor = b.isForecast ? 'rgba(37, 99, 235, 0.3)' : '#2563eb'
         const actualColor = b.isForecast ? '#fbbf24' : '#16a34a'
-        const plannedH = innerH - (innerH * (1 - b.planned / 100))
-        const actualH = innerH - (innerH * (1 - b.actual / 100))
+        const safePlanned = isFinite(b.planned) ? Math.max(0, Math.min(100, b.planned)) : 0
+        const safeActual = isFinite(b.actual) ? Math.max(0, Math.min(100, b.actual)) : 0
+        const plannedH = innerH * (safePlanned / 100)
+        const actualH = innerH * (safeActual / 100)
         return (
           <g key={i}>
-            <rect x={x} y={yFor(b.planned)} width={barW} height={plannedH} fill={plannedColor} />
-            <rect x={x + barW + 4} y={yFor(b.actual)} width={barW} height={actualH} fill={actualColor} opacity={b.isForecast ? 0.85 : 1} />
-            <text x={padL + i * stepX} y={H - padB + 14} fontSize="9" fill={b.isToday ? '#0f172a' : '#64748b'} textAnchor="middle" fontWeight={b.isToday ? '600' : '400'}>{b.label}</text>
+            <rect x={x} y={yFor(safePlanned)} width={barW} height={plannedH} fill={plannedColor} />
+            <rect x={x + barW + 4} y={yFor(safeActual)} width={barW} height={actualH} fill={actualColor} opacity={b.isForecast ? 0.85 : 1} />
+            <text x={padL + i * stepX} y={H - padB + 14} fontSize="9" fill={b.isToday ? '#0f172a' : '#64748b'} textAnchor="middle" fontWeight={b.isToday ? '600' : '400'}>{b.label || `M${i+1}`}</text>
             {b.sublabel && <text x={padL + i * stepX} y={H - padB + 24} fontSize="8" fill="#94a3b8" textAnchor="middle">{b.sublabel}</text>}
           </g>
         )
@@ -670,104 +733,129 @@ function buildScheduleProgressData(input: {
   actualByMonth?: any[]
   plannedByMonth?: any[]
 }): ChartData {
-  const start = safeDate(input.projectStart)
-  const contract = safeDate(input.contractEnd)
-  const projected = safeDate(input.projectedEnd) || contract
-  const today = safeDate(input.dataDate) || new Date()
+  try {
+    const start = safeDate(input.projectStart)
+    const contract = safeDate(input.contractEnd)
+    const projected = safeDate(input.projectedEnd) || contract
+    const today = safeDate(input.dataDate) || new Date()
+    const workComplete = num(input.workComplete, 0)
 
-  // If both planned and actual time series are provided, use them directly.
-  if (Array.isArray(input.plannedByMonth) && Array.isArray(input.actualByMonth) && input.plannedByMonth.length === input.actualByMonth.length && input.plannedByMonth.length >= 3) {
-    const buckets: ChartBucket[] = input.plannedByMonth.map((row: any, i: number) => {
-      const label = typeof row.label === 'string' ? row.label : `M${i + 1}`
-      const planned = num(row.value ?? row.planned, 0)
-      const actual = num(input.actualByMonth![i]?.value ?? input.actualByMonth![i]?.actual, 0)
+    // If both planned and actual time series are provided, use them directly.
+    if (Array.isArray(input.plannedByMonth) && Array.isArray(input.actualByMonth)
+        && input.plannedByMonth.length === input.actualByMonth.length
+        && input.plannedByMonth.length >= 3) {
+      const buckets: ChartBucket[] = input.plannedByMonth.map((row: any, i: number) => {
+        const label = typeof row?.label === 'string' ? row.label : `M${i + 1}`
+        const planned = num(row?.value ?? row?.planned, 0)
+        const actualRow = input.actualByMonth![i]
+        const actual = num(actualRow?.value ?? actualRow?.actual, 0)
+        return {
+          label,
+          planned,
+          actual,
+          isForecast: !!row?.forecast,
+          isToday: false,
+          isContract: false,
+          isProjected: false,
+        }
+      })
       return {
-        label,
+        buckets,
+        todayIndex: -1,
+        contractIndex: -1,
+        projectedIndex: -1,
+        plannedAtToday: workComplete,
+        velocityPerMonth: 0,
+        requiredVelocityToHitContract: 0,
+      }
+    }
+
+    // Otherwise — compute a plausible monthly progression
+    if (!start || !contract || !projected) {
+      return synthChartData(workComplete)
+    }
+
+    // Sanity check: projected must be > start, contract should be > start
+    if (projected.getTime() <= start.getTime() || contract.getTime() <= start.getTime()) {
+      return synthChartData(workComplete)
+    }
+
+    const numBuckets = 7
+    const buckets: ChartBucket[] = []
+    const startTime = start.getTime()
+    const projectedTime = projected.getTime()
+    const totalSpan = projectedTime - startTime
+    const todayT = totalSpan > 0 ? Math.max(0, Math.min(1, (today.getTime() - startTime) / totalSpan)) : 0.5
+    const contractT = totalSpan > 0 ? Math.max(0, Math.min(1, (contract.getTime() - startTime) / totalSpan)) : 0.8
+
+    for (let i = 0; i < numBuckets; i++) {
+      const t = i / (numBuckets - 1)
+      const bucketDate = new Date(startTime + t * totalSpan)
+      const isAfterToday = t > todayT
+      const isToday = i > 0 && (todayT >= (i - 1) / (numBuckets - 1)) && (todayT <= i / (numBuckets - 1))
+
+      // Planned curve: linear from 0% at start to 100% at contractT
+      const localPlannedT = contractT > 0 ? Math.min(1, t / contractT) : 1
+      const planned = round1(localPlannedT * 100)
+
+      // Actual: linear from 0 to workComplete at todayT; forecast linear from workComplete to 100% at projected end
+      let actual: number
+      if (!isAfterToday) {
+        const localActT = todayT > 0 ? Math.min(1, t / todayT) : 0
+        actual = round1(localActT * workComplete)
+      } else {
+        const remainingT = (1 - todayT) > 0 ? (t - todayT) / (1 - todayT) : 1
+        actual = round1(Math.min(100, workComplete + remainingT * (100 - workComplete)))
+      }
+
+      buckets.push({
+        label: bucketDate.toLocaleString('en-US', { month: 'short' }),
+        sublabel: t === 0 ? `'${String(bucketDate.getFullYear()).slice(2)}` : undefined,
         planned,
         actual,
-        isForecast: !!row.forecast,
-        isToday: false,
+        isForecast: isAfterToday,
+        isToday,
         isContract: false,
-        isProjected: false,
-      }
-    })
+        isProjected: i === numBuckets - 1,
+      })
+    }
+
+    const todayIndex = Math.round(todayT * (numBuckets - 1))
+    const contractIndex = Math.round(contractT * (numBuckets - 1))
+    const projectedIndex = numBuckets - 1
+
+    // Velocity (compare last actual bucket to one ~3 buckets back)
+    const actualBuckets = buckets.filter(b => !b.isForecast)
+    let velocityPerMonth = 0
+    if (actualBuckets.length >= 2) {
+      const lastActual = actualBuckets[actualBuckets.length - 1].actual
+      const refIdx = Math.max(0, actualBuckets.length - 4)
+      const refActual = actualBuckets[refIdx].actual
+      const monthsApart = Math.max(1, actualBuckets.length - 1 - refIdx)
+      velocityPerMonth = (lastActual - refActual) / monthsApart
+    }
+
+    const monthsToContract = Math.max(monthsBetween(today, contract), 0.01)
+    const requiredVelocityToHitContract = today >= contract
+      ? Infinity
+      : (100 - workComplete) / monthsToContract
+
+    const plannedAtToday = buckets[todayIndex]?.planned ?? workComplete
+
     return {
       buckets,
-      todayIndex: -1,
-      contractIndex: -1,
-      projectedIndex: -1,
-      plannedAtToday: 0,
-      velocityPerMonth: 0,
-      requiredVelocityToHitContract: 0,
+      todayIndex,
+      contractIndex,
+      projectedIndex,
+      plannedAtToday,
+      velocityPerMonth,
+      requiredVelocityToHitContract,
     }
-  }
-
-  // Otherwise — compute a plausible monthly progression
-  if (!start || !contract) {
-    return synthChartData(input.workComplete)
-  }
-
-  const totalMonths = Math.max(monthsBetween(start, projected || contract) + 1, 6)
-  const numBuckets = Math.min(7, Math.max(6, totalMonths))
-  // Build evenly-spaced buckets between start and projected end
-  const buckets: ChartBucket[] = []
-  for (let i = 0; i < numBuckets; i++) {
-    const t = i / (numBuckets - 1)
-    const bucketDate = new Date(start.getTime() + t * (projected!.getTime() - start.getTime()))
-    const isAfterToday = bucketDate > today
-    const isAfterContract = bucketDate > contract
-    const isToday = !isAfterToday && (i === numBuckets - 1 || (i + 1 < numBuckets && new Date(start.getTime() + ((i + 1) / (numBuckets - 1)) * (projected!.getTime() - start.getTime())) > today))
-    // Planned curve: linear from 0% at start to 100% at contract end
-    const tPlannedAtContract = monthsBetween(start, contract) / monthsBetween(start, projected || contract)
-    const localT = t / Math.max(tPlannedAtContract, 0.01)
-    const planned = Math.min(100, Math.max(0, localT * 100))
-    // Actual: ends at workComplete at the "today" position, then forecast continues to 100% at projected end
-    let actual: number
-    if (!isAfterToday) {
-      // Linear from 0 to workComplete at today's position
-      const todayT = (today.getTime() - start.getTime()) / (projected!.getTime() - start.getTime())
-      const localActT = todayT > 0 ? t / todayT : 0
-      actual = Math.min(input.workComplete, Math.max(0, localActT * input.workComplete))
-    } else {
-      // Forecast: linear from workComplete (at today) to 100% at projected end
-      const todayT = (today.getTime() - start.getTime()) / (projected!.getTime() - start.getTime())
-      const remainingT = (t - todayT) / (1 - todayT)
-      actual = Math.min(100, input.workComplete + remainingT * (100 - input.workComplete))
-    }
-    buckets.push({
-      label: bucketDate.toLocaleString('en-US', { month: 'short' }),
-      sublabel: bucketDate.toLocaleString('en-US', { year: '2-digit' }) === buckets[0]?.sublabel?.replace("'", '') ? undefined : `'${String(bucketDate.getFullYear()).slice(2)}`,
-      planned: round1(planned),
-      actual: round1(actual),
-      isForecast: isAfterToday,
-      isToday,
-      isContract: false,
-      isProjected: i === numBuckets - 1,
-    })
-  }
-
-  // Find indices for markers
-  const todayIndex = findIndexClosest(buckets, start, projected!, today)
-  const contractIndex = findIndexClosest(buckets, start, projected!, contract)
-  const projectedIndex = numBuckets - 1
-
-  // Velocity (last 3 buckets of actual data, before forecast)
-  const actualBuckets = buckets.filter(b => !b.isForecast)
-  const velocityPerMonth = actualBuckets.length >= 2
-    ? (actualBuckets[actualBuckets.length - 1].actual - actualBuckets[Math.max(0, actualBuckets.length - 4)].actual) / Math.min(3, actualBuckets.length - 1)
-    : 0
-  const monthsToContract = Math.max(monthsBetween(today, contract), 0.1)
-  const requiredVelocityToHitContract = today >= contract ? Infinity : (100 - input.workComplete) / monthsToContract
-  const plannedAtToday = buckets[todayIndex]?.planned ?? input.workComplete
-
-  return {
-    buckets,
-    todayIndex,
-    contractIndex,
-    projectedIndex,
-    plannedAtToday,
-    velocityPerMonth,
-    requiredVelocityToHitContract,
+  } catch (err) {
+    // Any unexpected math/date issue — fall back to synthetic data so the
+    // dashboard still renders. The error gets logged for debugging.
+    console.warn('[ExecutiveDashboard] chart data builder failed, using fallback:', err)
+    return synthChartData(num(input.workComplete, 0))
   }
 }
 
