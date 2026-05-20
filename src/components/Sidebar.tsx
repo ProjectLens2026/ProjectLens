@@ -47,6 +47,7 @@ export default function Sidebar({ user }: SidebarProps) {
   const [editProjectIdField, setEditProjectIdField] = useState('')
   const [confirmDeleteProjectId, setConfirmDeleteProjectId] = useState<string | null>(null)
   const [confirmDeleteVersionId, setConfirmDeleteVersionId] = useState<string | null>(null)
+  const [confirmStatusChange, setConfirmStatusChange] = useState<{projectId: string, newStatus: ProjectStatus} | null>(null)
   const [movePickerForVersionId, setMovePickerForVersionId] = useState<string | null>(null)
 
   const displayUser = DEMO_MODE ? DEMO_USER : user
@@ -156,9 +157,47 @@ export default function Sidebar({ user }: SidebarProps) {
   }
 
   function handleSetStatus(projectId: string, status: ProjectStatus) {
-    setProjectStatus(projectId, status)
+    // Active is a "safe" status (restoring a project). Apply immediately.
+    // Other statuses (Completed, On Hold, Archived) change visibility or
+    // significance, so prompt for confirmation first so users don't accidentally
+    // hide a project by misclicking the radio.
+    if (status === 'Active') {
+      setProjectStatus(projectId, status)
+      setOpenActionMenu(null)
+      refresh()
+      return
+    }
+    setConfirmStatusChange({ projectId, newStatus: status })
     setOpenActionMenu(null)
+  }
+
+  function applyStatusChange() {
+    if (!confirmStatusChange) return
+    setProjectStatus(confirmStatusChange.projectId, confirmStatusChange.newStatus)
+    setConfirmStatusChange(null)
     refresh()
+  }
+
+  // Build the warning message + button color shown in the status change confirmation.
+  // Keeps the verbiage specific to each destination state so users know exactly
+  // what will happen.
+  function statusChangeMessage(status: ProjectStatus): { headline: string; body: string; confirmBg: string } {
+    if (status === 'Completed') return {
+      headline: 'Mark as Completed?',
+      body: 'Project moves to the Archive page. Restorable any time.',
+      confirmBg: 'bg-emerald-600 hover:bg-emerald-700',
+    }
+    if (status === 'On Hold') return {
+      headline: 'Set to On Hold?',
+      body: 'Project stays in sidebar with an "On Hold" badge. Schedule work is paused.',
+      confirmBg: 'bg-amber-600 hover:bg-amber-700',
+    }
+    if (status === 'Archived') return {
+      headline: 'Archive this project?',
+      body: 'Project moves to the Archive page. Restorable any time.',
+      confirmBg: 'bg-slate-600 hover:bg-slate-700',
+    }
+    return { headline: 'Change status?', body: '', confirmBg: 'bg-blue-600 hover:bg-blue-700' }
   }
 
   // Counts for the Workspace section badges.
@@ -304,6 +343,7 @@ export default function Sidebar({ user }: SidebarProps) {
           const isActive = activeProject?.id === p.id
           const isEditing = editingProjectId === p.id
           const isConfirmingDelete = confirmDeleteProjectId === p.id
+          const isConfirmingStatusChange = confirmStatusChange?.projectId === p.id
           const isActionMenuOpen = openActionMenu === `project:${p.id}`
           const latest = getLatestVersion(p)
           const condition = latest?.analysis?.condition
@@ -336,6 +376,24 @@ export default function Sidebar({ user }: SidebarProps) {
                       className="flex-1 bg-white/10 hover:bg-white/15 text-white text-[10px] font-bold py-1 rounded">Cancel</button>
                   </div>
                 </div>
+              ) : isConfirmingStatusChange && confirmStatusChange ? (
+                (() => {
+                  const msg = statusChangeMessage(confirmStatusChange.newStatus)
+                  return (
+                    <div className="bg-blue-500/15 border border-blue-500/40 rounded-md p-2 mx-0.5">
+                      <div className="text-blue-200 text-[10px] font-semibold mb-1">{msg.headline}</div>
+                      <div className="text-blue-300/80 text-[9px] mb-2 truncate" title={p.name}>
+                        {p.name} · {msg.body}
+                      </div>
+                      <div className="flex gap-1">
+                        <button onClick={applyStatusChange}
+                          className={clsx('flex-1 text-white text-[10px] font-bold py-1 rounded', msg.confirmBg)}>Confirm</button>
+                        <button onClick={() => setConfirmStatusChange(null)}
+                          className="flex-1 bg-white/10 hover:bg-white/15 text-white text-[10px] font-bold py-1 rounded">Cancel</button>
+                      </div>
+                    </div>
+                  )
+                })()
               ) : isConfirmingDelete ? (
                 <div className="bg-amber-500/15 border border-amber-500/40 rounded-md p-2 mx-0.5">
                   <div className="text-amber-200 text-[10px] font-semibold mb-1">Move to Deleted Items?</div>
@@ -449,7 +507,7 @@ export default function Sidebar({ user }: SidebarProps) {
               )}
 
               {/* VERSIONS */}
-              {isExpanded && !isEditing && !isConfirmingDelete && p.versions.length > 0 && (
+              {isExpanded && !isEditing && !isConfirmingDelete && !isConfirmingStatusChange && p.versions.length > 0 && (
                 <div className="ml-5 pl-2 border-l border-white/5 py-0.5">
                   {[...p.versions]
                     .sort((a, b) =>
