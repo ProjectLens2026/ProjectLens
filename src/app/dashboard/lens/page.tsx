@@ -1,9 +1,22 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { getActiveProject, getActiveVersion, updateVersionNarrative } from '@/lib/projectStore'
 
-// Gantt Chart Component
+// =============================================================================
+// Gantt Chart Component — P6-style time scale + zoom + pan
+//
+// PREVIOUS: percent-based widths. Bars compressed unreadably for long
+// projects (a 3-year schedule with 100 activities became a wall of slivers).
+//
+// NOW: pixel-based widths driven by Time Scale (Year/Quarter/Month/Week)
+// and Zoom (− Fit +). Bars stay readable at any project length. Chart
+// auto-scrolls horizontally when its content exceeds the viewport.
+// User can drag the chart area to pan, just like in P6.
+// =============================================================================
+
+type Scale = 'year' | 'quarter' | 'month' | 'week'
+
 function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
   activities: any[]
   drivingPath: any[]
@@ -14,93 +27,336 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
   const hasDrivingPath = drivingPath && drivingPath.length > 0
   const displayActivities = hasZeroNegFloat ? activities : (hasDrivingPath ? drivingPath : [])
   const mode = hasZeroNegFloat ? 'float' : hasDrivingPath ? 'driving' : 'none'
-  function renderGantt(acts: any[]) {
-    const start = new Date(dataDate?.replace(' ', 'T') || new Date())
-    const end = new Date(projectedEnd?.replace(' ', 'T') || new Date())
-    const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)))
-    function getLeft(dateStr?: string) {
-      if (!dateStr) return 0
-      const d = new Date(dateStr.replace(' ', 'T'))
-      const days = Math.round((d.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
-      return Math.max(0, Math.min(100, (days / totalDays) * 100))
-    }
-    function getWidth(startStr?: string, endStr?: string) {
-      if (!startStr || !endStr) return 1
-      const s = new Date(startStr.replace(' ', 'T'))
-      const e = new Date(endStr.replace(' ', 'T'))
-      const days = Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24))
-      return Math.max(0.5, Math.min(100, (days / totalDays) * 100))
-    }
-    function shortDate(d?: string) { return d ? d.slice(0, 10) : '—' }
-    const months: { label: string; left: number }[] = []
-    const cur = new Date(start)
-    cur.setDate(1)
-    while (cur <= end) {
-      const left = getLeft(cur.toISOString())
-      if (left >= 0 && left <= 100) {
-        months.push({ label: cur.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }), left })
+
+  // Chart date window — from the schedule's data date through projected end.
+  // If either is missing we default to "now → now + 1 year" so the chart
+  // still renders without throwing.
+  const chartStart = new Date(dataDate?.replace(' ', 'T') || new Date())
+  const chartEnd = new Date(projectedEnd?.replace(' ', 'T') ||
+    new Date(Date.now() + 365 * 86400000).toISOString())
+  const totalDays = Math.max(1, Math.round((chartEnd.getTime() - chartStart.getTime()) / 86400000))
+
+  // Auto-select sensible scale based on project duration. PMs running a
+  // 5-year megaproject see a Year view by default; a 2-week lookahead opens
+  // in Week view. They can switch anytime.
+  function pickDefaultScale(): Scale {
+    if (totalDays > 365 * 5) return 'year'
+    if (totalDays > 365 * 2) return 'quarter'
+    if (totalDays < 60) return 'week'
+    return 'month'
+  }
+
+  const [scale, setScale] = useState<Scale>(pickDefaultScale)
+  const [zoom, setZoom] = useState(1)
+  const [isDragging, setIsDragging] = useState(false)
+  const chartScrollRef = useRef<HTMLDivElement>(null)
+  const dragStateRef = useRef<{ startX: number; startScroll: number } | null>(null)
+
+  // Pixels per day at zoom=1 for each scale. Quarter/Year are intentionally
+  // thin so big projects fit. Zoom multiplies these. Week is wide enough to
+  // read activity codes inside bars.
+  const BASE_PX_PER_DAY: Record<Scale, number> = {
+    week: 14,
+    month: 3.5,
+    quarter: 1.3,
+    year: 0.45,
+  }
+  const pxPerDay = BASE_PX_PER_DAY[scale] * zoom
+  const chartWidth = Math.max(400, totalDays * pxPerDay)
+
+  // Layout constants
+  const ACTIVITY_COL_WIDTH = 320
+  const ROW_HEIGHT = 40
+  const HEADER_HEIGHT = 48
+
+  function dayDiff(d: Date) {
+    return Math.max(0, (d.getTime() - chartStart.getTime()) / 86400000)
+  }
+
+  // Fit-to-viewport — compute zoom so the whole chart visible without scroll.
+  // Useful after zooming way in and wanting to reset.
+  function fitToView() {
+    if (!chartScrollRef.current) return
+    const viewWidth = chartScrollRef.current.clientWidth - ACTIVITY_COL_WIDTH - 20
+    if (viewWidth <= 0) return
+    const neededPxPerDay = viewWidth / totalDays
+    const newZoom = neededPxPerDay / BASE_PX_PER_DAY[scale]
+    setZoom(Math.max(0.15, Math.min(8, newZoom)))
+  }
+
+  // Build major (labeled) + minor (unlabeled, lighter) tick marks for the
+  // date header. Major ticks anchor the header text; minor ticks give the
+  // PM eye-guides between them inside each row.
+  function buildTicks() {
+    const majors: { left: number; label: string }[] = []
+    const minors: { left: number }[] = []
+    const cur = new Date(chartStart)
+    cur.setHours(0, 0, 0, 0)
+
+    if (scale === 'year') {
+      cur.setMonth(0, 1)
+      while (cur <= chartEnd) {
+        const left = dayDiff(cur) * pxPerDay
+        if (left >= -50 && left <= chartWidth + 50) {
+          majors.push({ left, label: cur.getFullYear().toString() })
+        }
+        // Quarters as minor ticks within each year
+        for (let q = 1; q < 4; q++) {
+          const minCur = new Date(cur); minCur.setMonth(q * 3)
+          const minLeft = dayDiff(minCur) * pxPerDay
+          if (minLeft >= 0 && minLeft <= chartWidth) minors.push({ left: minLeft })
+        }
+        cur.setFullYear(cur.getFullYear() + 1)
       }
-      cur.setMonth(cur.getMonth() + 1)
+    } else if (scale === 'quarter') {
+      cur.setMonth(Math.floor(cur.getMonth() / 3) * 3, 1)
+      while (cur <= chartEnd) {
+        const left = dayDiff(cur) * pxPerDay
+        const q = Math.floor(cur.getMonth() / 3) + 1
+        if (left >= -50 && left <= chartWidth + 50) {
+          majors.push({ left, label: `Q${q} '${cur.getFullYear().toString().slice(-2)}` })
+        }
+        for (let m = 1; m < 3; m++) {
+          const minCur = new Date(cur); minCur.setMonth(minCur.getMonth() + m)
+          const minLeft = dayDiff(minCur) * pxPerDay
+          if (minLeft >= 0 && minLeft <= chartWidth) minors.push({ left: minLeft })
+        }
+        cur.setMonth(cur.getMonth() + 3)
+      }
+    } else if (scale === 'month') {
+      cur.setDate(1)
+      while (cur <= chartEnd) {
+        const left = dayDiff(cur) * pxPerDay
+        if (left >= -50 && left <= chartWidth + 50) {
+          majors.push({ left, label: cur.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }) })
+        }
+        // Mid-month minor tick
+        const mid = new Date(cur); mid.setDate(15)
+        const midLeft = dayDiff(mid) * pxPerDay
+        if (midLeft >= 0 && midLeft <= chartWidth) minors.push({ left: midLeft })
+        cur.setMonth(cur.getMonth() + 1)
+      }
+    } else if (scale === 'week') {
+      // Snap to the nearest Monday on/before chartStart
+      const day = cur.getDay()  // 0=Sun, 1=Mon
+      const offsetToMonday = day === 0 ? -6 : 1 - day
+      cur.setDate(cur.getDate() + offsetToMonday)
+      while (cur <= chartEnd) {
+        const left = dayDiff(cur) * pxPerDay
+        if (left >= -50 && left <= chartWidth + 50) {
+          majors.push({ left, label: cur.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) })
+        }
+        cur.setDate(cur.getDate() + 7)
+      }
     }
+    return { majors, minors }
+  }
+  const { majors, minors } = buildTicks()
+
+  // Data date marker — vertical dashed red line at the schedule's data date
+  // (which is x=0 by construction). We render it as a "Today/Data Date"
+  // anchor so the PM can see at a glance what's behind/ahead.
+  const dataDateLeft = 0  // chartStart === dataDate by definition
+
+  // Drag-to-pan handlers. Clicking-and-dragging anywhere in the timeline
+  // (not on a bar) pans the chart left/right, matching P6's behavior.
+  function onMouseDown(e: React.MouseEvent) {
+    if ((e.target as HTMLElement).closest('[data-gantt-bar]')) return
+    if (!chartScrollRef.current) return
+    dragStateRef.current = {
+      startX: e.clientX,
+      startScroll: chartScrollRef.current.scrollLeft,
+    }
+    setIsDragging(true)
+  }
+  function onMouseMove(e: React.MouseEvent) {
+    if (!dragStateRef.current || !chartScrollRef.current) return
+    const dx = e.clientX - dragStateRef.current.startX
+    chartScrollRef.current.scrollLeft = dragStateRef.current.startScroll - dx
+  }
+  function onMouseUp() {
+    dragStateRef.current = null
+    setIsDragging(false)
+  }
+
+  function renderGantt(acts: any[]) {
     const displayed = acts.slice(0, 100)
+
     return (
-      <div className="overflow-auto max-h-[550px] border border-slate-200 rounded-xl">
-        <div className="sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
-          <div className="flex">
-            <div className="w-80 flex-shrink-0 px-3 py-2 text-[10px] font-bold text-slate-500 uppercase border-r border-slate-200">Activity</div>
-            <div className="flex-1 relative h-8 min-w-[600px]">
-              {months.map((m, i) => (
-                <div key={i} className="absolute top-0 h-full flex items-center" style={{ left: `${m.left}%` }}>
-                  <div className="h-full border-l border-slate-300 border-dashed" />
-                  <span className="text-[9px] text-slate-400 ml-1 whitespace-nowrap">{m.label}</span>
-                </div>
-              ))}
-            </div>
+      <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
+
+        {/* P6-style toolbar: Time Scale + Zoom controls */}
+        <div className="flex items-center gap-3 px-3 py-2 border-b border-slate-200 bg-slate-50 flex-wrap">
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] font-bold text-slate-600 uppercase mr-1">Time Scale</span>
+            {(['year', 'quarter', 'month', 'week'] as Scale[]).map(s => (
+              <button key={s} onClick={() => setScale(s)}
+                className={`text-[10px] font-semibold px-2.5 py-1 rounded transition-colors ${
+                  scale === s ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-200 bg-white border border-slate-200'
+                }`}>
+                {s.charAt(0).toUpperCase() + s.slice(1)}
+              </button>
+            ))}
+          </div>
+          <div className="w-px h-5 bg-slate-300"></div>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] font-bold text-slate-600 uppercase mr-1">Zoom</span>
+            <button onClick={() => setZoom(z => Math.max(0.15, z * 0.7))}
+              title="Zoom out (compress bars)"
+              className="w-7 h-7 flex items-center justify-center rounded bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-base leading-none">
+              −
+            </button>
+            <button onClick={fitToView}
+              title="Fit entire chart to viewport width"
+              className="px-2.5 h-7 rounded bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-[10px] font-semibold">
+              Fit
+            </button>
+            <button onClick={() => setZoom(z => Math.min(8, z * 1.4))}
+              title="Zoom in (enlarge bars)"
+              className="w-7 h-7 flex items-center justify-center rounded bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-base leading-none">
+              +
+            </button>
+            <span className="text-[10px] text-slate-500 ml-1 font-mono">{Math.round(zoom * 100)}%</span>
+          </div>
+          <div className="w-px h-5 bg-slate-300"></div>
+          <div className="text-[10px] text-slate-500 hidden md:block">
+            {acts.length} activities · {totalDays}d span
+          </div>
+          <div className="text-[10px] text-slate-400 ml-auto hidden lg:block">
+            Drag chart to pan · Shift+wheel to scroll horizontally
           </div>
         </div>
-        {displayed.map((t: any, i: number) => {
-          const taskStart = t.act_start_date || t.early_start_date || t.target_start_date || ''
-          const taskEnd = t.early_end_date || t.act_end_date || t.target_end_date || ''
-          const float = parseFloat(t.total_float_hr_cnt || '0')
-          const isComplete = t.status_code === 'TK_Complete'
-          const barColor = isComplete ? 'bg-slate-400' : mode === 'driving' ? 'bg-blue-500' : float < 0 ? 'bg-red-500' : 'bg-amber-500'
-          const left = getLeft(taskStart)
-          const width = getWidth(taskStart, taskEnd)
-          const pct = parseFloat(t.phys_complete_pct || '0')
-          return (
-            <div key={i} className={`flex border-b border-slate-100 hover:bg-blue-50/30 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
-              <div className="w-80 flex-shrink-0 px-3 py-2 border-r border-slate-100 flex items-center gap-2">
-                <div className="min-w-0">
-                  <div className="text-[11px] font-mono font-bold text-slate-800 truncate">{t.task_code}</div>
-                  <div className="text-[10px] text-slate-500 truncate">{t.task_name}</div>
-                </div>
-                <div className={`ml-auto text-[10px] font-bold flex-shrink-0 ${float < 0 ? 'text-red-600' : float === 0 ? 'text-amber-600' : 'text-green-600'}`}>
-                  {Math.round(float / 8)}d
-                </div>
+
+        {/* Scrollable chart body */}
+        <div
+          ref={chartScrollRef}
+          className={`overflow-auto max-h-[600px] relative ${isDragging ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
+          onMouseDown={onMouseDown}
+          onMouseMove={onMouseMove}
+          onMouseUp={onMouseUp}
+          onMouseLeave={onMouseUp}
+        >
+          {/* Inner wide content — holds activity column + chart area as
+              a single scrollable surface so the data-date marker scrolls
+              correctly with the timeline. */}
+          <div className="relative" style={{ width: (ACTIVITY_COL_WIDTH + chartWidth) + 'px' }}>
+
+            {/* Header row — sticky to top of chart body */}
+            <div className="flex sticky top-0 z-20 bg-slate-50 border-b-2 border-slate-300" style={{ height: HEADER_HEIGHT + 'px' }}>
+              {/* Top-left corner — sticky both top & left */}
+              <div className="sticky left-0 z-30 bg-slate-100 border-r-2 border-slate-300 flex-shrink-0 px-3 py-2 flex flex-col justify-center"
+                style={{ width: ACTIVITY_COL_WIDTH + 'px' }}>
+                <div className="text-[10px] font-bold text-slate-600 uppercase">Activity</div>
+                <div className="text-[9px] text-slate-400">Code · Name · Float</div>
               </div>
-              <div className="flex-1 relative py-2 min-w-[600px] h-10">
-                <div className="absolute inset-y-0 flex items-center" style={{ left: `${left}%`, width: `${width}%`, minWidth: '4px' }}>
-                  <div className={`relative h-5 w-full rounded-sm ${barColor} opacity-80 overflow-hidden`}>
-                    <div className="absolute inset-y-0 left-0 bg-black/20 rounded-l-sm" style={{ width: `${pct}%` }} />
-                    {width > 8 && (
-                      <div className="absolute inset-0 flex items-center px-1">
-                        <span className="text-[9px] text-white font-semibold truncate">{shortDate(taskEnd)}</span>
+              {/* Date scale header */}
+              <div className="relative flex-shrink-0" style={{ width: chartWidth + 'px' }}>
+                {majors.map((m, i) => (
+                  <div key={'M' + i} className="absolute top-0 h-full" style={{ left: m.left + 'px' }}>
+                    <div className="h-full border-l border-slate-400"></div>
+                    <span className="absolute top-1.5 left-1.5 text-[10px] font-bold text-slate-700 whitespace-nowrap">{m.label}</span>
+                  </div>
+                ))}
+                {minors.map((m, i) => (
+                  <div key={'m' + i} className="absolute top-6 h-6 border-l border-slate-200" style={{ left: m.left + 'px' }}></div>
+                ))}
+              </div>
+            </div>
+
+            {/* Activity rows */}
+            {displayed.map((t: any, i: number) => {
+              const taskStart = t.act_start_date || t.early_start_date || t.target_start_date || ''
+              const taskEnd = t.early_end_date || t.act_end_date || t.target_end_date || ''
+              const floatHr = parseFloat(t.total_float_hr_cnt || '0')
+              const isComplete = t.status_code === 'TK_Complete'
+              const barColor = isComplete ? 'bg-slate-400' : mode === 'driving' ? 'bg-blue-500' : floatHr < 0 ? 'bg-red-500' : 'bg-amber-500'
+              const pct = parseFloat(t.phys_complete_pct || '0')
+              const rowBg = i % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'
+
+              let barLeft = 0, barWidth = 0, hasBar = false
+              if (taskStart && taskEnd) {
+                const sDate = new Date(taskStart.replace(' ', 'T'))
+                const eDate = new Date(taskEnd.replace(' ', 'T'))
+                if (!isNaN(sDate.getTime()) && !isNaN(eDate.getTime())) {
+                  barLeft = dayDiff(sDate) * pxPerDay
+                  barWidth = Math.max(3, ((eDate.getTime() - sDate.getTime()) / 86400000) * pxPerDay)
+                  hasBar = true
+                }
+              }
+
+              return (
+                <div key={i} className={`flex group border-b border-slate-100 ${rowBg}`} style={{ height: ROW_HEIGHT + 'px' }}>
+                  {/* Sticky activity column */}
+                  <div className={`sticky left-0 z-10 border-r border-slate-200 flex-shrink-0 px-3 py-2 flex items-center gap-2 ${rowBg} group-hover:bg-blue-50/40`}
+                    style={{ width: ACTIVITY_COL_WIDTH + 'px' }}>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[11px] font-mono font-bold text-slate-800 truncate" title={t.task_code}>{t.task_code}</div>
+                      <div className="text-[10px] text-slate-500 truncate" title={t.task_name}>{t.task_name}</div>
+                    </div>
+                    <div className={`text-[10px] font-bold flex-shrink-0 ${floatHr < 0 ? 'text-red-600' : floatHr === 0 ? 'text-amber-600' : 'text-green-600'}`}>
+                      {Math.round(floatHr / 8)}d
+                    </div>
+                  </div>
+
+                  {/* Timeline area for this activity */}
+                  <div className="relative flex-shrink-0 group-hover:bg-blue-50/30" style={{ width: chartWidth + 'px' }}>
+                    {/* Vertical grid lines mirror the major ticks */}
+                    {majors.map((m, mi) => (
+                      <div key={'g' + mi} className="absolute top-0 h-full border-l border-slate-100 pointer-events-none" style={{ left: m.left + 'px' }}></div>
+                    ))}
+                    {/* The bar */}
+                    {hasBar && (
+                      <div
+                        data-gantt-bar
+                        className={`absolute rounded-sm overflow-hidden ${barColor} shadow-sm`}
+                        style={{ left: barLeft + 'px', width: barWidth + 'px', top: '8px', height: '24px' }}
+                        title={`${t.task_code}: ${t.task_name}\n${taskStart.slice(0,10)} → ${taskEnd.slice(0,10)}\nFloat: ${Math.round(floatHr / 8)}d · ${pct}% complete`}
+                      >
+                        {/* Progress overlay */}
+                        <div className="absolute inset-y-0 left-0 bg-black/30 pointer-events-none" style={{ width: pct + '%' }}></div>
+                        {/* Bar label if wide enough */}
+                        {barWidth > 80 && (
+                          <div className="absolute inset-0 flex items-center px-2 pointer-events-none">
+                            <span className="text-[9px] text-white font-bold truncate drop-shadow">
+                              {t.task_code}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
                 </div>
+              )
+            })}
+
+            {/* Data Date marker — full-height dashed line, scrolls with content.
+                Positioned in the inner wide container so it stays aligned with
+                bars as the user pans the chart. Sits OVER bars (z-15) but
+                UNDER the sticky activity column (z-10... wait, marker has higher).
+                The sticky activity column has z-10, marker has z-15, so marker
+                would actually appear ABOVE the sticky column visually when they
+                overlap. That's fine — the column is sticky on left and marker
+                only appears at dataDateLeft (=0 in chart area), so they don't
+                actually visually overlap. */}
+            <div className="absolute top-0 bottom-0 pointer-events-none z-[8]"
+              style={{ left: (ACTIVITY_COL_WIDTH + dataDateLeft) + 'px' }}>
+              <div className="h-full border-l-2 border-dashed border-red-500 opacity-70"></div>
+              <div className="absolute top-0 -translate-x-1/2 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-b whitespace-nowrap shadow">
+                DATA DATE
               </div>
             </div>
-          )
-        })}
-        {acts.length > 100 && (
-          <div className="text-center py-3 text-xs text-slate-400 border-t border-slate-200">
-            Showing first 100 of {acts.length} activities
+
+            {acts.length > 100 && (
+              <div className="sticky left-0 z-10 text-center py-3 text-xs text-slate-400 border-t border-slate-200 bg-white" style={{ width: '100%' }}>
+                Showing first 100 of {acts.length} activities
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
     )
   }
+
   if (mode === 'none') {
     return (
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
@@ -122,6 +378,7 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
       </div>
     )
   }
+
   if (mode === 'driving') {
     return (
       <div className="space-y-4">
@@ -151,6 +408,7 @@ function GanttChart({ activities, drivingPath, dataDate, projectedEnd }: {
       </div>
     )
   }
+
   return (
     <div className="space-y-3">
       <div className="flex gap-4 text-xs">
