@@ -2,81 +2,83 @@
 import Link from 'next/link'
 
 // =============================================================================
-// ControlLens marketing landing page.
+// ControlLens marketing landing page — full version.
 //
-// Layout (matches the approved mockup):
-//   1. Top nav bar — brand mark + nav links + Sign in
-//   2. Centered hero — badge, headline, subheadline, CTAs, "no credit card" line
-//   3. Dashboard preview — realistic-looking screenshot of the actual product:
-//      browser frame on top, sidebar with Mike Anderson + projects on left,
-//      Schedule Analysis main pane with KPI tiles + Float Trend chart +
-//      Key Findings panel on right
-//   4. Social proof strip — agency abbreviations (no real client names)
+// Sections (top to bottom):
+//   1. Top nav
+//   2. Hero — "Read your schedule like a 20-year scheduler would."
+//   3. Dashboard preview — the "wow" moment: a real-looking post-upload
+//      analysis showing 550 activities, 133 days behind, 28/100 score
+//   4. "Upload. Analyze. Act." — 3-step explainer (anchor: #how)
+//   5. "Built for PMs and schedulers" — 6-feature grid
+//   6. "Made for the people who carry the schedule" — 4 personas
+//   7. Pricing — 3 tiers (Free / ControlLens / ControlLens Plus)
+//   8. Final CTA — "See your schedule clearly."
+//   9. Footer
 //
-// Lives at /landing. To make it the home page, either:
-//   (a) replace /src/app/page.tsx with a redirect to /landing for unauthenticated
-//       users, or
-//   (b) move this file's contents into /src/app/page.tsx and update the auth
-//       check accordingly.
-//
-// Vercel-level password protection covers all pages currently; for this to be
-// a true public marketing surface, that protection needs to be removed.
+// Route: /landing  (move into /src/app/page.tsx if you want it as the home page)
 // =============================================================================
 
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-white font-sans text-slate-900">
 
-      {/* ─────────────── TOP NAV ─────────────── */}
-      <nav className="max-w-7xl mx-auto flex items-center justify-between px-6 py-4">
-        <Link href="/" className="flex items-center gap-2">
-          <BrandMark />
-          <span className="font-extrabold text-base tracking-tight">
-            Control<span className="text-blue-600">Lens</span>
-          </span>
-        </Link>
-        <div className="flex gap-6 items-center text-sm text-slate-600">
-          <a href="#features" className="hover:text-slate-900 hidden md:inline">Features</a>
-          <a href="#pricing" className="hover:text-slate-900 hidden md:inline">Pricing</a>
-          <a href="#customers" className="hover:text-slate-900 hidden md:inline">Customers</a>
-          <Link href="/login" className="font-medium text-slate-900 hover:text-blue-600">
-            Sign in
+      {/* ─────────────── 1. TOP NAV ─────────────── */}
+      <nav className="border-b border-slate-100 sticky top-0 bg-white/95 backdrop-blur-sm z-50">
+        <div className="max-w-7xl mx-auto flex items-center justify-between px-6 py-4">
+          <Link href="/" className="flex items-center gap-2">
+            <BrandMark />
+            <span className="font-extrabold text-base tracking-tight">
+              Control<span className="text-blue-600">Lens</span>
+            </span>
           </Link>
+          <div className="flex gap-6 items-center text-sm text-slate-600">
+            <a href="#how" className="hover:text-slate-900 hidden md:inline">How it works</a>
+            <a href="#features" className="hover:text-slate-900 hidden md:inline">Features</a>
+            <a href="#pricing" className="hover:text-slate-900 hidden md:inline">Pricing</a>
+            <Link href="/login" className="font-medium text-slate-900 hover:text-blue-600">
+              Sign in
+            </Link>
+            <Link href="/login" className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md font-semibold text-xs transition-colors hidden md:inline-block">
+              Try Free
+            </Link>
+          </div>
         </div>
       </nav>
 
-      {/* ─────────────── HERO ─────────────── */}
-      <section className="max-w-3xl mx-auto text-center px-4 pt-8 pb-10">
-        <div className="inline-block bg-blue-50 text-blue-900 text-xs px-3 py-1 rounded-full font-semibold mb-5">
+      {/* ─────────────── 2. HERO ─────────────── */}
+      <section className="max-w-4xl mx-auto text-center px-4 pt-16 pb-8">
+        <div className="inline-block bg-blue-50 text-blue-900 text-xs px-3 py-1 rounded-full font-semibold mb-6">
           Built for federal, state, and local construction PMs
         </div>
-        <h1 className="text-4xl md:text-5xl font-medium tracking-tight leading-tight mb-4">
-          Construction schedule intelligence — instantly.
+        <h1 className="text-4xl md:text-6xl font-medium tracking-tight leading-tight mb-5">
+          Read your schedule like a <br className="hidden md:block"/>
+          <span className="text-blue-600">20-year scheduler</span> would.
         </h1>
-        <p className="text-base text-slate-600 leading-relaxed mb-7 max-w-xl mx-auto">
-          Upload your P6 XER files. Get instant schedule analysis, risk detection, and TIA-ready insights. The 3-day workflow done in 30 seconds.
+        <p className="text-lg text-slate-600 leading-relaxed mb-8 max-w-2xl mx-auto">
+          Upload your Primavera P6 XER file. ControlLens finds your critical path drivers, logic violations, long lead risks, and delay evidence — in 30 seconds. No training. No setup.
         </p>
-        <div className="flex gap-3 justify-center flex-wrap">
+        <div className="flex gap-3 justify-center flex-wrap mb-3">
           <Link
-            href="/signup"
-            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold text-sm transition-colors"
+            href="/login"
+            className="bg-blue-600 hover:bg-blue-700 text-white px-7 py-3.5 rounded-lg font-semibold text-base transition-colors shadow-lg shadow-blue-200"
           >
-            Try it free
+            Try It Free — Upload Your XER
           </Link>
           <a
-            href="#preview"
-            className="border border-slate-300 hover:bg-slate-50 text-slate-900 px-6 py-3 rounded-lg font-semibold text-sm transition-colors"
+            href="#how"
+            className="border border-slate-300 hover:bg-slate-50 text-slate-900 px-7 py-3.5 rounded-lg font-semibold text-base transition-colors"
           >
-            See how it works
+            See how it works →
           </a>
         </div>
-        <div className="text-xs text-slate-400 mt-4">
-          No credit card · Full features for 14 days · Cancel anytime
+        <div className="text-sm text-slate-500 mt-2">
+          No credit card. No commitment. Drop in a schedule and see for yourself.
         </div>
       </section>
 
-      {/* ─────────────── DASHBOARD PREVIEW ─────────────── */}
-      <section id="preview" className="max-w-7xl mx-auto px-4 pb-16">
+      {/* ─────────────── 3. DASHBOARD PREVIEW ─────────────── */}
+      <section className="max-w-6xl mx-auto px-4 pb-20">
         <div className="bg-slate-900 rounded-2xl p-2 shadow-2xl">
 
           {/* Browser-frame top bar */}
@@ -84,145 +86,251 @@ export default function LandingPage() {
             <div className="w-2.5 h-2.5 rounded-full bg-red-400"/>
             <div className="w-2.5 h-2.5 rounded-full bg-yellow-400"/>
             <div className="w-2.5 h-2.5 rounded-full bg-green-400"/>
-            <div className="flex-1 ml-2 bg-white/10 text-white/50 text-xs px-3 py-1 rounded font-mono">
-              app.control-lens.com/dashboard
+            <div className="flex-1 ml-2 bg-white/10 text-white/50 text-xs px-3 py-1 rounded font-mono truncate">
+              app.control-lens.com/dashboard/upload
             </div>
           </div>
 
-          {/* App shell: sidebar + main */}
-          <div className="grid grid-cols-[180px_1fr] md:grid-cols-[210px_1fr] bg-slate-900 rounded-lg overflow-hidden min-h-[460px]">
+          {/* Dashboard content */}
+          <div className="bg-slate-50 rounded-lg p-5 md:p-7">
 
-            {/* Sidebar */}
-            <aside className="bg-slate-900 p-2 text-white text-xs border-r border-white/10">
-              {/* Brand */}
-              <div className="flex items-center gap-1.5 px-1.5 py-2 border-b border-white/5">
-                <BrandMark size="sm" />
-                <span className="font-semibold text-xs">
-                  Control<span className="text-blue-400">Lens</span>
-                </span>
-              </div>
-              {/* Workspace */}
-              <div className="px-2 py-2 border-b border-white/5">
-                <div className="text-white/30 text-[8px] uppercase tracking-widest">Workspace</div>
-                <div className="font-medium text-[10px] mt-0.5 leading-tight">Eastline Construction Group</div>
-              </div>
-              {/* User */}
-              <div className="flex items-center gap-2 px-2 py-2 border-b border-white/5">
-                <div className="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center text-[8px] font-semibold">MA</div>
-                <div className="leading-tight">
-                  <div className="font-semibold text-[10px]">Mike Anderson</div>
-                  <div className="text-white/40 text-[8px]">Admin</div>
-                </div>
-              </div>
-              {/* Search */}
-              <div className="px-2 py-2 border-b border-white/5">
-                <div className="bg-white/5 border border-white/10 px-2 py-1 rounded text-[9px] text-white/40 flex items-center gap-1">
-                  <span>🔍</span><span>Search projects</span>
-                </div>
-              </div>
-              {/* Projects */}
-              <div className="py-2 space-y-0.5">
-                <SidebarProject name="Fairfax HS Renovation" code="FCPS-2024-127" condition="green" badge="ACTIVE" badgeColor="green" versions={3} active expanded />
-                <div className="ml-4 pl-2 border-l border-white/10 py-0.5 space-y-0.5">
-                  <div className="flex gap-1 py-0.5 text-[9px] bg-blue-600/20 border-l-2 border-blue-400 -ml-2 pl-1.5 rounded-r">
-                    <span className="text-blue-400">✓</span>
-                    <div>
-                      <div className="font-medium">CU-06</div>
-                      <div className="text-white/40 text-[7px]">Apr 28</div>
-                    </div>
-                  </div>
-                  <div className="py-0.5 text-[9px] text-white/50">CU-05 · Mar 31</div>
-                  <div className="py-0.5 text-[9px] text-white/50">Baseline · Feb 14</div>
-                </div>
-                <SidebarProject name="NYC Parks Restoration" code="NYCDDC-24-087" condition="amber" badge="ON HOLD" badgeColor="amber" versions={2} />
-                <SidebarProject name="Federal Courthouse P2" code="GSA-FC-2026" condition="red" badge="ACTIVE" badgeColor="green" versions={5} />
-                <SidebarProject name="State Highway Bridge" code="VDOT-BR-1184" condition="green" badge="ACTIVE" badgeColor="green" versions={4} />
-                <div className="px-2 py-1.5 mt-1.5 text-blue-400 text-[10px] font-medium">+ New project</div>
-              </div>
-            </aside>
+            {/* 5-stat row */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+              <StatTile label="Total Activities" value="550" sub="799 relationships" />
+              <StatTile label="Complete" value="222" sub="40% of schedule" tone="emerald" />
+              <StatTile label="In Progress" value="63" sub="11% active" tone="blue" />
+              <StatTile label="Negative Float" value="319" sub="58% of all" tone="red" />
+              <StatTile label="Out-of-Sequence" value="57" sub="Logic violations" tone="red" />
+            </div>
 
-            {/* Main pane: Schedule Analysis */}
-            <div className="bg-slate-50 p-3 md:p-4">
-              {/* Title row */}
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <div className="font-semibold text-sm text-slate-900">Schedule Analysis · Fairfax HS Renovation</div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">CU-06 · Data date Apr 28, 2026 · Fairfax County Public Schools</div>
+            {/* Recovery Required banner */}
+            <div className="bg-red-50 border-2 border-red-200 rounded-xl p-5 flex items-start gap-4">
+              <div className="text-3xl flex-shrink-0">🔴</div>
+              <div className="flex-1">
+                <div className="font-bold text-red-900 text-base md:text-lg mb-1.5">
+                  Recovery Required — 133 days behind contract completion
                 </div>
-                <div className="flex gap-1.5 flex-shrink-0">
-                  <span className="bg-emerald-100 text-emerald-800 text-[9px] font-semibold px-2 py-1 rounded">● Stable</span>
-                  <span className="bg-white border border-slate-200 text-slate-700 text-[9px] font-semibold px-2 py-1 rounded">⬇ Export</span>
+                <div className="text-sm text-red-800 leading-relaxed">
+                  Critical path driven by MEP procurement: thermal expansion tank, insulation, and hydronic air control unit not yet ordered. Switchgear fabrication at <span className="font-mono font-semibold">−5 days float</span>.
                 </div>
               </div>
-
-              {/* KPI tiles */}
-              <div className="grid grid-cols-4 gap-2 mb-3">
-                <KPI label="Completion" value="67.3%" sub="▲ +4.2 vs CU-05" subColor="text-emerald-600"/>
-                <KPI label="Critical Path" value="142 d" sub="▼ −8 days lost" subColor="text-red-600"/>
-                <KPI label="Float Erosion" value="−18 d" sub="Monitor closely" subColor="text-amber-600"/>
-                <KPI label="Open RFIs" value="3" sub="2 high priority" subColor="text-slate-500"/>
-              </div>
-
-              {/* Float Trend chart */}
-              <div className="bg-white border border-slate-200 rounded-md p-2.5 mb-2.5">
-                <div className="flex justify-between items-center mb-2">
-                  <div>
-                    <div className="font-semibold text-[11px] text-slate-900">Float Trend by Version</div>
-                  </div>
-                  <div className="flex gap-2 text-[9px] text-slate-500">
-                    <span className="flex items-center gap-1"><span className="w-2 h-2 bg-blue-600 rounded-sm inline-block"/>Total Float</span>
-                    <span className="flex items-center gap-1"><span className="w-2 h-2 bg-red-600 rounded-sm inline-block"/>Critical Float</span>
-                  </div>
-                </div>
-                <svg viewBox="0 0 480 110" className="w-full h-24">
-                  <line x1="20" y1="100" x2="475" y2="100" stroke="#cbd5e1" strokeWidth="0.5"/>
-                  <line x1="20" y1="70" x2="475" y2="70" stroke="#e2e8f0" strokeWidth="0.5" strokeDasharray="2"/>
-                  <line x1="20" y1="40" x2="475" y2="40" stroke="#e2e8f0" strokeWidth="0.5" strokeDasharray="2"/>
-                  <line x1="20" y1="15" x2="475" y2="15" stroke="#e2e8f0" strokeWidth="0.5" strokeDasharray="2"/>
-                  <text x="14" y="103" fontSize="7" fill="#94a3b8" textAnchor="end">0</text>
-                  <text x="14" y="73" fontSize="7" fill="#94a3b8" textAnchor="end">15</text>
-                  <text x="14" y="43" fontSize="7" fill="#94a3b8" textAnchor="end">30</text>
-                  <text x="14" y="18" fontSize="7" fill="#94a3b8" textAnchor="end">45</text>
-                  <polyline points="40,25 110,32 180,38 250,50 320,58 390,68" fill="none" stroke="#2563eb" strokeWidth="2"/>
-                  {[[40,25],[110,32],[180,38],[250,50],[320,58],[390,68]].map(([x,y],i)=>
-                    <circle key={i} cx={x} cy={y} r="3" fill="#2563eb"/>
-                  )}
-                  <polyline points="40,75 110,72 180,80 250,85 320,82 390,90" fill="none" stroke="#dc2626" strokeWidth="2"/>
-                  {[[40,75],[110,72],[180,80],[250,85],[320,82],[390,90]].map(([x,y],i)=>
-                    <circle key={i} cx={x} cy={y} r="3" fill="#dc2626"/>
-                  )}
-                  {['Baseline','CU-01','CU-02','CU-03','CU-04','CU-06'].map((label, i) =>
-                    <text key={label} x={40 + i * 70} y="108" fontSize="7" fill="#64748b" textAnchor="middle">{label}</text>
-                  )}
-                </svg>
-              </div>
-
-              {/* Key Findings */}
-              <div className="bg-sky-50 border border-sky-200 rounded-md p-2.5 flex gap-2">
-                <div className="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0">
-                  <span className="text-white text-[10px]">📊</span>
-                </div>
-                <div className="flex-1">
-                  <div className="font-semibold text-[10px] text-sky-900 mb-0.5">Key Findings · CU-06 vs Baseline</div>
-                  <div className="text-[10px] text-sky-800 leading-relaxed">
-                    Schedule remains <strong>stable</strong> with 18 days of float erosion since baseline. Activity A1240 (Site Concrete Pour Phase 3) is on critical path with weather sensitivity — recommend monitoring 3-day forecast window. No recovery action required at this time.
-                  </div>
-                </div>
+              <div className="flex-shrink-0 text-center">
+                <div className="text-4xl md:text-5xl font-bold text-red-700 leading-none">28<span className="text-2xl text-red-500">/100</span></div>
+                <div className="text-[10px] uppercase tracking-widest text-red-600 mt-1 font-semibold">Health Score</div>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* ─────────────── SOCIAL PROOF ─────────────── */}
-      <section id="customers" className="text-center pb-16 px-4">
-        <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">
-          Built for the workflow used by construction PMs across federal, state, and local government
-        </div>
-        <div className="text-sm text-slate-600 font-semibold tracking-wide">
-          USACE · NAVFAC · GSA · VA · State DOTs · County Governments
+      {/* ─────────────── 4. UPLOAD. ANALYZE. ACT. ─────────────── */}
+      <section id="how" className="bg-slate-50 py-20 px-4">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl md:text-4xl font-medium tracking-tight mb-3">Upload. Analyze. Act.</h2>
+            <p className="text-base text-slate-600 max-w-2xl mx-auto">
+              No training required. No complicated setup. Just upload your XER and ControlLens does the hard work.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <StepCard
+              icon="📁"
+              step="STEP 01"
+              title="Upload your XER"
+              description="Drag and drop your Primavera P6 schedule. ControlLens parses 500+ activities and 800+ relationships in seconds."
+            />
+            <StepCard
+              icon="🔍"
+              step="STEP 02"
+              title="See what matters"
+              description="Critical path drivers, logic check, long lead items, no-tie activities, field reality — all in 7 organized tabs."
+            />
+            <StepCard
+              icon="📄"
+              step="STEP 03"
+              title="Generate the report"
+              description="Print, save as PDF, or for TIA work — compare two schedules and generate a full Word document."
+            />
+          </div>
         </div>
       </section>
+
+      {/* ─────────────── 5. FEATURES ─────────────── */}
+      <section id="features" className="py-20 px-4">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl md:text-4xl font-medium tracking-tight mb-3">
+              Built for PMs and schedulers who do real work.
+            </h2>
+            <p className="text-base text-slate-600 max-w-2xl mx-auto">
+              Every feature designed from 18 years of construction PM experience on federal and commercial projects.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            <FeatureCard
+              icon="🎯"
+              title="Critical Path Analysis"
+              description="See exactly what is driving project completion. ControlLens identifies driving activities, float condition, and where the path can break."
+            />
+            <FeatureCard
+              icon="🔧"
+              title="Schedule Logic Check"
+              description="Catches out-of-sequence work, fabricated-before-approval procurement, and review-before-submit violations. TIA evidence ready."
+            />
+            <FeatureCard
+              icon="📦"
+              title="Long Lead Item Tracker"
+              description="Every 20+ day procurement item, sorted by float. Know which vendor calls to make today vs which can wait until next week."
+            />
+            <FeatureCard
+              icon="⛓️"
+              title="No Logic Ties Detection"
+              description="Finds activities missing predecessors or successors — the schedule quality issues that hide real risk."
+            />
+            <FeatureCard
+              icon="👷"
+              title="Field Reality Check"
+              description="Compares in-progress activities against expected sequencing. Flags drywall going up before inspections, painting before drywall is closed."
+            />
+            <FeatureCard
+              icon="📑"
+              title="TIA Comparison & Word Report"
+              description="Upload two schedules — un-impacted and impacted. ControlLens detects fragnets, runs trend analysis, and generates a full TIA Word document ready for owner submission."
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* ─────────────── 6. PERSONAS ─────────────── */}
+      <section className="bg-slate-50 py-20 px-4">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl md:text-4xl font-medium tracking-tight mb-3">
+              Made for the people who carry the schedule.
+            </h2>
+            <p className="text-base text-slate-600 max-w-2xl mx-auto">
+              If you spend your day in P6, defending dates, or writing TIAs — this was built for you.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <PersonaCard
+              icon="🏗️"
+              title="Project Managers"
+              description="PMP-level analysis without learning new tools"
+            />
+            <PersonaCard
+              icon="📅"
+              title="Schedulers"
+              description="Logic check and fragnet detection in 30 seconds"
+            />
+            <PersonaCard
+              icon="⚖️"
+              title="Claims Consultants"
+              description="TIA comparison + Word report drafting"
+            />
+            <PersonaCard
+              icon="🏛️"
+              title="Federal Contractors"
+              description="USACE / DGS / GSA scheduling workflows"
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* ─────────────── 7. PRICING ─────────────── */}
+      <section id="pricing" className="py-20 px-4">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl md:text-4xl font-medium tracking-tight mb-3">Simple pricing</h2>
+            <p className="text-base text-slate-600 max-w-2xl mx-auto">
+              Start free. Upgrade when you need TIA.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-5xl mx-auto">
+            <PriceCard
+              tier="Free"
+              price="$0"
+              priceSub="forever"
+              features={[
+                '1 active project',
+                'XER upload & analysis',
+                '7-tab analysis',
+                'Print / Save PDF',
+              ]}
+              ctaText="Start Free"
+              ctaHref="/login"
+            />
+            <PriceCard
+              tier="ControlLens"
+              price="$49"
+              priceSub="/month"
+              features={[
+                '5 active projects',
+                'Full Analysis',
+                'Operational narrative',
+                'Project history & saves',
+                'Email support',
+              ]}
+              ctaText="Start 14-day Trial"
+              ctaHref="/login"
+              featured
+            />
+            <PriceCard
+              tier="ControlLens Plus"
+              price="$199"
+              priceSub="/month"
+              features={[
+                'Unlimited projects',
+                'TIA Comparison Engine',
+                'Fragnet detection & Word report',
+                'Multi-user team access',
+                'Priority support',
+              ]}
+              ctaText="Start Plus Trial"
+              ctaHref="/login"
+            />
+          </div>
+          <div className="text-center text-sm text-slate-500 mt-8 max-w-2xl mx-auto">
+            All plans include unlimited XER uploads and full schedule analysis. TIA features and Word report generation only in Plus.
+          </div>
+        </div>
+      </section>
+
+      {/* ─────────────── 8. FINAL CTA ─────────────── */}
+      <section className="bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 py-20 px-4 text-center">
+        <div className="max-w-3xl mx-auto">
+          <h2 className="text-3xl md:text-4xl font-medium tracking-tight text-white mb-3">
+            See your schedule clearly.
+          </h2>
+          <p className="text-base text-blue-100 mb-8">
+            Upload your XER. Get the analysis. Make the call. All in 30 seconds.
+          </p>
+          <Link
+            href="/login"
+            className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-lg font-semibold text-base transition-colors shadow-2xl"
+          >
+            Try ControlLens Free →
+          </Link>
+          <div className="text-xs text-blue-200/70 mt-4">No credit card required.</div>
+        </div>
+      </section>
+
+      {/* ─────────────── 9. FOOTER ─────────────── */}
+      <footer className="bg-slate-900 text-slate-300 py-12 px-4 border-t border-slate-800">
+        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <BrandMark />
+            <div>
+              <div className="font-bold text-white">ControlLens</div>
+              <div className="text-xs text-slate-400">Visibility. Insight. Control.</div>
+            </div>
+          </div>
+          <div className="text-xs text-slate-400 text-center md:text-right">
+            <div>© 2026 ControlLens. All rights reserved.</div>
+            <div className="mt-1">Built by Nobel Project Management Services</div>
+          </div>
+        </div>
+      </footer>
 
     </div>
   )
@@ -232,11 +340,9 @@ export default function LandingPage() {
 // Sub-components
 // =============================================================================
 
-function BrandMark({ size = 'md' }: { size?: 'sm' | 'md' }) {
-  const w = size === 'sm' ? 16 : 28
-  const h = size === 'sm' ? 11 : 20
+function BrandMark() {
   return (
-    <svg width={w} height={h} viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" aria-label="ControlLens mark">
+    <svg width="28" height="20" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" aria-label="ControlLens mark">
       <rect x="0" y="0" width="32" height="5" rx="1" fill="#2563eb"/>
       <rect x="0" y="9" width="44" height="5" rx="1" fill="#dc2626"/>
       <rect x="0" y="18" width="26" height="5" rx="1" fill="#16a34a"/>
@@ -245,43 +351,100 @@ function BrandMark({ size = 'md' }: { size?: 'sm' | 'md' }) {
   )
 }
 
-function KPI({ label, value, sub, subColor }: { label: string; value: string; sub: string; subColor: string }) {
+function StatTile({
+  label, value, sub, tone = 'slate',
+}: {
+  label: string; value: string; sub: string; tone?: 'slate' | 'emerald' | 'blue' | 'red'
+}) {
+  const valueColor =
+    tone === 'red' ? 'text-red-600' :
+    tone === 'emerald' ? 'text-emerald-600' :
+    tone === 'blue' ? 'text-blue-600' :
+    'text-slate-900'
+  const borderColor =
+    tone === 'red' ? 'border-red-200' :
+    'border-slate-200'
   return (
-    <div className="bg-white border border-slate-200 rounded-md p-2">
-      <div className="text-[8px] text-slate-500 uppercase tracking-wider font-semibold">{label}</div>
-      <div className="text-lg font-bold text-slate-900 mt-0.5">{value}</div>
-      <div className={`text-[8px] mt-0.5 ${subColor}`}>{sub}</div>
+    <div className={`bg-white border ${borderColor} rounded-lg p-3 shadow-sm`}>
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">{label}</div>
+      <div className={`text-3xl font-bold mt-1 ${valueColor}`}>{value}</div>
+      <div className="text-[10px] text-slate-500 mt-1">{sub}</div>
     </div>
   )
 }
 
-function SidebarProject({
-  name, code, condition, badge, badgeColor, versions, active, expanded,
-}: {
-  name: string
-  code: string
-  condition: 'green' | 'amber' | 'red'
-  badge: string
-  badgeColor: 'green' | 'amber'
-  versions: number
-  active?: boolean
-  expanded?: boolean
-}) {
-  const dotColor = condition === 'green' ? 'bg-emerald-400'
-    : condition === 'amber' ? 'bg-amber-400'
-    : 'bg-red-400'
-  const badgeBg = badgeColor === 'green' ? 'bg-emerald-500/25 text-emerald-300'
-    : 'bg-amber-500/25 text-amber-300'
+function StepCard({ icon, step, title, description }: { icon: string; step: string; title: string; description: string }) {
   return (
-    <div className={`flex items-center gap-1.5 px-1.5 py-1.5 rounded ${active ? 'bg-white/5' : ''}`}>
-      <span className="text-[8px] text-white/40 w-2">{expanded ? '▾' : '▸'}</span>
-      <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`}></span>
-      <div className="flex-1 min-w-0 leading-tight">
-        <div className="font-medium text-[10px] truncate">{name}</div>
-        <div className="text-white/40 text-[7px] font-mono">{code}</div>
+    <div className="bg-white border border-slate-200 rounded-xl p-6 hover:shadow-lg transition-shadow">
+      <div className="text-4xl mb-4">{icon}</div>
+      <div className="text-[10px] uppercase tracking-widest text-blue-600 font-bold mb-2">{step}</div>
+      <h3 className="text-xl font-semibold mb-2">{title}</h3>
+      <p className="text-sm text-slate-600 leading-relaxed">{description}</p>
+    </div>
+  )
+}
+
+function FeatureCard({ icon, title, description }: { icon: string; title: string; description: string }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-6 hover:border-blue-300 hover:shadow-md transition-all">
+      <div className="text-3xl mb-3">{icon}</div>
+      <h3 className="text-lg font-semibold mb-2">{title}</h3>
+      <p className="text-sm text-slate-600 leading-relaxed">{description}</p>
+    </div>
+  )
+}
+
+function PersonaCard({ icon, title, description }: { icon: string; title: string; description: string }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 text-center hover:shadow-md transition-shadow">
+      <div className="text-3xl mb-3">{icon}</div>
+      <h3 className="text-sm font-semibold mb-1.5">{title}</h3>
+      <p className="text-xs text-slate-600 leading-relaxed">{description}</p>
+    </div>
+  )
+}
+
+function PriceCard({
+  tier, price, priceSub, features, ctaText, ctaHref, featured,
+}: {
+  tier: string
+  price: string
+  priceSub: string
+  features: string[]
+  ctaText: string
+  ctaHref: string
+  featured?: boolean
+}) {
+  return (
+    <div className={`relative bg-white border-2 rounded-xl p-6 flex flex-col ${featured ? 'border-blue-500 shadow-xl shadow-blue-100' : 'border-slate-200'}`}>
+      {featured && (
+        <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full">
+          Most Popular
+        </div>
+      )}
+      <div className="text-lg font-semibold mb-2">{tier}</div>
+      <div className="flex items-baseline gap-1 mb-5">
+        <div className="text-4xl font-bold">{price}</div>
+        <div className="text-sm text-slate-500">{priceSub}</div>
       </div>
-      <span className={`${badgeBg} text-[7px] font-semibold px-1.5 py-px rounded-full uppercase tracking-wide`}>{badge}</span>
-      <span className="text-white/50 text-[8px]">{versions}</span>
+      <ul className="space-y-2.5 mb-6 flex-1">
+        {features.map((f, i) => (
+          <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+            <span className="text-emerald-600 font-bold flex-shrink-0">✓</span>
+            <span>{f}</span>
+          </li>
+        ))}
+      </ul>
+      <Link
+        href={ctaHref}
+        className={`block text-center px-4 py-3 rounded-lg font-semibold text-sm transition-colors ${
+          featured
+            ? 'bg-blue-600 hover:bg-blue-700 text-white'
+            : 'bg-slate-100 hover:bg-slate-200 text-slate-900'
+        }`}
+      >
+        {ctaText}
+      </Link>
     </div>
   )
 }
