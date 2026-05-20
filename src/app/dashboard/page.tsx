@@ -110,6 +110,17 @@ function ExecutiveDashboardInner() {
     )
   }
 
+  // Delegate to DashboardContent so its hooks (useMemo) only run when project/version exist.
+  // This avoids React error #310 ("rendered more hooks than during the previous render")
+  // which happens when hooks are conditionally called past an early return.
+  return <DashboardContent project={project} version={version} />
+}
+
+// =============================================================================
+// DashboardContent — only renders when project + version are loaded.
+// All hooks here run on EVERY render of this component (no conditional hooks).
+// =============================================================================
+function DashboardContent({ project, version }: { project: Project; version: ScheduleVersion }) {
   const a = version.analysis || {}
 
   // --------- safe field reads (all optional, sensible fallbacks) ----------
