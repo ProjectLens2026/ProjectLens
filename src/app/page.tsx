@@ -77,7 +77,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ─────────────── 3. DASHBOARD PREVIEW ─────────────── */}
+      {/* ─────────────── 3. DASHBOARD PREVIEW (full Executive Dashboard) ─────────────── */}
       <section className="max-w-6xl mx-auto px-4 pb-20">
         <div className="bg-slate-900 rounded-2xl p-2 shadow-2xl">
 
@@ -87,38 +87,95 @@ export default function LandingPage() {
             <div className="w-2.5 h-2.5 rounded-full bg-yellow-400"/>
             <div className="w-2.5 h-2.5 rounded-full bg-green-400"/>
             <div className="flex-1 ml-2 bg-white/10 text-white/50 text-xs px-3 py-1 rounded font-mono truncate">
-              app.control-lens.com/dashboard/upload
+              app.control-lens.com/dashboard
             </div>
           </div>
 
           {/* Dashboard content */}
-          <div className="bg-slate-50 rounded-lg p-5 md:p-7">
+          <div className="bg-slate-50 rounded-lg p-4 md:p-5 space-y-3">
 
-            {/* 5-stat row */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
-              <StatTile label="Total Activities" value="550" sub="799 relationships" />
-              <StatTile label="Complete" value="222" sub="40% of schedule" tone="emerald" />
-              <StatTile label="In Progress" value="63" sub="11% active" tone="blue" />
-              <StatTile label="Negative Float" value="319" sub="58% of all" tone="red" />
-              <StatTile label="Out-of-Sequence" value="57" sub="Logic violations" tone="red" />
+            {/* Header */}
+            <div className="bg-white border-b border-slate-200 px-4 py-2.5 -mx-4 -mt-4 md:-mx-5 md:-mt-5 mb-1 flex items-center justify-between">
+              <div>
+                <span className="font-bold text-slate-900 text-sm">Executive Dashboard</span>
+                <span className="text-slate-400 text-xs ml-2 hidden md:inline">· Federal Building Renovation · CL-2024-FBR-127</span>
+              </div>
+              <div className="flex gap-1.5">
+                <span className="bg-blue-600 text-white text-[10px] font-semibold px-2.5 py-1 rounded">🔍 Full Analysis</span>
+              </div>
             </div>
 
-            {/* Recovery Required banner */}
-            <div className="bg-red-50 border-2 border-red-200 rounded-xl p-5 flex items-start gap-4">
-              <div className="text-3xl flex-shrink-0">🔴</div>
+            {/* Health Banner */}
+            <div className="bg-red-50 border-2 border-red-200 rounded-xl p-3 flex items-center gap-3">
+              <div className="text-2xl flex-shrink-0">⚠</div>
               <div className="flex-1">
-                <div className="font-bold text-red-900 text-base md:text-lg mb-1.5">
-                  Recovery Required — 133 days behind contract completion
-                </div>
-                <div className="text-sm text-red-800 leading-relaxed">
-                  Critical path driven by MEP procurement: thermal expansion tank, insulation, and hydronic air control unit not yet ordered. Switchgear fabrication at <span className="font-mono font-semibold">−5 days float</span>.
-                </div>
-              </div>
-              <div className="flex-shrink-0 text-center">
-                <div className="text-4xl md:text-5xl font-bold text-red-700 leading-none">28<span className="text-2xl text-red-500">/100</span></div>
-                <div className="text-[10px] uppercase tracking-widest text-red-600 mt-1 font-semibold">Health Score</div>
+                <div className="font-bold text-red-900 text-sm">Recovery Required · Health 28/100</div>
+                <div className="text-xs text-red-800 mt-0.5">Critical path driven by MEP procurement: thermal expansion tank, insulation, and hydronic air control unit not yet ordered. Switchgear fabrication at −5 days float.</div>
               </div>
             </div>
+
+            {/* Key Dates row */}
+            <div className="bg-white border border-slate-200 rounded-xl p-3">
+              <div className="text-xs font-semibold text-slate-800 mb-2">Key Dates &amp; Durations</div>
+              <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+                <DateMini label="Data Date" value="05/15/2024" />
+                <DateMini label="Project Start" value="07/01/2024" sub="NTP" />
+                <DateMini label="Subst. Completion" value="11/15/2024" sub="MILE-195" />
+                <DateMini label="Final Completion" value="11/30/2024" sub="MILE-200" />
+                <DateMini label="Contract End" value="11/30/2024" valueColor="text-red-600" />
+                <DateMini label="Projected End" value="04/10/2025" valueColor="text-amber-600" />
+              </div>
+            </div>
+
+            {/* KPI tiles */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <KPIMini label="Days Behind" value="+133" sub="↓ TIA territory" valueColor="text-red-600"/>
+              <KPIMini label="Work Complete" value="40%" sub="222 of 550 activities" valueColor="text-slate-900"/>
+              <KPIMini label="Long Lead at Risk" value="3" sub="of 6 long lead" valueColor="text-red-600"/>
+              <KPIMini label="Risks Detected" value="7" sub="4 critical" valueColor="text-red-600"/>
+            </div>
+
+            {/* Schedule Progress chart (the centerpiece) */}
+            <div className="bg-white border border-slate-200 rounded-xl p-3">
+              <div className="flex items-start justify-between mb-2">
+                <div>
+                  <div className="text-xs font-semibold text-slate-800">Schedule Progress</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">Planned vs Actual completion · Contract end <span className="text-red-600 font-semibold">11/30/2024</span> · Projected <span className="text-amber-600 font-semibold">04/10/2025 (+133d)</span></div>
+                </div>
+                <div className="flex gap-2 text-[9px] text-slate-500">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 bg-blue-600 rounded-sm inline-block"/>Planned</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 bg-emerald-600 rounded-sm inline-block"/>Actual</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 bg-amber-400 rounded-sm inline-block"/>Forecast</span>
+                </div>
+              </div>
+
+              {/* The chart itself */}
+              <ScheduleProgressMockChart/>
+
+              {/* Insight cells below chart */}
+              <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-100">
+                <div>
+                  <div className="text-[9px] text-slate-500">Behind plan by</div>
+                  <div className="text-xs font-semibold text-red-600 mt-0.5">−60.0 percentage pts</div>
+                </div>
+                <div>
+                  <div className="text-[9px] text-slate-500">Velocity (last 3 mo)</div>
+                  <div className="text-xs font-semibold text-slate-900 mt-0.5">~5.2% / month</div>
+                </div>
+                <div>
+                  <div className="text-[9px] text-slate-500">Required to hit contract</div>
+                  <div className="text-xs font-semibold text-red-600 mt-0.5">— (already past)</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Attention Areas (compact row) */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+              <AttentionMini icon="📅" title="Schedule Compression" desc="75 activities behind. Critical path in compression." impact="medium"/>
+              <AttentionMini icon="🔧" title="Out-of-Sequence Work" desc="57 logic violations. Schedule integrity issue." impact="high"/>
+              <AttentionMini icon="⚖️" title="TIA Territory" desc="133 days behind. Begin documenting delay events." impact="high"/>
+            </div>
+
           </div>
         </div>
       </section>
@@ -351,25 +408,111 @@ function BrandMark() {
   )
 }
 
-function StatTile({
-  label, value, sub, tone = 'slate',
-}: {
-  label: string; value: string; sub: string; tone?: 'slate' | 'emerald' | 'blue' | 'red'
-}) {
-  const valueColor =
-    tone === 'red' ? 'text-red-600' :
-    tone === 'emerald' ? 'text-emerald-600' :
-    tone === 'blue' ? 'text-blue-600' :
-    'text-slate-900'
-  const borderColor =
-    tone === 'red' ? 'border-red-200' :
-    'border-slate-200'
+function DateMini({ label, value, sub, valueColor = 'text-slate-900' }: { label: string; value: string; sub?: string; valueColor?: string }) {
   return (
-    <div className={`bg-white border ${borderColor} rounded-lg p-3 shadow-sm`}>
-      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">{label}</div>
-      <div className={`text-3xl font-bold mt-1 ${valueColor}`}>{value}</div>
-      <div className="text-[10px] text-slate-500 mt-1">{sub}</div>
+    <div>
+      <div className="text-[8px] uppercase tracking-wider text-slate-500 font-semibold">{label}</div>
+      <div className={`text-xs font-semibold mt-0.5 ${valueColor}`}>{value}</div>
+      {sub && <div className="text-[8px] text-slate-400 mt-0.5">{sub}</div>}
     </div>
+  )
+}
+
+function KPIMini({ label, value, sub, valueColor }: { label: string; value: string; sub: string; valueColor: string }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-2.5">
+      <div className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold">{label}</div>
+      <div className={`text-xl font-bold mt-0.5 ${valueColor}`}>{value}</div>
+      <div className="text-[9px] text-slate-500 mt-0.5">{sub}</div>
+    </div>
+  )
+}
+
+function AttentionMini({ icon, title, desc, impact }: { icon: string; title: string; desc: string; impact: 'high' | 'medium' }) {
+  const border = impact === 'high' ? 'border-red-200' : 'border-amber-200'
+  const pill = impact === 'high' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
+  return (
+    <div className={`bg-white border rounded-xl p-2.5 ${border}`}>
+      <div className="flex items-center gap-1.5 mb-1">
+        <span className="text-sm">{icon}</span>
+        <span className="font-semibold text-[11px] text-slate-900 flex-1">{title}</span>
+        <span className={`text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${pill}`}>{impact}</span>
+      </div>
+      <div className="text-[10px] text-slate-600 leading-snug">{desc}</div>
+    </div>
+  )
+}
+
+function ScheduleProgressMockChart() {
+  // Static SVG chart mirroring the real dashboard's Schedule Progress visual:
+  // 7 monthly buckets, planned (blue) vs actual (green / amber forecast),
+  // with Today / Contract End / Forecast End vertical markers.
+  const W = 700, H = 180
+  const padL = 36, padR = 16, padT = 18, padB = 38
+  const innerW = W - padL - padR
+  const innerH = H - padT - padB
+  // 7 buckets: May, Jul, Sep, Nov (contract end), Jan'25, Mar (today), Apr (forecast end)
+  // Heights: planned, actual (0-100)
+  const buckets = [
+    { label: 'May',  sub: "'24", planned: 14, actual: 5,  forecast: false, today: false },
+    { label: 'Jul',  sub: '',     planned: 38, actual: 18, forecast: false, today: false },
+    { label: 'Sep',  sub: '',     planned: 67, actual: 28, forecast: false, today: false },
+    { label: 'Nov',  sub: '',     planned: 100, actual: 36, forecast: false, today: false }, // contract end
+    { label: 'Jan',  sub: "'25",  planned: 100, actual: 40, forecast: false, today: true  }, // today
+    { label: 'Mar',  sub: '',     planned: 100, actual: 70, forecast: true,  today: false },
+    { label: 'Apr',  sub: '',     planned: 100, actual: 100, forecast: true, today: false }, // forecast end
+  ]
+  const todayIdx = 4
+  const contractIdx = 3
+  const forecastEndIdx = 6
+  const stepX = innerW / (buckets.length - 1)
+  const barW = 14
+  const groupW = barW * 2 + 4
+  const yFor = (p: number) => padT + innerH * (1 - p / 100)
+  const xCenter = (i: number) => padL + i * stepX
+  const xGroup = (i: number) => xCenter(i) - groupW / 2
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 220 }}>
+      {/* Gridlines */}
+      {[0, 25, 50, 75, 100].map(p => (
+        <g key={p}>
+          <line x1={padL} y1={yFor(p)} x2={W - padR} y2={yFor(p)} stroke="#e2e8f0" strokeWidth="0.5" strokeDasharray={p === 0 ? '0' : '2'}/>
+          <text x={padL - 6} y={yFor(p) + 3} fontSize="9" fill="#94a3b8" textAnchor="end">{p}%</text>
+        </g>
+      ))}
+      {/* Markers */}
+      <g>
+        <line x1={xCenter(todayIdx)} y1={padT} x2={xCenter(todayIdx)} y2={H - padB} stroke="#94a3b8" strokeWidth="0.5" strokeDasharray="2,2"/>
+        <text x={xCenter(todayIdx)} y={padT - 4} fontSize="8" fill="#94a3b8" textAnchor="middle">Today</text>
+      </g>
+      <g>
+        <line x1={xCenter(contractIdx)} y1={padT} x2={xCenter(contractIdx)} y2={H - padB} stroke="#dc2626" strokeWidth="1" strokeDasharray="3,2"/>
+        <text x={xCenter(contractIdx)} y={padT - 4} fontSize="9" fill="#dc2626" textAnchor="middle" fontWeight="600">Contract End</text>
+      </g>
+      <g>
+        <line x1={xCenter(forecastEndIdx)} y1={padT} x2={xCenter(forecastEndIdx)} y2={H - padB} stroke="#d97706" strokeWidth="1" strokeDasharray="3,2"/>
+        <text x={xCenter(forecastEndIdx)} y={padT - 4} fontSize="9" fill="#d97706" textAnchor="middle" fontWeight="600">Forecast End</text>
+      </g>
+      {/* Bars */}
+      {buckets.map((b, i) => {
+        const x = xGroup(i)
+        const plannedColor = b.forecast ? 'rgba(37, 99, 235, 0.3)' : '#2563eb'
+        const actualColor = b.forecast ? '#fbbf24' : '#16a34a'
+        const plannedY = yFor(b.planned)
+        const actualY = yFor(b.actual)
+        const plannedH = (H - padB) - plannedY
+        const actualH = (H - padB) - actualY
+        return (
+          <g key={i}>
+            <rect x={x} y={plannedY} width={barW} height={plannedH} fill={plannedColor}/>
+            <rect x={x + barW + 4} y={actualY} width={barW} height={actualH} fill={actualColor} opacity={b.forecast ? 0.85 : 1}/>
+            <text x={xCenter(i)} y={H - padB + 14} fontSize="9" fill={b.today ? '#0f172a' : '#64748b'} textAnchor="middle" fontWeight={b.today ? '600' : '400'}>{b.label}</text>
+            {b.sub && <text x={xCenter(i)} y={H - padB + 24} fontSize="8" fill="#94a3b8" textAnchor="middle">{b.sub}</text>}
+          </g>
+        )
+      })}
+    </svg>
   )
 }
 
