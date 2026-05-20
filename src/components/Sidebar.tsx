@@ -17,10 +17,6 @@ interface SidebarProps {
   user?: { name: string; role: string; initials: string; company: string }
 }
 
-// =============================================================================
-// DEMO MODE — pre-launch placeholder for showing the team UI to prospects.
-// When true, ignores the real signed-in user and shows Mike Anderson + Nobel PCS.
-// =============================================================================
 const DEMO_MODE = true
 const DEMO_USER = {
   name: 'Mike Anderson',
@@ -28,6 +24,7 @@ const DEMO_USER = {
   initials: 'MA',
   company: 'Nobel Project Control Services, LLC',
 }
+const DEMO_TEAM_MEMBER_COUNT = 4
 
 const STATUS_OPTIONS: ProjectStatus[] = ['Active', 'Completed', 'On Hold', 'Archived']
 
@@ -35,20 +32,16 @@ export default function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
 
-  // Core project/version state
   const [activeProject, setActiveProject] = useState<Project | null>(null)
   const [activeVersion, setActiveVersion] = useState<ScheduleVersion | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
 
-  // Tree UI state
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'active' | 'archived'>('active')
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(new Set())
 
-  // Action menu state
   const [openActionMenu, setOpenActionMenu] = useState<string | null>(null)
 
-  // Inline edit / delete / move state
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [editProjectIdField, setEditProjectIdField] = useState('')
@@ -59,7 +52,6 @@ export default function Sidebar({ user }: SidebarProps) {
   const displayUser = DEMO_MODE ? DEMO_USER : user
   const showTeamMode = !!displayUser?.company
 
-  // ====================== Effects ======================
   useEffect(() => {
     migrateLegacyData()
     refresh()
@@ -97,7 +89,6 @@ export default function Sidebar({ user }: SidebarProps) {
     router.push('/login')
   }
 
-  // ====================== Navigation helpers ======================
   function maybeNavigateToDashboard() {
     if (!pathname.startsWith('/dashboard') || pathname === '/dashboard/projects') {
       router.push('/dashboard')
@@ -131,7 +122,6 @@ export default function Sidebar({ user }: SidebarProps) {
     })
   }
 
-  // ====================== Rename / delete / move / status ======================
   function startRename(project: Project) {
     setEditingProjectId(project.id)
     setEditName(project.name)
@@ -169,25 +159,17 @@ export default function Sidebar({ user }: SidebarProps) {
     setProjectStatus(projectId, status)
     setOpenActionMenu(null)
     refresh()
-    // If user just archived a project from the Active tab, they probably want
-    // to stay on the Active tab. The list will refresh and that project disappears.
-    // If they want to see it again, they can flip to the Archived tab.
   }
 
-  // ====================== Counts + filtering ======================
   const activeCount = projects.filter(p => getProjectStatus(p) !== 'Archived').length
   const archivedCount = projects.filter(p => getProjectStatus(p) === 'Archived').length
 
-  // Filter logic: search ignores tab filter (so users can find archived projects
-  // via search without manually switching tabs). When not searching, respect tab.
   const filteredProjects = (() => {
     const q = searchQuery.trim().toLowerCase()
     let pool: Project[]
     if (q) {
-      // Searching → all projects regardless of status
       pool = projects
     } else {
-      // Not searching → apply tab filter
       pool = projects.filter(p => {
         const status = getProjectStatus(p)
         if (statusFilter === 'archived') return status === 'Archived'
@@ -210,7 +192,6 @@ export default function Sidebar({ user }: SidebarProps) {
     return expandedProjectIds.has(projectId)
   }
 
-  // ====================== Visual helpers ======================
   function getConditionDotColor(condition?: string): string {
     if (condition === 'Recovery Required') return 'bg-red-400'
     if (condition === 'Attention Needed') return 'bg-amber-400'
@@ -226,7 +207,6 @@ export default function Sidebar({ user }: SidebarProps) {
     } catch { return '' }
   }
 
-  // ====================== Views nav ======================
   const views = activeProject ? [
     { href: '/dashboard', icon: '⊞', label: 'Overview' },
     { href: '/dashboard/lens', icon: '🔍', label: 'Schedule Analysis' },
@@ -239,6 +219,9 @@ export default function Sidebar({ user }: SidebarProps) {
     { href: '/dashboard/trend', icon: '📈', label: 'Trend Analysis' },
     { href: '/dashboard/tia', icon: '📑', label: 'TIA Comparison' },
   ] : []
+
+  // Helper for highlighting settings tab nav
+  const isSettingsActive = pathname.startsWith('/dashboard/settings')
 
   return (
     <aside className="w-64 flex-shrink-0 flex flex-col h-full no-print" style={{ background: '#0d1b2e' }}>
@@ -294,7 +277,7 @@ export default function Sidebar({ user }: SidebarProps) {
         <span className="absolute left-5 top-1/2 -translate-y-1/2 text-white/40 text-[11px] pointer-events-none">🔍</span>
       </div>
 
-      {/* Filter tabs (Active / Archived) — hidden during search */}
+      {/* Filter tabs */}
       {!searchQuery.trim() && (
         <div className="flex gap-1 px-2.5 py-1.5 border-b border-white/5 flex-shrink-0">
           <button
@@ -365,7 +348,6 @@ export default function Sidebar({ user }: SidebarProps) {
 
           return (
             <div key={p.id} className="mb-0.5">
-              {/* INLINE RENAME FORM */}
               {isEditing ? (
                 <div className="bg-white/5 rounded-md p-2 mx-0.5">
                   <input
@@ -402,7 +384,6 @@ export default function Sidebar({ user }: SidebarProps) {
                   </div>
                 </div>
               ) : (
-                /* NORMAL PROJECT ROW */
                 <div
                   className={clsx(
                     'group flex items-center gap-1 px-1.5 py-1.5 rounded-md transition-colors',
@@ -428,7 +409,6 @@ export default function Sidebar({ user }: SidebarProps) {
                         'text-xs font-medium truncate',
                         isArchived ? 'text-white/45 italic' : isCompleted ? 'text-white/60' : 'text-white'
                       )}>{p.name}</span>
-                      {/* Status badges (only for On Hold and Completed; Active and Archived inferred from context) */}
                       {isOnHold && (
                         <span className="text-[8px] font-bold px-1.5 py-px rounded-full bg-amber-500/25 text-amber-300 uppercase tracking-wide flex-shrink-0">On Hold</span>
                       )}
@@ -444,7 +424,6 @@ export default function Sidebar({ user }: SidebarProps) {
                     )}
                   </div>
                   <span className="text-white/40 text-[9px] flex-shrink-0 font-mono">{p.versions.length}</span>
-                  {/* Three-dot menu */}
                   <div className="relative flex-shrink-0">
                     <button
                       onClick={(e) => {
@@ -503,7 +482,7 @@ export default function Sidebar({ user }: SidebarProps) {
                 </div>
               )}
 
-              {/* VERSIONS LIST */}
+              {/* VERSIONS */}
               {isExpanded && !isEditing && !isConfirmingDelete && p.versions.length > 0 && (
                 <div className="ml-5 pl-2 border-l border-white/5 py-0.5">
                   {[...p.versions]
@@ -632,7 +611,6 @@ export default function Sidebar({ user }: SidebarProps) {
           )
         })}
 
-        {/* + New project — only on Active tab (to avoid confusion when archived) */}
         {statusFilter === 'active' && !searchQuery && (
           <Link href="/dashboard/upload"
             className="flex items-center gap-1.5 px-2 py-2 mt-2 text-blue-400 hover:text-blue-300 hover:bg-white/5 rounded-md text-xs font-medium"
@@ -670,6 +648,47 @@ export default function Sidebar({ user }: SidebarProps) {
           </div>
         </div>
       )}
+
+      {/* ====================================================================== */}
+      {/* WORKSPACE NAV — Members / Invite / Settings (restored from earlier demo) */}
+      {/* ====================================================================== */}
+      <div className="border-t border-white/10 px-2 py-2 flex-shrink-0">
+        <div className="text-white/30 text-[9px] uppercase tracking-widest px-2 py-1">
+          Workspace
+        </div>
+        {showTeamMode && (
+          <>
+            <Link href="/dashboard/settings?tab=members"
+              className={clsx(
+                'flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2',
+                pathname === '/dashboard/settings'
+                  ? 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
+                  : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
+              )}>
+              <span className="text-sm w-4 text-center">👥</span>
+              <span className="flex-1">Members</span>
+              <span className="bg-white/10 text-white/60 text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                {DEMO_TEAM_MEMBER_COUNT}
+              </span>
+            </Link>
+            <Link href="/dashboard/settings?tab=invitations"
+              className="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2 text-slate-400 border-transparent hover:text-white hover:bg-white/5">
+              <span className="text-sm w-4 text-center">✉</span>
+              <span className="flex-1">Invite people</span>
+            </Link>
+          </>
+        )}
+        <Link href="/dashboard/settings"
+          className={clsx(
+            'flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2',
+            isSettingsActive
+              ? 'bg-blue-600/20 text-white border-blue-500'
+              : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
+          )}>
+          <span className="text-sm w-4 text-center">⚙</span>
+          <span className="flex-1">Settings</span>
+        </Link>
+      </div>
 
       {/* Sign out */}
       <div className="px-3 py-2.5 border-t border-white/10 flex-shrink-0">
