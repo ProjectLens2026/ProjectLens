@@ -447,8 +447,11 @@ function buildRows(projects: Project[]): ProjectRowData[] {
       }
 
       // Work complete — try many common field names from different analyzer
-      // outputs, then fall back to computing from completedActivities / totalActivities.
-      // undefined when no data at all — UI will show "—" instead of a misleading 0%.
+      // outputs, then fall back to computing from completedActivities / totalActivities,
+      // then finally fall back to TIME-BASED progress (how far along the project
+      // is on its timeline). Time-based isn't "real" work complete, but it gives
+      // the column something useful instead of empty when the analyzer doesn't
+      // emit a progress field.
       let workComplete: number | undefined = numOrUndef(
         a.workComplete ?? a.percentComplete ?? a.percent_complete ??
         a.physicalPercentComplete ?? a.physical_percent_complete ??
@@ -460,6 +463,24 @@ function buildRows(projects: Project[]): ProjectRowData[] {
       const totalActivities = num(a.totalActivities ?? a.total_activities ?? a.activityCount ?? a.activity_count, 0)
       if (workComplete === undefined && completedActivities !== undefined && totalActivities > 0) {
         workComplete = (completedActivities / totalActivities) * 100
+      }
+      // Time-based fallback — how far along is the project in elapsed time?
+      // Uses the data date as "now", relative to project start and projected end.
+      const dataDate = a.dataDate || a.data_date || (latest as any)?.dataDate || latest?.uploadedAt
+      if (workComplete === undefined && projectStart && projectedEnd && dataDate) {
+        const pS = new Date(projectStart)
+        const pE = new Date(projectedEnd)
+        const dD = new Date(dataDate)
+        if (!isNaN(pS.getTime()) && !isNaN(pE.getTime()) && !isNaN(dD.getTime())) {
+          const pSUTC = Date.UTC(pS.getFullYear(), pS.getMonth(), pS.getDate())
+          const pEUTC = Date.UTC(pE.getFullYear(), pE.getMonth(), pE.getDate())
+          const dDUTC = Date.UTC(dD.getFullYear(), dD.getMonth(), dD.getDate())
+          const total = pEUTC - pSUTC
+          const elapsed = dDUTC - pSUTC
+          if (total > 0) {
+            workComplete = Math.max(0, Math.min(100, (elapsed / total) * 100))
+          }
+        }
       }
 
       const risksDetected = num(a.risksDetected ?? a.risksCount ?? a.risks_count, 0)

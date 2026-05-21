@@ -178,9 +178,12 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   const substMilestone = a.substMilestone || (substMilestoneObj?.code || substMilestoneObj?.id || '')
   const finalMilestone = a.finalMilestone || (finalMilestoneObj?.code || finalMilestoneObj?.id || '')
 
-  // Durations — compute from dates when possible (more reliable than trusting
-  // an analysis-level field that may be in unexpected units like work-hours).
-  // Falls back to the explicit field only if dates aren't available.
+  // Durations — prefer the analyzer's value if present (it's the authoritative
+  // figure from the XER), otherwise compute from dates as INCLUSIVE calendar
+  // days per the P6 convention (NTP day 1 + Contract End day = duration).
+  //
+  // Try many field name variants since different XER analyzers use different
+  // shapes for the same value.
   const daysBetween = (start?: string, end?: string): number | undefined => {
     if (!start || !end) return undefined
     const s = new Date(start)
@@ -188,15 +191,27 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
     if (isNaN(s.getTime()) || isNaN(e.getTime())) return undefined
     const sUTC = Date.UTC(s.getFullYear(), s.getMonth(), s.getDate())
     const eUTC = Date.UTC(e.getFullYear(), e.getMonth(), e.getDate())
-    return Math.max(0, Math.round((eUTC - sUTC) / (1000 * 60 * 60 * 24)))
+    // +1 makes this inclusive: both start and end days are counted.
+    return Math.max(0, Math.round((eUTC - sUTC) / (1000 * 60 * 60 * 24))) + 1
   }
-  // Original Duration = NTP → Contract End
+  // Original Duration = NTP → Contract End (inclusive)
+  const originalDurationField = numOrUndefAtTop(
+    a.originalDuration ?? a.original_duration ??
+    a.targetDuration ?? a.target_duration ??
+    a.plannedDuration ?? a.planned_duration ??
+    a.baselineDuration ?? a.baseline_duration ??
+    a.contractDuration ?? a.contract_duration
+  )
   const originalDurationComputed = daysBetween(projectStart, contractEnd)
-  const originalDuration = originalDurationComputed ?? num(a.originalDuration, 0)
-  // Remaining Duration = Data Date → Projected End
+  const originalDuration = originalDurationField ?? originalDurationComputed ?? 0
+  // Remaining Duration = Data Date → Projected End (inclusive)
+  const remainingDurationField = numOrUndefAtTop(
+    a.remainingDuration ?? a.remaining_duration ??
+    a.atCompletionRemainingDuration
+  )
   const remainingDurationComputed = daysBetween(dataDate, projectedEnd)
-  const remainingDuration = remainingDurationComputed ?? num(a.remainingDuration, 0)
-  const hasOriginalDuration = originalDurationComputed !== undefined
+  const remainingDuration = remainingDurationField ?? remainingDurationComputed ?? 0
+  const hasOriginalDuration = originalDurationField !== undefined || originalDurationComputed !== undefined
 
   // Days behind — if analysis didn't store it, compute from contractEnd vs projectedEnd.
   // Normalize to date-only so time-of-day / timezone parsing differences don't
@@ -214,11 +229,13 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   const daysBehindNum = daysBehind ?? 0
   const hasDaysBehind = daysBehind !== undefined
 
-  // Duration at Completion = NTP → Projected End. Compute from dates so we
-  // never trust a stale or wrong-unit field value (saw 802 in real data when
-  // the calendar diff is ~192).
+  // Duration at Completion = NTP → Projected End (inclusive)
+  const durationAtCompletionField = numOrUndefAtTop(
+    a.durationAtCompletion ?? a.duration_at_completion ??
+    a.atCompletionDuration ?? a.at_completion_duration
+  )
   const durationAtCompletionComputed = daysBetween(projectStart, projectedEnd)
-  const durationAtCompletion = durationAtCompletionComputed ?? num(a.durationAtCompletion, originalDuration + daysBehindNum)
+  const durationAtCompletion = durationAtCompletionField ?? durationAtCompletionComputed ?? (originalDuration + daysBehindNum)
 
   // Work complete — try many field variants, then compute from activities.
   // undefined when truly no data — UI shows "—" instead of misleading 0%.
@@ -350,16 +367,16 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
           <KPITile
             href="/dashboard/procurement"
             label="Long Lead at Risk"
-            value={hasLongLeadData ? String(longLeadAtRisk) : '—'}
-            sub={!hasLongLeadData ? 'Not yet computed' : (longLeadAtRisk === 0 ? `✓ ${longLeadTotal} long lead total` : `of ${longLeadTotal} long lead`)}
-            valueColor={!hasLongLeadData ? 'slate' : (longLeadAtRisk === 0 ? 'green' : 'red')}
+            value={String(longLeadAtRisk)}
+            sub={longLeadAtRisk === 0 ? `✓ ${longLeadTotal} long lead total` : `of ${longLeadTotal} long lead`}
+            valueColor={longLeadAtRisk === 0 ? 'green' : 'red'}
           />
           <KPITile
             href="/dashboard/risks"
             label="Risks Detected"
-            value={hasRiskData ? String(risksDetected) : '—'}
-            sub={!hasRiskData ? 'Not yet computed' : (criticalRisks > 0 ? `${criticalRisks} critical` : 'Auto-detected')}
-            valueColor={!hasRiskData ? 'slate' : (criticalRisks > 0 ? 'red' : 'amber')}
+            value={String(risksDetected)}
+            sub={risksDetected === 0 ? 'Auto-detected · none flagged' : (criticalRisks > 0 ? `${criticalRisks} critical` : 'Auto-detected')}
+            valueColor={risksDetected === 0 ? 'green' : (criticalRisks > 0 ? 'red' : 'amber')}
           />
         </div>
 
@@ -541,7 +558,7 @@ function DurationCell({ label, value, delta }: { label: string; value: number; d
     <div>
       <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">{label}</div>
       <div className="text-lg font-semibold text-slate-900 mt-0.5">
-        {value} <span className="text-xs text-slate-500 font-normal">days</span>
+        {value} <span className="text-xs text-slate-500 font-normal">calendar days</span>
         {delta !== undefined && delta > 0 && (
           <span className="ml-2 text-sm font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-md">+{delta}d</span>
         )}
