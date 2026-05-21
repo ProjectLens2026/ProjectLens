@@ -878,6 +878,13 @@ interface ChartData {
   todayIndex: number
   contractIndex: number
   projectedIndex: number
+  // v7 — continuous 0..1 positions in the chart window. Markers (Data Date,
+  // Contract End, Projected End) use these so they don't snap to bucket
+  // centers, which would misrepresent dates that fall mid-month.
+  // todayT/contractT/projectedT undefined for legacy ChartData (pre-v7).
+  todayT?: number
+  contractT?: number
+  projectedT?: number
   plannedAtToday: number
   velocityPerMonth: number
   requiredVelocityToHitContract: number
@@ -885,9 +892,6 @@ interface ChartData {
 
 function ScheduleProgressChart({ data }: { data: ChartData }) {
   const buckets = Array.isArray(data?.buckets) ? data.buckets : []
-  const todayIndex = typeof data?.todayIndex === 'number' ? data.todayIndex : -1
-  const contractIndex = typeof data?.contractIndex === 'number' ? data.contractIndex : -1
-  const projectedIndex = typeof data?.projectedIndex === 'number' ? data.projectedIndex : -1
 
   if (buckets.length === 0) {
     return (
@@ -897,46 +901,114 @@ function ScheduleProgressChart({ data }: { data: ChartData }) {
     )
   }
 
+  // v7 layout: taller canvas + more top padding so bold marker pills + bar %
+  // labels never collide with the 100% gridline. Narrow bars (7px) so monthly
+  // buckets stay crisp even at 24-month windows.
   const W = 700
-  const H = 200
-  const padL = 36, padR = 16, padT = 18, padB = 38
+  const H = 240
+  const padL = 36, padR = 16, padT = 32, padB = 38
   const innerW = W - padL - padR
   const innerH = H - padT - padB
   const stepX = innerW / Math.max(buckets.length - 1, 1)
-  const barW = 12
-  const groupW = barW * 2 + 4
+  const barW = 7
+  const barGap = 2
+  const groupW = barW * 2 + barGap
   const yFor = (pct: number) => {
     const safe = isFinite(pct) ? Math.max(0, Math.min(100, pct)) : 0
     return padT + innerH * (1 - safe / 100)
   }
+  // Position helpers. `xAt(i)` = LEFT edge of the bar group for bucket i.
+  // `xCenter(i)` = the bucket's center on the x-axis (matches the date label).
   const xAt = (i: number) => padL + i * stepX - groupW / 2
+  const xCenter = (i: number) => padL + i * stepX
+  // Continuous x for date markers (Data Date, Contract End, Projected End).
+  // Use the data's t-values when present (v7+), fall back to bucket indices.
+  const tFromOld = (idx: number) =>
+    typeof idx === 'number' && idx >= 0 && buckets.length > 1 ? idx / (buckets.length - 1) : -1
+  const todayTval = typeof data.todayT === 'number' ? data.todayT : tFromOld(data.todayIndex)
+  const contractTval = typeof data.contractT === 'number' ? data.contractT : tFromOld(data.contractIndex)
+  const projectedTval = typeof data.projectedT === 'number' ? data.projectedT : tFromOld(data.projectedIndex)
+  const xFromT = (t: number) => padL + t * innerW
+
+  // Cumulative line points — connect the tops of each bar with a smoothed
+  // polyline. Planned line (blue, solid) traces the planned cumulative curve.
+  // Actual line splits at the data-date: solid green for actuals, dashed amber
+  // for the forecast portion.
+  const plannedPathPts = buckets.map((b, i) => {
+    const safe = isFinite(b.planned) ? Math.max(0, Math.min(100, b.planned)) : 0
+    return `${xAt(i) + barW / 2},${yFor(safe)}`
+  }).join(' ')
+  const actualActualPts = buckets
+    .map((b, i) => ({ b, i }))
+    .filter(({ b }) => !b.isForecast)
+    .map(({ b, i }) => {
+      const safe = isFinite(b.actual) ? Math.max(0, Math.min(100, b.actual)) : 0
+      return `${xAt(i) + barW + barGap + barW / 2},${yFor(safe)}`
+    }).join(' ')
+  const actualForecastPts = (() => {
+    // Forecast line — include the LAST actual bucket as the first point so
+    // the solid and dashed lines connect visually instead of leaving a gap.
+    const firstForecastIdx = buckets.findIndex(b => b.isForecast)
+    if (firstForecastIdx <= 0) {
+      // No actuals or no forecast — render whatever we have.
+      return buckets
+        .map((b, i) => ({ b, i }))
+        .filter(({ b }) => b.isForecast)
+        .map(({ b, i }) => {
+          const safe = isFinite(b.actual) ? Math.max(0, Math.min(100, b.actual)) : 0
+          return `${xAt(i) + barW + barGap + barW / 2},${yFor(safe)}`
+        }).join(' ')
+    }
+    const startIdx = firstForecastIdx - 1
+    return buckets
+      .map((b, i) => ({ b, i }))
+      .filter(({ i }) => i >= startIdx)
+      .map(({ b, i }) => {
+        const safe = isFinite(b.actual) ? Math.max(0, Math.min(100, b.actual)) : 0
+        return `${xAt(i) + barW + barGap + barW / 2},${yFor(safe)}`
+      }).join(' ')
+  })()
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto' }}>
+      {/* Y-axis gridlines and labels */}
       {[0, 25, 50, 75, 100].map(p => (
         <g key={p}>
           <line x1={padL} y1={yFor(p)} x2={W - padR} y2={yFor(p)} stroke="#e2e8f0" strokeWidth="0.5" strokeDasharray={p === 0 ? '0' : '2'} />
           <text x={padL - 6} y={yFor(p) + 3} fontSize="9" fill="#94a3b8" textAnchor="end">{p}%</text>
         </g>
       ))}
-      {todayIndex >= 0 && todayIndex < buckets.length && (
+
+      {/* DATA DATE marker — neutral grey, simple line + label so it doesn't
+          compete with the bolder Contract / Forecast pills. */}
+      {todayTval >= 0 && todayTval <= 1 && (
         <g>
-          <line x1={padL + todayIndex * stepX} y1={padT} x2={padL + todayIndex * stepX} y2={H - padB} stroke="#94a3b8" strokeWidth="0.5" strokeDasharray="2,2" />
-          <text x={padL + todayIndex * stepX} y={padT - 4} fontSize="8" fill="#94a3b8" textAnchor="middle">Today</text>
+          <line x1={xFromT(todayTval)} y1={padT + 2} x2={xFromT(todayTval)} y2={H - padB} stroke="#475569" strokeWidth="0.7" strokeDasharray="3,2" />
+          <text x={xFromT(todayTval)} y={padT - 18} fontSize="9" fontWeight="700" fill="#475569" textAnchor="middle" letterSpacing="0.05em">DATA DATE</text>
         </g>
       )}
-      {contractIndex >= 0 && contractIndex < buckets.length && (
+
+      {/* CONTRACT END — red pill, bold, positioned at top of chart */}
+      {contractTval >= 0 && contractTval <= 1 && (
         <g>
-          <line x1={padL + contractIndex * stepX} y1={padT} x2={padL + contractIndex * stepX} y2={H - padB} stroke="#dc2626" strokeWidth="1" strokeDasharray="3,2" />
-          <text x={padL + contractIndex * stepX} y={padT - 4} fontSize="9" fill="#dc2626" textAnchor="middle" fontWeight="600">Contract End</text>
+          <line x1={xFromT(contractTval)} y1={padT + 2} x2={xFromT(contractTval)} y2={H - padB} stroke="#dc2626" strokeWidth="1.3" strokeDasharray="3,2" />
+          <rect x={xFromT(contractTval) - 48} y={padT - 28} width="96" height="14" fill="#fef2f2" stroke="#dc2626" strokeWidth="0.6" rx="2" />
+          <text x={xFromT(contractTval)} y={padT - 18} fontSize="9" fontWeight="700" fill="#dc2626" textAnchor="middle" letterSpacing="0.05em">CONTRACT END</text>
         </g>
       )}
-      {projectedIndex >= 0 && projectedIndex < buckets.length && projectedIndex !== contractIndex && (
+
+      {/* FORECAST END — amber pill. Shown only if it differs from Contract End
+          by at least ~30 days, otherwise the pills would overlap. */}
+      {projectedTval >= 0 && projectedTval <= 1 && Math.abs(projectedTval - contractTval) * innerW > 30 && (
         <g>
-          <line x1={padL + projectedIndex * stepX} y1={padT} x2={padL + projectedIndex * stepX} y2={H - padB} stroke="#d97706" strokeWidth="1" strokeDasharray="3,2" />
-          <text x={padL + projectedIndex * stepX} y={padT - 4} fontSize="9" fill="#d97706" textAnchor="middle" fontWeight="600">Forecast End</text>
+          <line x1={xFromT(projectedTval)} y1={padT + 2} x2={xFromT(projectedTval)} y2={H - padB} stroke="#d97706" strokeWidth="1.3" strokeDasharray="3,2" />
+          <rect x={xFromT(projectedTval) - 48} y={padT - 28} width="96" height="14" fill="#fffbeb" stroke="#d97706" strokeWidth="0.6" rx="2" />
+          <text x={xFromT(projectedTval)} y={padT - 18} fontSize="9" fontWeight="700" fill="#d97706" textAnchor="middle" letterSpacing="0.05em">FORECAST END</text>
         </g>
       )}
+
+      {/* Bars + bar % labels. v7 — narrow bars + labels lifted 8px above
+          bar tops so they never sit on a gridline. Labels skipped for 0%. */}
       {buckets.map((b, i) => {
         const x = xAt(i)
         const plannedColor = b.isForecast ? 'rgba(37, 99, 235, 0.3)' : '#2563eb'
@@ -945,32 +1017,47 @@ function ScheduleProgressChart({ data }: { data: ChartData }) {
         const safeActual = isFinite(b.actual) ? Math.max(0, Math.min(100, b.actual)) : 0
         const plannedH = innerH * (safePlanned / 100)
         const actualH = innerH * (safeActual / 100)
-        // Percentage labels above each bar. v5 — added so PMs can read the
-        // planned vs actual values directly without estimating bar heights.
-        // Forecast bars use lighter text. Skip labels for 0% to reduce clutter.
         const plannedLabelColor = b.isForecast ? '#94a3b8' : '#1e40af'
-        const actualLabelColor = b.isForecast ? '#d97706' : '#15803d'
-        const plannedLabelY = yFor(safePlanned) - 3
-        const actualLabelY = yFor(safeActual) - 3
+        const actualLabelColor = b.isForecast ? '#b45309' : '#15803d'
+        // Bar labels — position 8px above bar top. For very tall bars
+        // (>= 95%) put label INSIDE the top of the bar in white to avoid
+        // crashing into the marker pills overhead.
+        const insideThreshold = 95
+        const plannedLabelY = safePlanned >= insideThreshold ? yFor(safePlanned) + 9 : yFor(safePlanned) - 4
+        const actualLabelY = safeActual >= insideThreshold ? yFor(safeActual) + 9 : yFor(safeActual) - 4
+        const plannedLabelFill = safePlanned >= insideThreshold ? 'white' : plannedLabelColor
+        const actualLabelFill = safeActual >= insideThreshold ? (b.isForecast ? '#1f2937' : 'white') : actualLabelColor
         return (
           <g key={i}>
             <rect x={x} y={yFor(safePlanned)} width={barW} height={plannedH} fill={plannedColor} />
-            <rect x={x + barW + 4} y={yFor(safeActual)} width={barW} height={actualH} fill={actualColor} opacity={b.isForecast ? 0.85 : 1} />
+            <rect x={x + barW + barGap} y={yFor(safeActual)} width={barW} height={actualH} fill={actualColor} opacity={b.isForecast ? 0.85 : 1} />
             {safePlanned > 0 && (
-              <text x={x + barW / 2} y={plannedLabelY} fontSize="8" fill={plannedLabelColor} textAnchor="middle" fontWeight="600">
-                {Math.round(safePlanned)}%
+              <text x={x + barW / 2} y={plannedLabelY} fontSize="8" fill={plannedLabelFill} textAnchor="middle" fontWeight="600">
+                {Math.round(safePlanned)}
               </text>
             )}
             {safeActual > 0 && (
-              <text x={x + barW + 4 + barW / 2} y={actualLabelY} fontSize="8" fill={actualLabelColor} textAnchor="middle" fontWeight="600">
-                {Math.round(safeActual)}%
+              <text x={x + barW + barGap + barW / 2} y={actualLabelY} fontSize="8" fill={actualLabelFill} textAnchor="middle" fontWeight="600">
+                {Math.round(safeActual)}
               </text>
             )}
-            <text x={padL + i * stepX} y={H - padB + 14} fontSize="9" fill={b.isToday ? '#0f172a' : '#64748b'} textAnchor="middle" fontWeight={b.isToday ? '600' : '400'}>{b.label || `M${i+1}`}</text>
-            {b.sublabel && <text x={padL + i * stepX} y={H - padB + 24} fontSize="8" fill="#94a3b8" textAnchor="middle">{b.sublabel}</text>}
+            <text x={xCenter(i)} y={H - padB + 14} fontSize="9" fill="#64748b" textAnchor="middle">{b.label || `M${i+1}`}</text>
+            {b.sublabel && <text x={xCenter(i)} y={H - padB + 24} fontSize="8" fill="#94a3b8" textAnchor="middle">{b.sublabel}</text>}
           </g>
         )
       })}
+
+      {/* Cumulative lines — drawn AFTER bars so they sit on top. Planned line
+          is solid blue; actual is split into solid green (past) + dashed amber
+          (forecast). Started-from-0 reads naturally because the first bucket's
+          planned/actual values are the cumulative completion at that point. */}
+      <polyline points={plannedPathPts} stroke="#1e40af" strokeWidth="1.5" fill="none" opacity="0.7" />
+      {actualActualPts && (
+        <polyline points={actualActualPts} stroke="#15803d" strokeWidth="1.8" fill="none" />
+      )}
+      {actualForecastPts && (
+        <polyline points={actualForecastPts} stroke="#b45309" strokeWidth="1.8" fill="none" strokeDasharray="4,3" opacity="0.85" />
+      )}
     </svg>
   )
 }
@@ -1134,69 +1221,97 @@ function buildScheduleProgressData(input: {
       return synthChartData(workComplete)
     }
 
-    // ----- v5 chart window: start = max(NTP, data_date - 2 months) -----
-    // PM rationale: showing the entire NTP-to-end span on a 7-bucket chart
-    // means each bar covers 6+ months of work for a typical 3-year project,
-    // making the recent past and near-term forecast unreadable. Narrowing
-    // the window to (data_date - 2 months) → projected end keeps recent
-    // history visible (last 2 months of actuals) plus the runway to the
-    // forecast. If NTP is more recent than DD - 2M (project just started),
-    // we use NTP so we never show pre-NTP empty months.
-    const TWO_MONTHS_MS = 2 * 30.4375 * 24 * 60 * 60 * 1000  // avg month length
+    // ============================================================================
+    // v7 chart window — MONTHLY buckets across a 12–24 month visible window.
+    //
+    // PM rationale: the previous 7-fixed-bucket span made each bar cover months
+    // of work, which read as vague. We switch to one bucket per calendar month
+    // so the bars are crisp and labels readable. Window rules:
+    //
+    //   chartStart = max(NTP, data_date - 2 months)
+    //   chartEnd   = projected end (extended forward to 12 months min, capped 24)
+    //
+    // For a 6-month-remaining project the window stretches to 12 months past DD;
+    // for a 24-month-remaining project we cap at 24 months past chartStart so we
+    // don't shrink the bars beyond readability.
+    // ============================================================================
+    const AVG_MONTH_MS = 30.4375 * 24 * 60 * 60 * 1000
+    const TWO_MONTHS_MS = 2 * AVG_MONTH_MS
+    const MIN_WINDOW_MS = 12 * AVG_MONTH_MS
+    const MAX_WINDOW_MS = 24 * AVG_MONTH_MS
+
     const ddMs = today.getTime()
     const ddMinus2M = new Date(ddMs - TWO_MONTHS_MS)
-    const chartStart = ddMinus2M.getTime() > start.getTime() ? ddMinus2M : start
+    const chartStartDate = ddMinus2M.getTime() > start.getTime() ? ddMinus2M : start
+    // Align chartStart to the 1st of its month so bucket boundaries are clean.
+    const chartStart = new Date(chartStartDate.getFullYear(), chartStartDate.getMonth(), 1)
     const chartStartTime = chartStart.getTime()
 
-    const numBuckets = 7
-    const buckets: ChartBucket[] = []
-    const projectedTime = projected.getTime()
-    const totalSpan = projectedTime - chartStartTime
-    if (totalSpan <= 0) {
-      return synthChartData(workComplete)
+    let chartEndTime = Math.max(projected.getTime(), chartStartTime + MIN_WINDOW_MS)
+    if (chartEndTime - chartStartTime > MAX_WINDOW_MS) {
+      chartEndTime = chartStartTime + MAX_WINDOW_MS
     }
-    const todayT = Math.max(0, Math.min(1, (today.getTime() - chartStartTime) / totalSpan))
-    const contractT = Math.max(0, Math.min(1, (contract.getTime() - chartStartTime) / totalSpan))
-    // For the planned-curve calculation we still need the FULL project's
-    // planned-completion-fraction at any given calendar date. Use the
-    // original NTP→contract span for that.
+    const chartEnd = new Date(chartEndTime)
+
+    const buckets: ChartBucket[] = []
     const fullStartTime = start.getTime()
     const fullContractTime = contract.getTime()
     const fullPlanSpan = fullContractTime - fullStartTime
+    const todayTime = today.getTime()
+    const totalSpan = chartEndTime - chartStartTime
+    if (totalSpan <= 0) {
+      return synthChartData(workComplete)
+    }
+    const todayT = Math.max(0, Math.min(1, (todayTime - chartStartTime) / totalSpan))
+    const contractT = Math.max(0, Math.min(1, (fullContractTime - chartStartTime) / totalSpan))
 
-    for (let i = 0; i < numBuckets; i++) {
-      const t = i / (numBuckets - 1)
-      const bucketDate = new Date(chartStartTime + t * totalSpan)
-      const isAfterToday = t > todayT
-      const isToday = i > 0 && (todayT >= (i - 1) / (numBuckets - 1)) && (todayT <= i / (numBuckets - 1))
-      // Planned = bucket-date fraction across full NTP→Contract span
+    // Generate one bucket per calendar month from chartStart up to chartEnd.
+    const cursor = new Date(chartStart)
+    while (cursor.getTime() <= chartEndTime) {
+      const bucketTime = cursor.getTime()
+      const isAfterToday = bucketTime > todayTime
+      // Planned = the planned-complete percentage at this calendar date,
+      // computed against the FULL NTP→Contract span so the curve matches
+      // the project plan regardless of the chart window.
       const plannedFrac = fullPlanSpan > 0
-        ? Math.max(0, Math.min(1, (bucketDate.getTime() - fullStartTime) / fullPlanSpan))
+        ? Math.max(0, Math.min(1, (bucketTime - fullStartTime) / fullPlanSpan))
         : 1
       const planned = round1(plannedFrac * 100)
       let actual: number
       if (!isAfterToday) {
-        const localActT = todayT > 0 ? Math.min(1, t / todayT) : 0
-        actual = round1(localActT * workComplete)
+        // Past — actuals ramp linearly from 0 (at chart start) to workComplete
+        // (at data date). Earlier values are interpolated; the actuals at DD
+        // match the analyzer's workCompletePct.
+        const t = (bucketTime - chartStartTime) / Math.max(1, todayTime - chartStartTime)
+        actual = round1(Math.max(0, Math.min(1, t)) * workComplete)
       } else {
-        const remainingT = (1 - todayT) > 0 ? (t - todayT) / (1 - todayT) : 1
-        actual = round1(Math.min(100, workComplete + remainingT * (100 - workComplete)))
+        // Future — forecast ramps from workComplete to 100% at chartEnd.
+        const remainingT = (1 - todayT) > 0
+          ? (bucketTime - todayTime) / Math.max(1, chartEndTime - todayTime)
+          : 1
+        actual = round1(Math.min(100, workComplete + Math.max(0, Math.min(1, remainingT)) * (100 - workComplete)))
       }
       buckets.push({
-        label: bucketDate.toLocaleString('en-US', { month: 'short' }),
-        sublabel: `'${String(bucketDate.getFullYear()).slice(2)}`,
+        label: cursor.toLocaleString('en-US', { month: 'short' }),
+        sublabel: cursor.getMonth() === 0 ? `'${String(cursor.getFullYear()).slice(2)}` : undefined,
         planned,
         actual,
         isForecast: isAfterToday,
-        isToday,
+        isToday: false,  // we use a continuous date marker now, not a bucket flag
         isContract: false,
-        isProjected: i === numBuckets - 1,
+        isProjected: false,
       })
+      cursor.setMonth(cursor.getMonth() + 1)
     }
+
+    const numBuckets = buckets.length
 
     const todayIndex = Math.round(todayT * (numBuckets - 1))
     const contractIndex = Math.round(contractT * (numBuckets - 1))
     const projectedIndex = numBuckets - 1
+    // v7 — continuous positions for marker placement on the chart x-axis.
+    // Projected may be inside the visible window or at its right edge.
+    const projectedT = Math.max(0, Math.min(1, (projected.getTime() - chartStartTime) / totalSpan))
 
     const actualBuckets = buckets.filter(b => !b.isForecast)
     let velocityPerMonth = 0
@@ -1220,6 +1335,9 @@ function buildScheduleProgressData(input: {
       todayIndex,
       contractIndex,
       projectedIndex,
+      todayT,
+      contractT,
+      projectedT,
       plannedAtToday,
       velocityPerMonth,
       requiredVelocityToHitContract,
