@@ -354,18 +354,14 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   // Analyzer now computes risksDetected = criticalDrivers + outOfSequence + noTies
   // and criticalRisks = criticalDrivers count. Legacy versions (analyzed
   // before v3) didn't compute these fields, so fall back to counting from
-  // the arrays directly when present.
-  let risksDetected = numOrUndefAtTop(a.risksDetected ?? a.risksCount)
-  let criticalRisks = numOrUndefAtTop(a.criticalRisks)
-  if (risksDetected === undefined) {
-    const cd = Array.isArray(a.criticalDrivers) ? a.criticalDrivers.length : 0
-    const oos = Array.isArray(a.outOfSequence) ? a.outOfSequence.length : 0
-    const nt = Array.isArray(a.noTies) ? a.noTies.length : 0
-    risksDetected = cd + oos + nt
-  }
-  if (criticalRisks === undefined) {
-    criticalRisks = Array.isArray(a.criticalDrivers) ? a.criticalDrivers.length : 0
-  }
+  // the arrays directly when present. Using const-with-default so TypeScript
+  // narrows both vars to `number` for the JSX comparison checks below.
+  const cdArrCount = Array.isArray(a.criticalDrivers) ? a.criticalDrivers.length : 0
+  const oosArrCount = Array.isArray(a.outOfSequence) ? a.outOfSequence.length : 0
+  const ntArrCount = Array.isArray(a.noTies) ? a.noTies.length : 0
+  const risksDetected: number = numOrUndefAtTop(a.risksDetected ?? a.risksCount)
+    ?? (cdArrCount + oosArrCount + ntArrCount)
+  const criticalRisks: number = numOrUndefAtTop(a.criticalRisks) ?? cdArrCount
 
   const attentionAreas: AttentionArea[] = Array.isArray(a.attentionAreas) && a.attentionAreas.length
     ? a.attentionAreas
