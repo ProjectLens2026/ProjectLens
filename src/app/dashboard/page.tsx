@@ -350,25 +350,25 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   longLeadTotal = longLeadTotal ?? 0
   longLeadAtRisk = longLeadAtRisk ?? 0
 
-  // Risks Detected — Day 5, v4 (categorized by float severity)
-  // Analyzer computes risksDetected = risksCritical + risksHigh + risksMedium
-  // where:
+  // Risks Detected — Day 5, v5 (categorized by float severity)
+  // Analyzer computes:
   //   risksCritical = activities with float < 0 (negative — actively behind)
   //   risksHigh     = activities with float = 0 (zero buffer)
   //   risksMedium   = activities with 1..7 days float (near critical)
   //
-  // Legacy versions (analyzed before v3/v4) didn't compute these fields, so
+  // Legacy versions (analyzed before v4) didn't compute these fields, so
   // fall back to counting from the criticalDrivers array. The fallback will
   // only fill risksCritical accurately — High/Medium stay 0 since the
-  // pre-v4 critical drivers list lumps zero-float and negative-float
+  // pre-v4 critical-drivers list lumps zero-float and negative-float
   // together. Re-uploading the XER will give the proper categorized counts.
+  //
+  // RisksTile renders the 3 categories as separate rows — no aggregate
+  // total displayed (was misleading). Color: red if any critical, amber
+  // if any high.
   const cdArrCount = Array.isArray(a.criticalDrivers) ? a.criticalDrivers.length : 0
   const risksCritical: number = numOrUndefAtTop(a.risksCritical) ?? cdArrCount
   const risksHigh: number = numOrUndefAtTop(a.risksHigh) ?? 0
   const risksMedium: number = numOrUndefAtTop(a.risksMedium) ?? 0
-  const risksDetected: number = numOrUndefAtTop(a.risksDetected ?? a.risksCount)
-    ?? (risksCritical + risksHigh + risksMedium)
-  const criticalRisks: number = numOrUndefAtTop(a.criticalRisks) ?? risksCritical
 
   const attentionAreas: AttentionArea[] = Array.isArray(a.attentionAreas) && a.attentionAreas.length
     ? a.attentionAreas
@@ -521,16 +521,10 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
             sub={longLeadAtRisk === 0 ? `✓ none ≤14d float · ${longLeadTotal} total` : `≤14d float · ${longLeadTotal} total`}
             valueColor={longLeadAtRisk === 0 ? 'green' : 'red'}
           />
-          <KPITile
-            href="/dashboard/risks"
-            label="Risks Detected"
-            value={String(risksDetected)}
-            sub={
-              risksDetected === 0
-                ? 'Auto-detected · none flagged'
-                : `🚨 ${risksCritical} crit · ⚠️ ${risksHigh} high · ⚡ ${risksMedium} med`
-            }
-            valueColor={risksDetected === 0 ? 'green' : (risksCritical > 0 ? 'red' : risksHigh > 0 ? 'amber' : 'slate')}
+          <RisksTile
+            critical={risksCritical}
+            high={risksHigh}
+            medium={risksMedium}
           />
         </div>
 
@@ -767,6 +761,37 @@ function KPITile({ href, label, value, sub, valueColor }: { href: string; label:
       <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">{label}</div>
       <div className={clsx('text-2xl font-bold mt-0.5', valColor)}>{value}</div>
       <div className="text-[10px] text-slate-500 mt-0.5">{sub}</div>
+    </Link>
+  )
+}
+
+// Risks Detected tile — categorized by float severity. Replaces the single
+// big-number display with three rows (Critical / High / Medium) so the count
+// reads as a triage breakdown, not a misleading aggregate that conflates
+// "5 negative-float activities" with "395 near-critical activities."
+//
+// Layout matches KPITile dimensions (same outer card, header label) so it
+// sits cleanly alongside the other tiles in the grid row.
+function RisksTile({ critical, high, medium }: { critical: number; high: number; medium: number }) {
+  const row = (emoji: string, label: string, count: number, activeColor: string) => (
+    <div className="flex items-center justify-between text-[12px] leading-tight">
+      <span className="flex items-center gap-1 text-slate-600">
+        <span>{emoji}</span>
+        <span>{label}</span>
+      </span>
+      <span className={clsx('font-bold tabular-nums', count > 0 ? activeColor : 'text-slate-300')}>
+        {count}
+      </span>
+    </div>
+  )
+  return (
+    <Link href="/dashboard/risks" className="bg-white border border-slate-200 rounded-xl p-3 hover:border-slate-300 hover:shadow-sm transition-all">
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Risks Detected</div>
+      <div className="space-y-1">
+        {row('🚨', 'Critical', critical, 'text-red-600')}
+        {row('⚠️', 'High',     high,     'text-amber-600')}
+        {row('⚡', 'Medium',   medium,   'text-slate-700')}
+      </div>
     </Link>
   )
 }
