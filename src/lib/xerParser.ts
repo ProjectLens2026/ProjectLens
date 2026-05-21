@@ -147,14 +147,22 @@ export interface XERAnalysis {
   // longLeadAtRisk: subset of longLeadItems where floatDays <= 14
   // calendar days. PM threshold — two weeks of float or less = at risk.
   longLeadAtRisk?: number
-  // === Risks Detected (Day 5, v3) ===
-  // risksDetected: total count of schedule risk items the analyzer flagged.
-  // Sum of criticalDrivers.length + outOfSequence.length + noTies.length.
-  // Long Lead at Risk is intentionally NOT included (has its own tile).
+  // === Risks Detected (Day 5, v3+v4) ===
+  // risksDetected: total count of schedule-risk activities the analyzer
+  // flagged, categorized by float severity. As of v4 this is:
+  //   risksCritical + risksHigh + risksMedium
+  // (Long Lead at Risk excluded — has its own tile.)
   risksDetected?: number
-  // criticalRisks: just the count of critical drivers (float<=0, not done).
-  // Shown in the Risks Detected tile subtitle as "X critical".
+  // criticalRisks: legacy field kept for backward compat with the dashboard
+  // tile subtitle. Now equals risksCritical.
   criticalRisks?: number
+  // v4 categorized counts:
+  // Critical 🚨 — activities with float < 0 (already behind on critical path)
+  risksCritical?: number
+  // High ⚠️ — activities with float = 0 (zero float, no buffer)
+  risksHigh?: number
+  // Medium ⚡ — activities with 1 ≤ floatDays ≤ 7 (near critical, < 1 week buffer)
+  risksMedium?: number
 }
 // A single relationship-level violation. An out-of-sequence activity may
 // have multiple violations (one per predecessor whose logic was broken by
@@ -837,24 +845,68 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     excludedMilestoneCount + excludedSubmittalCount + excludedProcurementCount +
     excludedDesignCount + excludedCloseoutCount
   // ==========================================================================
-  // RISKS DETECTED — Day 5, v3
+  // RISKS DETECTED — Day 5, v4 (categorized by float severity)
   // ==========================================================================
   //
-  // PM-defined: the dashboard's "Risks Detected" tile was reading
-  // a.risksDetected which the analyzer wasn't computing, so it always
-  // showed 0 even when the schedule had real issues. Now we sum the
-  // three schedule-risk categories the analyzer already detects:
+  // PM-defined: the dashboard's "Risks Detected" tile should show categorized
+  // counts (All, Critical, High, Medium), not a single raw number that feels
+  // arbitrary. Categories reflect operational urgency based on activity float
+  // — the buffer between scheduled completion and the deadline:
   //
-  //   Critical drivers — activities with float<=0 and not complete
-  //   OOS sequence problems — relationship violations from actual progress
-  //   No-ties — activities missing predecessor or successor logic ties
+  //   Critical 🚨 (float < 0):
+  //     Activities with negative float — they're already past the date that
+  //     would still hit the contract end. Every day costs the schedule.
+  //     Take action immediately.
   //
-  // criticalRisks = just the critical-drivers count (shown in tile subtitle).
+  //   High ⚠️ (float = 0):
+  //     Activities sitting exactly on the critical path with no buffer.
+  //     Any slip becomes negative float. Monitor daily.
   //
-  // Long Lead at Risk is intentionally NOT included here — it has its own
-  // KPI tile and would double-count if combined.
-  const risksDetected = criticalDrivers.length + outOfSequence.length + noTies.length
-  const criticalRisks = criticalDrivers.length
+  //   Medium ⚡ (0 < float ≤ 7):
+  //     Near-critical activities with less than a week of buffer. One
+  //     incident (weather, RFI, sub no-show) can push them critical.
+  //     Track them in the lookahead.
+  //
+  // Activities with float > 7 days are NOT counted as risks — they have
+  // healthy buffer.
+  //
+  // Completed activities are excluded — they can't slip anymore.
+  //
+  // OOS violations and no-ties are NOT counted here — they have their own
+  // dedicated pages (Construction Sequence Problems, Lens Logic Check).
+  // Including them in this number would conflate distinct issue types and
+  // inflate the count.
+  //
+  // criticalRisks (legacy field, kept for backward compat with tile subtitle):
+  //   = risksCritical for v4. Maintains old contract for the dashboard.
+  const floatDaysOf = (t: Task): number => {
+    const cal = getCalendar(t)
+    return hoursToDays(t.total_float_hr_cnt || '0', cal)
+  }
+  let risksCritical = 0
+  let risksHigh = 0
+  let risksMedium = 0
+  for (const t of taskArr) {
+    if (t.status_code === 'TK_Complete') continue
+    // Use raw HOURS for the comparison (so we don't lose the negative/zero
+    // distinction when rounding to days). A task with -7 hours float should
+    // count as Critical even though rounded-to-days it might land on 0.
+    const floatHr = parseFloat(t.total_float_hr_cnt || '999')
+    if (isNaN(floatHr)) continue
+    if (floatHr < 0) {
+      risksCritical += 1
+    } else if (floatHr === 0) {
+      risksHigh += 1
+    } else {
+      // Convert to calendar days for the Medium check (1..7 days)
+      const fDays = floatDaysOf(t)
+      if (fDays >= 1 && fDays <= 7) {
+        risksMedium += 1
+      }
+    }
+  }
+  const risksDetected = risksCritical + risksHigh + risksMedium
+  const criticalRisks = risksCritical  // legacy alias, kept for back-compat
   return {
     totalActivities: taskArr.length,
     complete, inProgress, notStarted, negativeFloat,
@@ -891,8 +943,11 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     // Long Lead at Risk fields (v2)
     longLeadTotal,
     longLeadAtRisk,
-    // Risks Detected fields (v3)
+    // Risks Detected fields (v4 — categorized by float severity)
     risksDetected,
     criticalRisks,
+    risksCritical,
+    risksHigh,
+    risksMedium,
   }
 }

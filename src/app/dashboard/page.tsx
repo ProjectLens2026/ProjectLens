@@ -350,18 +350,25 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   longLeadTotal = longLeadTotal ?? 0
   longLeadAtRisk = longLeadAtRisk ?? 0
 
-  // Risks Detected — Day 5, v3
-  // Analyzer now computes risksDetected = criticalDrivers + outOfSequence + noTies
-  // and criticalRisks = criticalDrivers count. Legacy versions (analyzed
-  // before v3) didn't compute these fields, so fall back to counting from
-  // the arrays directly when present. Using const-with-default so TypeScript
-  // narrows both vars to `number` for the JSX comparison checks below.
+  // Risks Detected — Day 5, v4 (categorized by float severity)
+  // Analyzer computes risksDetected = risksCritical + risksHigh + risksMedium
+  // where:
+  //   risksCritical = activities with float < 0 (negative — actively behind)
+  //   risksHigh     = activities with float = 0 (zero buffer)
+  //   risksMedium   = activities with 1..7 days float (near critical)
+  //
+  // Legacy versions (analyzed before v3/v4) didn't compute these fields, so
+  // fall back to counting from the criticalDrivers array. The fallback will
+  // only fill risksCritical accurately — High/Medium stay 0 since the
+  // pre-v4 critical drivers list lumps zero-float and negative-float
+  // together. Re-uploading the XER will give the proper categorized counts.
   const cdArrCount = Array.isArray(a.criticalDrivers) ? a.criticalDrivers.length : 0
-  const oosArrCount = Array.isArray(a.outOfSequence) ? a.outOfSequence.length : 0
-  const ntArrCount = Array.isArray(a.noTies) ? a.noTies.length : 0
+  const risksCritical: number = numOrUndefAtTop(a.risksCritical) ?? cdArrCount
+  const risksHigh: number = numOrUndefAtTop(a.risksHigh) ?? 0
+  const risksMedium: number = numOrUndefAtTop(a.risksMedium) ?? 0
   const risksDetected: number = numOrUndefAtTop(a.risksDetected ?? a.risksCount)
-    ?? (cdArrCount + oosArrCount + ntArrCount)
-  const criticalRisks: number = numOrUndefAtTop(a.criticalRisks) ?? cdArrCount
+    ?? (risksCritical + risksHigh + risksMedium)
+  const criticalRisks: number = numOrUndefAtTop(a.criticalRisks) ?? risksCritical
 
   const attentionAreas: AttentionArea[] = Array.isArray(a.attentionAreas) && a.attentionAreas.length
     ? a.attentionAreas
@@ -518,8 +525,12 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
             href="/dashboard/risks"
             label="Risks Detected"
             value={String(risksDetected)}
-            sub={risksDetected === 0 ? 'Auto-detected · none flagged' : (criticalRisks > 0 ? `${criticalRisks} critical` : 'Auto-detected')}
-            valueColor={risksDetected === 0 ? 'green' : (criticalRisks > 0 ? 'red' : 'amber')}
+            sub={
+              risksDetected === 0
+                ? 'Auto-detected · none flagged'
+                : `🚨 ${risksCritical} crit · ⚠️ ${risksHigh} high · ⚡ ${risksMedium} med`
+            }
+            valueColor={risksDetected === 0 ? 'green' : (risksCritical > 0 ? 'red' : risksHigh > 0 ? 'amber' : 'slate')}
           />
         </div>
 
