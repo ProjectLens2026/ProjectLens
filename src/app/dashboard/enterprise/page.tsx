@@ -466,7 +466,6 @@ function buildRows(projects: Project[]): ProjectRowData[] {
       }
       // Time-based fallback — how far along is the project in elapsed time?
       // Uses the data date as "now", relative to project start and projected end.
-      const dataDate = a.dataDate || a.data_date || (latest as any)?.dataDate || latest?.uploadedAt
       if (workComplete === undefined && projectStart && projectedEnd && dataDate) {
         const pS = new Date(projectStart)
         const pE = new Date(projectedEnd)
