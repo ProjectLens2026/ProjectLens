@@ -124,7 +124,7 @@ export default function EnterpriseDashboard() {
           />
           <KPITile
             label="Avg % Complete"
-            value={`${portfolioKPIs.avgComplete.toFixed(0)}%`}
+            value={portfolioKPIs.hasWorkCompleteData ? `${portfolioKPIs.avgComplete.toFixed(0)}%` : '—'}
             sub={`${portfolioKPIs.totalActivities.toLocaleString()} activities tracked`}
             valueColor="text-slate-900"
           />
@@ -261,24 +261,32 @@ function ProjectRow({ row }: { row: ProjectRowData }) {
 
       {/* Days Behind */}
       <td className="py-3 pr-3 text-xs text-right">
-        <span className={clsx(
-          'font-semibold',
-          row.daysBehind > 0 ? 'text-red-600' :
-          row.daysBehind < 0 ? 'text-emerald-600' :
-          'text-slate-600'
-        )}>
-          {row.daysBehind > 0 ? `+${row.daysBehind}` : row.daysBehind}
-        </span>
+        {row.daysBehind === undefined ? (
+          <span className="text-slate-400">—</span>
+        ) : (
+          <span className={clsx(
+            'font-semibold',
+            row.daysBehind > 0 ? 'text-red-600' :
+            row.daysBehind < 0 ? 'text-emerald-600' :
+            'text-slate-600'
+          )}>
+            {row.daysBehind > 0 ? `+${row.daysBehind}` : row.daysBehind}
+          </span>
+        )}
       </td>
 
       {/* % Complete */}
       <td className="py-3 pr-3 text-xs text-right">
-        <div className="flex items-center justify-end gap-2">
-          <div className="w-12 h-1.5 bg-slate-200 rounded-full overflow-hidden hidden sm:block">
-            <div className="h-full bg-blue-500" style={{ width: `${Math.min(100, row.workComplete)}%` }}/>
+        {row.workComplete === undefined ? (
+          <span className="text-slate-400">—</span>
+        ) : (
+          <div className="flex items-center justify-end gap-2">
+            <div className="w-12 h-1.5 bg-slate-200 rounded-full overflow-hidden hidden sm:block">
+              <div className="h-full bg-blue-500" style={{ width: `${Math.min(100, row.workComplete)}%` }}/>
+            </div>
+            <span className="font-semibold text-slate-900">{Math.round(row.workComplete)}%</span>
           </div>
-          <span className="font-semibold text-slate-900">{row.workComplete}%</span>
-        </div>
+        )}
       </td>
 
       {/* Risks */}
@@ -388,8 +396,8 @@ interface ProjectRowData {
   status: ProjectStatus
   condition: string | undefined
   healthScore: number
-  daysBehind: number
-  workComplete: number
+  daysBehind: number | undefined
+  workComplete: number | undefined
   risksDetected: number
   criticalRisks: number
   startDate: string
@@ -412,15 +420,46 @@ function buildRows(projects: Project[]): ProjectRowData[] {
 
       const condition = a.condition || a.healthLabel
       const healthScore = num(a.healthScore, deriveScoreFromCondition(condition))
-      const daysBehind = num(a.daysBehind, 0)
-      const workComplete = num(a.workComplete ?? a.percentComplete, 0)
-      const risksDetected = num(a.risksDetected ?? a.risksCount, 0)
-      const criticalRisks = num(a.criticalRisks, 0)
-      const totalActivities = num(a.totalActivities, 0)
 
-      const projectStart = a.projectStart || a.project_start || a.ntp || a.ntpDate
+      // Dates — order matters. We resolve dataDate first because both
+      // projectStart and daysBehind depend on it.
+      const dataDate = a.dataDate || a.data_date || (latest as any)?.dataDate || latest?.uploadedAt
+      // For projectStart, fall back to dataDate if the analysis didn't capture
+      // a separate NTP / project start. Same fallback the Executive Dashboard uses.
+      const projectStart = a.projectStart || a.project_start || a.ntp || a.ntpDate || dataDate
       const contractEnd = a.contractEnd || a.contract_end || a.contractFinish || a.contract_finish
       const projectedEnd = a.projectedEnd || a.projected_end || a.forecastFinish || a.forecast_finish || a.projectedFinish
+
+      // Days behind — if the analysis pipeline didn't store it explicitly,
+      // compute as the gap in days between projectedEnd and contractEnd.
+      // Positive = behind, negative = ahead, undefined = unknown.
+      let daysBehind: number | undefined = numOrUndef(a.daysBehind ?? a.days_behind ?? a.behindContract)
+      if (daysBehind === undefined && projectedEnd && contractEnd) {
+        const cEnd = new Date(contractEnd).getTime()
+        const pEnd = new Date(projectedEnd).getTime()
+        if (isFinite(cEnd) && isFinite(pEnd)) {
+          daysBehind = Math.round((pEnd - cEnd) / (1000 * 60 * 60 * 24))
+        }
+      }
+
+      // Work complete — try many common field names from different analyzer
+      // outputs, then fall back to computing from completedActivities / totalActivities.
+      // undefined when no data at all — UI will show "—" instead of a misleading 0%.
+      let workComplete: number | undefined = numOrUndef(
+        a.workComplete ?? a.percentComplete ?? a.percent_complete ??
+        a.physicalPercentComplete ?? a.physical_percent_complete ??
+        a.durationPercentComplete ?? a.duration_percent_complete ??
+        a.percentDone ?? a.percent_done ?? a.progress ??
+        a.pctComplete ?? a.pct_complete ?? a.completion
+      )
+      const completedActivities = numOrUndef(a.completedActivities ?? a.completed_activities ?? a.completed ?? a.completedCount)
+      const totalActivities = num(a.totalActivities ?? a.total_activities ?? a.activityCount ?? a.activity_count, 0)
+      if (workComplete === undefined && completedActivities !== undefined && totalActivities > 0) {
+        workComplete = (completedActivities / totalActivities) * 100
+      }
+
+      const risksDetected = num(a.risksDetected ?? a.risksCount ?? a.risks_count, 0)
+      const criticalRisks = num(a.criticalRisks ?? a.critical_risks, 0)
 
       const today = new Date()
       const contractPast = contractEnd ? new Date(contractEnd) < today : false
@@ -451,10 +490,12 @@ function sortRows(rows: ProjectRowData[], key: SortKey): ProjectRowData[] {
     if (c === 'Stable') return 3
     return 4
   }
+  // Push unknown values to the end of sorts
+  const orInf = (n: number | undefined) => n === undefined ? -Infinity : n
   return [...rows].sort((a, b) => {
     if (key === 'health') return conditionRank(a.condition) - conditionRank(b.condition)
-    if (key === 'daysBehind') return b.daysBehind - a.daysBehind
-    if (key === 'workComplete') return b.workComplete - a.workComplete
+    if (key === 'daysBehind') return orInf(b.daysBehind) - orInf(a.daysBehind)
+    if (key === 'workComplete') return orInf(b.workComplete) - orInf(a.workComplete)
     if (key === 'name') return a.project.name.localeCompare(b.project.name)
     if (key === 'contractEnd') {
       const aD = a.contractEndDate === '—' ? Infinity : new Date(a.contractEndDate).getTime()
@@ -472,17 +513,24 @@ function computePortfolioKPIs(rows: ProjectRowData[]) {
   const atRisk = rows.filter(r =>
     r.condition === 'Recovery Required' || r.condition === 'Attention Needed'
   ).length
-  const totalDaysBehind = rows.reduce((sum, r) => sum + Math.max(0, r.daysBehind), 0)
-  const avgComplete = rows.length > 0
-    ? rows.reduce((sum, r) => sum + r.workComplete, 0) / rows.length
+  // Sum positive daysBehind across projects where we actually have the data
+  const totalDaysBehind = rows.reduce((sum, r) => {
+    if (r.daysBehind === undefined) return sum
+    return sum + Math.max(0, r.daysBehind)
+  }, 0)
+  // Average workComplete only across projects where we have data
+  const projectsWithWorkComplete = rows.filter(r => r.workComplete !== undefined)
+  const avgComplete = projectsWithWorkComplete.length > 0
+    ? projectsWithWorkComplete.reduce((sum, r) => sum + (r.workComplete || 0), 0) / projectsWithWorkComplete.length
     : 0
+  const hasWorkCompleteData = projectsWithWorkComplete.length > 0
   const totalActivities = rows.reduce((sum, r) => sum + r.totalActivities, 0)
   const stable = rows.filter(r => r.condition === 'Stable').length
   const monitor = rows.filter(r => r.condition === 'Monitor Closely').length
   const attention = rows.filter(r => r.condition === 'Attention Needed').length
   const recovery = rows.filter(r => r.condition === 'Recovery Required').length
   return {
-    active, onHold, completed, atRisk, totalDaysBehind, avgComplete, totalActivities,
+    active, onHold, completed, atRisk, totalDaysBehind, avgComplete, hasWorkCompleteData, totalActivities,
     stable, monitor, attention, recovery,
   }
 }
@@ -494,6 +542,14 @@ function computePortfolioKPIs(rows: ProjectRowData[]) {
 function num(v: any, fallback: number): number {
   const n = typeof v === 'number' ? v : typeof v === 'string' ? parseFloat(v) : NaN
   return isFinite(n) ? n : fallback
+}
+
+// Returns the parsed number when v is a finite number-or-string, else undefined.
+// Use when "no data" needs to be distinguishable from 0.
+function numOrUndef(v: any): number | undefined {
+  if (v === null || v === undefined || v === '') return undefined
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? parseFloat(v) : NaN
+  return isFinite(n) ? n : undefined
 }
 
 function fmtDate(d?: string): string {
