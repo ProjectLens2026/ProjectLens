@@ -572,7 +572,7 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
             <div>
               <SectionTitle>Schedule Progress</SectionTitle>
               <div className="text-[11px] text-slate-500 mt-0.5">
-                Planned vs Actual completion · Revised end <span className="text-red-600 font-semibold">{fmtDate(revisedContractCompletion || contractEnd)}</span>
+                Last 2 months + forecast · Revised end <span className="text-red-600 font-semibold">{fmtDate(revisedContractCompletion || contractEnd)}</span>
                 {' · Projected '}<span className="text-amber-600 font-semibold">{fmtDate(projectedEnd)}{daysBehindNum > 0 ? ` (+${daysBehindNum}d)` : ''}</span>
               </div>
             </div>
@@ -945,10 +945,27 @@ function ScheduleProgressChart({ data }: { data: ChartData }) {
         const safeActual = isFinite(b.actual) ? Math.max(0, Math.min(100, b.actual)) : 0
         const plannedH = innerH * (safePlanned / 100)
         const actualH = innerH * (safeActual / 100)
+        // Percentage labels above each bar. v5 — added so PMs can read the
+        // planned vs actual values directly without estimating bar heights.
+        // Forecast bars use lighter text. Skip labels for 0% to reduce clutter.
+        const plannedLabelColor = b.isForecast ? '#94a3b8' : '#1e40af'
+        const actualLabelColor = b.isForecast ? '#d97706' : '#15803d'
+        const plannedLabelY = yFor(safePlanned) - 3
+        const actualLabelY = yFor(safeActual) - 3
         return (
           <g key={i}>
             <rect x={x} y={yFor(safePlanned)} width={barW} height={plannedH} fill={plannedColor} />
             <rect x={x + barW + 4} y={yFor(safeActual)} width={barW} height={actualH} fill={actualColor} opacity={b.isForecast ? 0.85 : 1} />
+            {safePlanned > 0 && (
+              <text x={x + barW / 2} y={plannedLabelY} fontSize="8" fill={plannedLabelColor} textAnchor="middle" fontWeight="600">
+                {Math.round(safePlanned)}%
+              </text>
+            )}
+            {safeActual > 0 && (
+              <text x={x + barW + 4 + barW / 2} y={actualLabelY} fontSize="8" fill={actualLabelColor} textAnchor="middle" fontWeight="600">
+                {Math.round(safeActual)}%
+              </text>
+            )}
             <text x={padL + i * stepX} y={H - padB + 14} fontSize="9" fill={b.isToday ? '#0f172a' : '#64748b'} textAnchor="middle" fontWeight={b.isToday ? '600' : '400'}>{b.label || `M${i+1}`}</text>
             {b.sublabel && <text x={padL + i * stepX} y={H - padB + 24} fontSize="8" fill="#94a3b8" textAnchor="middle">{b.sublabel}</text>}
           </g>
@@ -1117,21 +1134,46 @@ function buildScheduleProgressData(input: {
       return synthChartData(workComplete)
     }
 
+    // ----- v5 chart window: start = max(NTP, data_date - 2 months) -----
+    // PM rationale: showing the entire NTP-to-end span on a 7-bucket chart
+    // means each bar covers 6+ months of work for a typical 3-year project,
+    // making the recent past and near-term forecast unreadable. Narrowing
+    // the window to (data_date - 2 months) → projected end keeps recent
+    // history visible (last 2 months of actuals) plus the runway to the
+    // forecast. If NTP is more recent than DD - 2M (project just started),
+    // we use NTP so we never show pre-NTP empty months.
+    const TWO_MONTHS_MS = 2 * 30.4375 * 24 * 60 * 60 * 1000  // avg month length
+    const ddMs = today.getTime()
+    const ddMinus2M = new Date(ddMs - TWO_MONTHS_MS)
+    const chartStart = ddMinus2M.getTime() > start.getTime() ? ddMinus2M : start
+    const chartStartTime = chartStart.getTime()
+
     const numBuckets = 7
     const buckets: ChartBucket[] = []
-    const startTime = start.getTime()
     const projectedTime = projected.getTime()
-    const totalSpan = projectedTime - startTime
-    const todayT = totalSpan > 0 ? Math.max(0, Math.min(1, (today.getTime() - startTime) / totalSpan)) : 0.5
-    const contractT = totalSpan > 0 ? Math.max(0, Math.min(1, (contract.getTime() - startTime) / totalSpan)) : 0.8
+    const totalSpan = projectedTime - chartStartTime
+    if (totalSpan <= 0) {
+      return synthChartData(workComplete)
+    }
+    const todayT = Math.max(0, Math.min(1, (today.getTime() - chartStartTime) / totalSpan))
+    const contractT = Math.max(0, Math.min(1, (contract.getTime() - chartStartTime) / totalSpan))
+    // For the planned-curve calculation we still need the FULL project's
+    // planned-completion-fraction at any given calendar date. Use the
+    // original NTP→contract span for that.
+    const fullStartTime = start.getTime()
+    const fullContractTime = contract.getTime()
+    const fullPlanSpan = fullContractTime - fullStartTime
 
     for (let i = 0; i < numBuckets; i++) {
       const t = i / (numBuckets - 1)
-      const bucketDate = new Date(startTime + t * totalSpan)
+      const bucketDate = new Date(chartStartTime + t * totalSpan)
       const isAfterToday = t > todayT
       const isToday = i > 0 && (todayT >= (i - 1) / (numBuckets - 1)) && (todayT <= i / (numBuckets - 1))
-      const localPlannedT = contractT > 0 ? Math.min(1, t / contractT) : 1
-      const planned = round1(localPlannedT * 100)
+      // Planned = bucket-date fraction across full NTP→Contract span
+      const plannedFrac = fullPlanSpan > 0
+        ? Math.max(0, Math.min(1, (bucketDate.getTime() - fullStartTime) / fullPlanSpan))
+        : 1
+      const planned = round1(plannedFrac * 100)
       let actual: number
       if (!isAfterToday) {
         const localActT = todayT > 0 ? Math.min(1, t / todayT) : 0
@@ -1142,7 +1184,7 @@ function buildScheduleProgressData(input: {
       }
       buckets.push({
         label: bucketDate.toLocaleString('en-US', { month: 'short' }),
-        sublabel: t === 0 ? `'${String(bucketDate.getFullYear()).slice(2)}` : undefined,
+        sublabel: `'${String(bucketDate.getFullYear()).slice(2)}`,
         planned,
         actual,
         isForecast: isAfterToday,
