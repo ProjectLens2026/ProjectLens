@@ -10,7 +10,39 @@
 //   Restore brings it back to Active. Permanent removal happens from the
 //   Deleted Items page via permanentlyDeleteProject().
 // =============================================================================
+
 export type ProjectStatus = 'Active' | 'Completed' | 'On Hold' | 'Archived' | 'Deleted'
+
+// =============================================================================
+// Contract dates — manual PM entries (added 2026-05-21).
+//
+// LAYER 1 (project-level, ContractDates):
+//   Sticky across versions. PM enters NTP + Original Contract Completion on
+//   first upload. On subsequent uploads, these pre-fill from the project
+//   but remain editable.
+//
+// LAYER 2 (version-level, VersionDates):
+//   Per-version values. Time Extension defaults to 0, editable each upload.
+//   Revised Contract Completion auto-calculates as
+//       (Original Contract Completion + Time Extension days)
+//   but PM can override to a specific date.
+//   manualDataDate is optional — if blank, the XER's data date is used.
+//
+// Where they flow to:
+//   - Executive Dashboard reads these first, falls back to XER analyzer
+//     fields when missing (handles legacy projects with no manual dates).
+//   - Durations on the dashboard use these as the source of truth.
+// =============================================================================
+export interface ContractDates {
+  ntp?: string                          // ISO date (YYYY-MM-DD)
+  originalContractCompletion?: string   // ISO date (YYYY-MM-DD)
+}
+
+export interface VersionDates {
+  timeExtensionDays: number             // default 0
+  revisedContractCompletion?: string    // ISO date — calc'd or manually overridden
+  manualDataDate?: string               // optional, XER data date used if blank
+}
 
 export interface ScheduleVersion {
   id: string
@@ -22,7 +54,9 @@ export interface ScheduleVersion {
   context?: any
   versionLabel?: string
   rawXER?: string
+  versionDates?: VersionDates           // NEW — per-version manual entries
 }
+
 export interface Project {
   id: string
   projectId?: string
@@ -37,14 +71,18 @@ export interface Project {
   versions: ScheduleVersion[]
   rfis: any[]
   changeOrders: any[]
+  contractDates?: ContractDates         // NEW — project-level manual dates
 }
+
 export interface SaveResult {
   ok: boolean
   error?: string
 }
+
 const LEGACY_PROJECTS_KEY = 'pl_projects'
 const ACTIVE_PROJECT_KEY = 'pl_active_project_id'
 const ACTIVE_VERSION_KEY = 'pl_active_version_id'
+
 const DB_NAME = 'nobelpm'
 const DB_VERSION = 1
 const PROJECTS_STORE = 'projects'
@@ -53,8 +91,41 @@ let _projects: Project[] = []
 let _hydrated = false
 let _hydrationPromise: Promise<void> | null = null
 let _dbPromise: Promise<IDBDatabase> | null = null
+
 type Listener = () => void
 const _listeners: Set<Listener> = new Set()
+
+// =============================================================================
+// Helpers for contract date math — exported so the upload form and dashboard
+// can both use the SAME calculation. Stops "off by one" disagreements.
+// =============================================================================
+
+/**
+ * Add N calendar days to an ISO date string ("YYYY-MM-DD"). Returns ISO date.
+ * Returns undefined for invalid inputs. Uses UTC math so DST does not skew.
+ */
+export function addCalendarDays(isoDate: string | undefined, days: number): string | undefined {
+  if (!isoDate) return undefined
+  const d = new Date(isoDate)
+  if (isNaN(d.getTime())) return undefined
+  const utc = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+  const result = new Date(utc + (days || 0) * 24 * 60 * 60 * 1000)
+  const yyyy = result.getUTCFullYear()
+  const mm = String(result.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(result.getUTCDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+/**
+ * Compute revised contract completion = original + time extension.
+ * Returns undefined if original date is missing.
+ */
+export function computeRevisedCompletion(
+  originalContractCompletion: string | undefined,
+  timeExtensionDays: number
+): string | undefined {
+  return addCalendarDays(originalContractCompletion, timeExtensionDays || 0)
+}
 
 function openDB(): Promise<IDBDatabase> {
   if (_dbPromise) return _dbPromise
@@ -75,6 +146,7 @@ function openDB(): Promise<IDBDatabase> {
   })
   return _dbPromise
 }
+
 async function idbGetAllProjects(): Promise<Project[]> {
   const db = await openDB()
   return new Promise<Project[]>((resolve, reject) => {
@@ -85,6 +157,7 @@ async function idbGetAllProjects(): Promise<Project[]> {
     req.onerror = () => reject(req.error || new Error('idbGetAll failed'))
   })
 }
+
 async function idbPutProject(project: Project): Promise<void> {
   const db = await openDB()
   return new Promise<void>((resolve, reject) => {
@@ -95,6 +168,7 @@ async function idbPutProject(project: Project): Promise<void> {
     req.onerror = () => reject(req.error || new Error('idbPut failed'))
   })
 }
+
 async function idbDeleteProject(id: string): Promise<void> {
   const db = await openDB()
   return new Promise<void>((resolve, reject) => {
@@ -105,6 +179,7 @@ async function idbDeleteProject(id: string): Promise<void> {
     req.onerror = () => reject(req.error || new Error('idbDelete failed'))
   })
 }
+
 async function hydrate(): Promise<void> {
   if (_hydrated) return
   try {
@@ -144,25 +219,32 @@ async function hydrate(): Promise<void> {
     notifyListeners()
   }
 }
+
 if (typeof window !== 'undefined') {
   _hydrationPromise = hydrate()
 }
+
 function notifyListeners() {
   _listeners.forEach(fn => { try { fn() } catch (err) { console.error(err) } })
 }
+
 export function subscribeToProjects(listener: Listener): () => void {
   _listeners.add(listener)
   return () => { _listeners.delete(listener) }
 }
+
 export function whenHydrated(): Promise<void> {
   return _hydrationPromise || Promise.resolve()
 }
+
 export function isHydrated(): boolean {
   return _hydrated
 }
+
 export function loadProjects(): Project[] {
   return _projects
 }
+
 export function getVersionEffectiveDate(v: ScheduleVersion): string {
   return v.dataDate || v.analysis?.dataDate || v.uploadedAt
 }
@@ -175,6 +257,7 @@ export function getActiveProjectId(): string | null {
   if (typeof window === 'undefined') return null
   try { return localStorage.getItem(ACTIVE_PROJECT_KEY) } catch { return null }
 }
+
 export function setActiveProjectId(id: string | null) {
   if (typeof window === 'undefined') return
   try {
@@ -185,10 +268,12 @@ export function setActiveProjectId(id: string | null) {
     console.error('[ControlLens] setActiveProjectId failed:', err)
   }
 }
+
 export function getActiveVersionId(): string | null {
   if (typeof window === 'undefined') return null
   try { return localStorage.getItem(ACTIVE_VERSION_KEY) } catch { return null }
 }
+
 export function setActiveVersionId(id: string | null) {
   if (typeof window === 'undefined') return
   try {
@@ -198,11 +283,13 @@ export function setActiveVersionId(id: string | null) {
     console.error('[ControlLens] setActiveVersionId failed:', err)
   }
 }
+
 export function getActiveProject(): Project | null {
   const id = getActiveProjectId()
   if (!id) return null
   return _projects.find(p => p.id === id) || null
 }
+
 export function getLatestVersion(project: Project | null): ScheduleVersion | null {
   if (!project || !project.versions || project.versions.length === 0) return null
   return [...project.versions].sort((a, b) =>
@@ -210,6 +297,7 @@ export function getLatestVersion(project: Project | null): ScheduleVersion | nul
     new Date(getVersionEffectiveDate(a)).getTime()
   )[0]
 }
+
 export function getActiveVersion(project?: Project | null): ScheduleVersion | null {
   const p = project || getActiveProject()
   if (!p) return null
@@ -220,14 +308,17 @@ export function getActiveVersion(project?: Project | null): ScheduleVersion | nu
   }
   return getLatestVersion(p)
 }
+
 export function getActiveAnalysis(): any {
   const v = getActiveVersion()
   return v?.analysis || null
 }
+
 export function getActiveProjectRFIs(): any[] {
   const p = getActiveProject()
   return p?.rfis || []
 }
+
 export function saveProjects(projects: Project[]): SaveResult {
   if (typeof window === 'undefined') return { ok: false, error: 'No window' }
   _projects = [...projects]
@@ -259,10 +350,12 @@ export function saveProjects(projects: Project[]): SaveResult {
   })
   return { ok: true }
 }
+
 export function createProject(opts: {
   name: string
   projectId?: string
   owner?: string
+  contractDates?: ContractDates    // NEW — manual NTP + Original Completion
   version: ScheduleVersion
 }): Project {
   const project: Project = {
@@ -270,6 +363,7 @@ export function createProject(opts: {
     projectId: opts.projectId,
     name: opts.name,
     owner: opts.owner,
+    contractDates: opts.contractDates,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     status: 'Active',
@@ -286,6 +380,7 @@ export function createProject(opts: {
   setActiveVersionId(opts.version.id)
   return project
 }
+
 export function addVersionToProject(projectId: string, version: ScheduleVersion): Project | null {
   const idx = _projects.findIndex(p => p.id === projectId)
   if (idx === -1) return null
@@ -303,6 +398,31 @@ export function addVersionToProject(projectId: string, version: ScheduleVersion)
   setActiveVersionId(version.id)
   return updated
 }
+
+// =============================================================================
+// updateProjectContractDates — replace the project's manual NTP + Original
+// Contract Completion. Called from the upload flow when the PM edits these
+// on an existing project. Bumps updatedAt and persists to IndexedDB.
+// =============================================================================
+export function updateProjectContractDates(
+  projectId: string,
+  dates: ContractDates
+): Project | null {
+  const idx = _projects.findIndex(p => p.id === projectId)
+  if (idx === -1) return null
+  const updated: Project = {
+    ..._projects[idx],
+    contractDates: dates,
+    updatedAt: new Date().toISOString(),
+  }
+  _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
+  notifyListeners()
+  idbPutProject(updated).catch(err => {
+    console.error('[ControlLens] updateProjectContractDates: IndexedDB persist failed:', err)
+  })
+  return updated
+}
+
 export function addRFIToActiveProject(rfi: any): Project | null {
   const id = getActiveProjectId()
   if (!id) return null
@@ -325,6 +445,7 @@ export function addRFIToActiveProject(rfi: any): Project | null {
   })
   return updated
 }
+
 export function deleteRFIFromActiveProject(rfiId: string) {
   const id = getActiveProjectId()
   if (!id) return
@@ -341,14 +462,6 @@ export function deleteRFIFromActiveProject(rfiId: string) {
   })
 }
 
-// =============================================================================
-// deleteProject — SOFT DELETE (changed 2026-05-20).
-// Moves the project to "Deleted" status with a deletedAt timestamp.
-// User sees it in the Deleted Items page where they can Restore or
-// permanently delete.
-//
-// PREVIOUS behavior (hard delete) is now permanentlyDeleteProject() below.
-// =============================================================================
 export function deleteProject(id: string) {
   const idx = _projects.findIndex(p => p.id === id)
   if (idx === -1) return
@@ -363,18 +476,12 @@ export function deleteProject(id: string) {
   idbPutProject(updated).catch(err => {
     console.error('[ControlLens] deleteProject: IndexedDB persist failed:', err)
   })
-  // If the active project was just deleted, switch to first non-deleted/non-archived
   if (getActiveProjectId() === id) {
     const fallback = _projects.find(p => p.id !== id && getProjectStatus(p) !== 'Deleted' && getProjectStatus(p) !== 'Archived')
     setActiveProjectId(fallback?.id || null)
   }
 }
 
-// =============================================================================
-// restoreProject — bring a deleted or archived project back to Active.
-// Clears deletedAt timestamp. Bumps updatedAt.
-// Added 2026-05-20.
-// =============================================================================
 export function restoreProject(id: string) {
   const idx = _projects.findIndex(p => p.id === id)
   if (idx === -1) return
@@ -391,12 +498,6 @@ export function restoreProject(id: string) {
   })
 }
 
-// =============================================================================
-// permanentlyDeleteProject — actually remove from storage (no recovery).
-// This is what the OLD deleteProject did. Called from the Deleted Items page
-// after explicit user confirmation.
-// Added 2026-05-20.
-// =============================================================================
 export function permanentlyDeleteProject(id: string) {
   _projects = _projects.filter(p => p.id !== id)
   notifyListeners()
@@ -426,6 +527,7 @@ export function deleteVersion(projectId: string, versionId: string) {
     setActiveVersionId(null)
   }
 }
+
 export function moveVersionToProject(sourceProjectId: string, versionId: string, targetProjectId: string): boolean {
   const sourceIdx = _projects.findIndex(p => p.id === sourceProjectId)
   const targetIdx = _projects.findIndex(p => p.id === targetProjectId)
@@ -459,6 +561,7 @@ export function moveVersionToProject(sourceProjectId: string, versionId: string,
   }
   return true
 }
+
 export function renameProject(id: string, newName: string, projectId?: string) {
   const idx = _projects.findIndex(p => p.id === id)
   if (idx === -1) return
@@ -483,7 +586,6 @@ export function setProjectStatus(id: string, status: ProjectStatus) {
     status,
     updatedAt: new Date().toISOString(),
   }
-  // Clear deletedAt when status changes away from Deleted
   if (status !== 'Deleted') {
     updated.deletedAt = undefined
   }
@@ -492,7 +594,6 @@ export function setProjectStatus(id: string, status: ProjectStatus) {
   idbPutProject(updated).catch(err => {
     console.error('[ControlLens] setProjectStatus: IndexedDB persist failed:', err)
   })
-  // If user archived or deleted the currently active project, switch active
   if ((status === 'Archived' || status === 'Deleted') && getActiveProjectId() === id) {
     const firstAvailable = _projects.find(p =>
       p.id !== id &&

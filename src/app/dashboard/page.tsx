@@ -1,4 +1,5 @@
 'use client'
+
 import { useState, useEffect, useMemo, Component, ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -6,24 +7,31 @@ import clsx from 'clsx'
 import {
   getActiveProject, getActiveVersion, getLatestVersion,
   subscribeToProjects, loadProjects,
+  addCalendarDays,
   Project, ScheduleVersion,
 } from '@/lib/projectStore'
 
 // =============================================================================
 // Executive Dashboard — main /dashboard page.
 //
-// Renders 7 sections in this order:
+// Renders sections in this order:
 //   1. Header bar (project, XER, last updated, action buttons)
 //   2. Health status banner (color-coded by score)
-//   3. Key Dates & Durations (6 date cells + 3 duration cells)
+//   3. Key Dates & Durations
+//        - Manual row: NTP, Original Comp, Revised Comp (from contract dates)
+//        - XER row: Data Date, Substantial, Final (from XER analysis)
+//        - Durations: Original, Revised, Remaining, At Completion
 //   4. KPI tiles (4 metrics, clickable to detail pages)
-//   5. Schedule Progress chart (NEW — planned vs actual + forecast)
+//   5. Schedule Progress chart (planned vs actual + forecast)
 //   6. Immediate Attention Areas (up to 3 risk cards)
 //   7. 2 Weeks Lookahead (milestone table)
 //   8. Bottom row: Operational Pressure | Follow-Up | Communication
 //
-// All data reads from activeVersion.analysis with safe fallbacks so the
-// dashboard still renders gracefully when fields are missing or null.
+// Contract dates flow (2026-05-21):
+//   - project.contractDates       — NTP + Original Comp (sticky across versions)
+//   - version.versionDates        — Time Ext, Revised override, manual Data Date
+//   - Dashboard reads manual values first, falls back to XER analyzer fields
+//     so legacy projects with no manual entries still render correctly.
 // =============================================================================
 
 export default function ExecutiveDashboard() {
@@ -34,8 +42,6 @@ export default function ExecutiveDashboard() {
   )
 }
 
-// Inline error boundary — catches any render error in the dashboard
-// and shows a friendly fallback instead of crashing the whole app.
 class ErrorBoundary extends Component<
   { children: ReactNode },
   { hasError: boolean; message: string }
@@ -90,7 +96,6 @@ function ExecutiveDashboardInner() {
     setVersion(p ? getActiveVersion(p) : null)
   }
 
-  // Empty state when no project is loaded
   if (!project || !version) {
     return (
       <div className="flex flex-col items-center justify-center h-full bg-slate-50 p-6">
@@ -110,35 +115,41 @@ function ExecutiveDashboardInner() {
     )
   }
 
-  // Delegate to DashboardContent so its hooks (useMemo) only run when project/version exist.
-  // This avoids React error #310 ("rendered more hooks than during the previous render")
-  // which happens when hooks are conditionally called past an early return.
   return <DashboardContent project={project} version={version} />
 }
 
-// =============================================================================
-// DashboardContent — only renders when project + version are loaded.
-// All hooks here run on EVERY render of this component (no conditional hooks).
-// =============================================================================
 function DashboardContent({ project, version }: { project: Project; version: ScheduleVersion }) {
   const a = version.analysis || {}
 
-  // --------- safe field reads (all optional, sensible fallbacks) ----------
-  const xerFile = version.fileName || 'schedule.xer'
-  const versionLabel = version.versionLabel || 'CU-01'
-  const lastUpdated = formatLastUpdated(version.uploadedAt)
+  // ============================================================================
+  // MANUAL CONTRACT DATES (project + version level) — primary source of truth
+  // ============================================================================
+  const manualNtp = project.contractDates?.ntp || undefined
+  const manualOriginalCompletion = project.contractDates?.originalContractCompletion || undefined
+  const timeExtensionDays = version.versionDates?.timeExtensionDays ?? 0
+  const manualRevisedCompletion = version.versionDates?.revisedContractCompletion || undefined
+  const manualDataDate = version.versionDates?.manualDataDate || undefined
 
+  // Revised = manual override OR (original + time extension)
+  const revisedCompletionComputed = manualOriginalCompletion
+    ? addCalendarDays(manualOriginalCompletion, timeExtensionDays)
+    : undefined
+  const revisedContractCompletion = manualRevisedCompletion || revisedCompletionComputed
+
+  // --------- safe field reads (manual first, XER fallback) ----------
+  const xerFile = version.fileName || 'schedule.xer'
+  const lastUpdated = formatLastUpdated(version.uploadedAt)
   const healthScore = num(a.healthScore, 65)
   const healthLabel = a.healthLabel || a.condition || deriveHealthLabel(healthScore)
   const healthNarrative = a.healthNarrative || a.aiSummary
     || 'Project metrics are being assessed. Detailed health insights will appear here as the schedule is analyzed.'
 
-  const dataDate = a.dataDate || a.data_date || version.dataDate || version.uploadedAt
-  const projectStart = a.projectStart || a.project_start || a.ntp || a.ntpDate || dataDate
+  // Data Date: manual → XER → uploaded
+  const dataDate = manualDataDate || a.dataDate || a.data_date || version.dataDate || version.uploadedAt
+  // NTP: manual → XER → dataDate
+  const projectStart = manualNtp || a.projectStart || a.project_start || a.ntp || a.ntpDate || dataDate
 
-  // Try direct fields first, then fall back to scanning the milestones array
-  // by common milestone codes (MILE-195 = substantial, MILE-200 = final, etc.)
-  // and by name keywords. This handles different XER analysis output shapes.
+  // Milestone detection (XER-only, unchanged)
   const milestones = Array.isArray(a.milestones) ? a.milestones : []
   const findMilestone = (codes: string[], nameKeywords: string[]) => {
     for (const m of milestones) {
@@ -151,12 +162,6 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   }
   const findMilestoneDate = (m: any) => m?.date || m?.finish || m?.actualFinish || m?.scheduledFinish || m?.early_finish || null
 
-  // Federal contract schedules use various milestone code patterns for
-  // Substantial / Final Completion. Try common variants:
-  //   - MILE-195 / MS-195 / 195 (Primavera convention for substantial)
-  //   - BCD (Beneficial Occupancy Date), SUB, M-SUB, ASB, BO (federal common)
-  //   - TCO (Temporary Certificate of Occupancy) — close enough to substantial
-  //   - 100 (sometimes used as the substantial completion code)
   const substMilestoneObj = findMilestone(
     ['MILE-195', 'MS-195', '195', 'BCD', 'SUB', 'M-SUB', 'ASB', 'BO', 'TCO', '100'],
     ['substantial', 'subst comp', 'sub completion', 'beneficial occupancy', 'beneficial occup', 'bo date', 'temp occupancy', 'temporary occupancy']
@@ -166,10 +171,10 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
     ['final completion', 'final compl', 'project finish', 'project close', 'closeout', 'project completion', 'punch list complete']
   )
 
-  // Resolve dates in order so finalCompletion can fall back to projectedEnd.
-  // Per the user's mental model: Final Completion = the projected end of the
-  // project. They're the same milestone in practice.
-  const contractEnd = a.contractEnd || a.contract_end || a.contractFinish || a.contract_finish || a.contractCompletion
+  // Contract End: MANUAL Original Contract Completion → XER fallback
+  const contractEnd = manualOriginalCompletion
+    || a.contractEnd || a.contract_end || a.contractFinish || a.contract_finish || a.contractCompletion
+
   const projectedEnd = a.projectedEnd || a.projected_end || a.forecastFinish || a.forecast_finish || a.projectedFinish || contractEnd
   const finalCompletion = a.finalCompletion || a.final_completion || a.projectFinish || a.project_finish || a.finalComp || findMilestoneDate(finalMilestoneObj) || projectedEnd
   const substantialCompletion = a.substantialCompletion || a.substantial_completion || a.substComp || a.subComp || a.substantialComp || a.substCompletion || findMilestoneDate(substMilestoneObj)
@@ -178,10 +183,15 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   const substMilestone = a.substMilestone || (substMilestoneObj?.code || substMilestoneObj?.id || '')
   const finalMilestone = a.finalMilestone || (finalMilestoneObj?.code || finalMilestoneObj?.id || '')
 
-  // Durations — compute from dates FIRST (truthful calendar-day count).
-  // The analyzer's field value is unreliable (it can be in wrong units,
-  // refer to a sub-window, or be plain wrong). Use it only as fallback
-  // when dates aren't available.
+  // ============================================================================
+  // DURATIONS — per PM formulas
+  //   Original   = NTP → Original Contract Completion  (inclusive)
+  //   Revised    = NTP → Revised Contract Completion   (inclusive)
+  //   Remaining  = Data Date → Revised Contract Completion
+  //   At Compl.  = NTP → Projected End (XER forecast)  (= Option B)
+  // All in calendar days. daysBetween() is +1 inclusive — matches the
+  // industry convention where NTP day counts as day 1.
+  // ============================================================================
   const daysBetween = (start?: string, end?: string): number | undefined => {
     if (!start || !end) return undefined
     const s = new Date(start)
@@ -189,10 +199,10 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
     if (isNaN(s.getTime()) || isNaN(e.getTime())) return undefined
     const sUTC = Date.UTC(s.getFullYear(), s.getMonth(), s.getDate())
     const eUTC = Date.UTC(e.getFullYear(), e.getMonth(), e.getDate())
-    // +1 makes this inclusive: both start and end days are counted.
     return Math.max(0, Math.round((eUTC - sUTC) / (1000 * 60 * 60 * 24))) + 1
   }
-  // Original Duration = NTP → Contract End (inclusive, calendar days)
+
+  // Original Duration = NTP → Original Contract Completion
   const originalDurationComputed = daysBetween(projectStart, contractEnd)
   const originalDurationField = numOrUndefAtTop(
     a.originalDuration ?? a.original_duration ??
@@ -202,21 +212,27 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
     a.contractDuration ?? a.contract_duration
   )
   const originalDuration = originalDurationComputed ?? originalDurationField ?? 0
-  // Remaining Duration = Data Date → Projected End (inclusive)
-  const remainingDurationComputed = daysBetween(dataDate, projectedEnd)
+  const hasOriginalDuration = originalDurationComputed !== undefined || originalDurationField !== undefined
+
+  // Revised Duration = NTP → Revised Contract Completion
+  const revisedDurationComputed = daysBetween(projectStart, revisedContractCompletion)
+  const revisedDuration = revisedDurationComputed ?? originalDuration
+
+  // Remaining Duration = Data Date → Revised Contract Completion
+  // (Was Data Date → Projected End in pre-2026-05-21 code. PM clarified:
+  // Remaining should be against the contract's revised completion, not the
+  // XER's forecast. Forecast slip is captured in At Completion + Days Behind.)
+  const remainingDurationComputed = daysBetween(dataDate, revisedContractCompletion)
   const remainingDurationField = numOrUndefAtTop(
     a.remainingDuration ?? a.remaining_duration ??
     a.atCompletionRemainingDuration
   )
   const remainingDuration = remainingDurationComputed ?? remainingDurationField ?? 0
-  const hasOriginalDuration = originalDurationComputed !== undefined || originalDurationField !== undefined
 
-  // Days behind — if analysis didn't store it, compute from contractEnd vs projectedEnd.
-  // Normalize to date-only so time-of-day / timezone parsing differences don't
-  // produce phantom +1 day diffs when the dates are actually the same calendar day.
+  // Days Behind = Projected End - Revised Contract Completion (if forecast is past contract)
   let daysBehind: number | undefined = numOrUndefAtTop(a.daysBehind ?? a.days_behind ?? a.behindContract)
-  if (daysBehind === undefined && contractEnd && projectedEnd) {
-    const cD = new Date(contractEnd)
+  if (daysBehind === undefined && revisedContractCompletion && projectedEnd) {
+    const cD = new Date(revisedContractCompletion)
     const pD = new Date(projectedEnd)
     if (!isNaN(cD.getTime()) && !isNaN(pD.getTime())) {
       const cUTC = Date.UTC(cD.getFullYear(), cD.getMonth(), cD.getDate())
@@ -227,17 +243,15 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   const daysBehindNum = daysBehind ?? 0
   const hasDaysBehind = daysBehind !== undefined
 
-  // Duration at Completion = NTP → Projected End (inclusive)
+  // At Completion Duration = NTP → Projected End (Forecast Finish from XER)
   const durationAtCompletionComputed = daysBetween(projectStart, projectedEnd)
   const durationAtCompletionField = numOrUndefAtTop(
     a.durationAtCompletion ?? a.duration_at_completion ??
     a.atCompletionDuration ?? a.at_completion_duration
   )
-  const durationAtCompletion = durationAtCompletionComputed ?? durationAtCompletionField ?? (originalDuration + daysBehindNum)
+  const durationAtCompletion = durationAtCompletionComputed ?? durationAtCompletionField ?? (revisedDuration + Math.max(0, daysBehindNum))
 
-  // Work complete — try many field variants, then compute from activities.
-  // Final fallback: time-based progress (where the project is on its timeline)
-  // so the Schedule Progress insights show something instead of "—".
+  // ----- Work complete (unchanged) -----
   let workComplete: number | undefined = numOrUndefAtTop(
     a.workComplete ?? a.percentComplete ?? a.percent_complete ??
     a.physicalPercentComplete ?? a.physical_percent_complete ??
@@ -247,13 +261,11 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   )
   const completedActivities = numOrUndefAtTop(a.completedActivities ?? a.completed_activities ?? a.completed ?? a.completedCount)
   const totalActivities = num(a.totalActivities ?? a.total_activities ?? a.activityCount ?? a.activity_count, 0)
+
   if (workComplete === undefined && completedActivities !== undefined && totalActivities > 0) {
     workComplete = (completedActivities / totalActivities) * 100
   }
-  // Time-based fallback: how far along is the project in elapsed time?
-  // Not "real" work-complete (which needs activity progress from the XER), but
-  // gives the chart and insights useful values instead of "—" until the analysis
-  // pipeline outputs real progress data.
+
   let workCompleteIsTimeBased = false
   if (workComplete === undefined && projectStart && projectedEnd && dataDate) {
     const pS = new Date(projectStart)
@@ -271,43 +283,36 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
       }
     }
   }
+
   const workCompleteNum = workComplete ?? 0
   const hasWorkComplete = workComplete !== undefined
 
   const longLeadAtRisk = num(a.longLeadAtRisk, 0)
   const longLeadTotal = num(a.longLeadTotal, 0)
-  const hasLongLeadData = a.longLeadTotal !== undefined
+
   const risksDetected = num(a.risksDetected ?? a.risksCount, 0)
   const criticalRisks = num(a.criticalRisks, 0)
-  const hasRiskData = a.risksDetected !== undefined || a.risksCount !== undefined
 
   const attentionAreas: AttentionArea[] = Array.isArray(a.attentionAreas) && a.attentionAreas.length
     ? a.attentionAreas
     : defaultAttentionAreas(daysBehindNum)
-
   const lookahead: LookaheadItem[] = Array.isArray(a.lookahead) && a.lookahead.length
     ? a.lookahead
     : defaultLookahead()
-
   const operationalPressure: PressureItem[] = Array.isArray(a.operationalPressure) && a.operationalPressure.length
     ? a.operationalPressure
     : defaultPressure()
-
   const followUp: FollowUpItem[] = Array.isArray(a.followUp) && a.followUp.length
     ? a.followUp
     : defaultFollowUp(daysBehindNum)
-
   const communicationSummary = a.communicationSummary
     || defaultCommSummary(daysBehindNum)
 
   // --------- Schedule Progress chart data ----------
-  // Computes a 7-bucket monthly chart from project start → forecast end.
-  // Uses analysis values where present; otherwise interpolates a plausible
-  // planned vs actual progression matching workComplete at the data date.
   const chartData = useMemo(
     () => buildScheduleProgressData({
       projectStart,
-      contractEnd,
+      contractEnd: revisedContractCompletion || contractEnd,  // use revised for chart's "contract end" marker
       projectedEnd,
       dataDate,
       workComplete: workCompleteNum,
@@ -315,7 +320,7 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
       actualByMonth: a.actualByMonth,
       plannedByMonth: a.plannedByMonth,
     }),
-    [projectStart, contractEnd, projectedEnd, dataDate, workCompleteNum, a.plannedVelocity, a.actualByMonth, a.plannedByMonth]
+    [projectStart, contractEnd, revisedContractCompletion, projectedEnd, dataDate, workCompleteNum, a.plannedVelocity, a.actualByMonth, a.plannedByMonth]
   )
 
   const behindByPts = workCompleteNum - chartData.plannedAtToday
@@ -324,7 +329,6 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
 
   return (
     <div className="flex flex-col h-full bg-slate-50 overflow-y-auto">
-
       {/* Header bar */}
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center justify-between flex-shrink-0">
         <div>
@@ -350,19 +354,51 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
         {/* SECTION 2: Key Dates & Durations */}
         <Card>
           <SectionTitle>Key Dates & Durations</SectionTitle>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <DateCell label="Data Date" value={fmtDate(dataDate)} sub="As of XER upload" />
-            <DateCell label="Project Start / NTP" value={fmtDate(projectStart)} sub={ntpMilestone ? `NTP Milestone (${ntpMilestone})` : ''} />
-            <DateCell label="Substantial Completion" value={fmtDate(substantialCompletion)} sub={substMilestone} />
 
-            <DateCell label="Final Completion" value={fmtDate(finalCompletion)} sub={finalMilestone} />
-            <DateCell label="Contract End" value={fmtDate(contractEnd)} sub="Per contract" highlightColor="red" />
-            <DateCell label="Projected End" value={fmtDate(projectedEnd)} sub="Per current schedule" highlightColor="amber" />
+          {/* Manual contract dates row */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <DateCell
+              label="NTP / Contract Start"
+              value={fmtDate(projectStart)}
+              sub={manualNtp ? 'Entered manually' : 'From XER'} />
+            <DateCell
+              label="Original Contract Completion"
+              value={fmtDate(contractEnd)}
+              sub={manualOriginalCompletion ? 'Entered manually' : 'From XER'}
+              highlightColor="red" />
+            <DateCell
+              label="Revised Contract Completion"
+              value={fmtDate(revisedContractCompletion)}
+              sub={
+                manualRevisedCompletion ? 'Override (manual)' :
+                timeExtensionDays > 0 ? `Original + ${timeExtensionDays}d` :
+                'No time extension'
+              }
+              highlightColor="amber" />
           </div>
-          <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-4">
+
+          {/* XER-detected dates row */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-slate-100">
+            <DateCell
+              label="Data Date"
+              value={fmtDate(dataDate)}
+              sub={manualDataDate ? 'Manual entry' : 'From XER'} />
+            <DateCell
+              label="Substantial Completion"
+              value={fmtDate(substantialCompletion)}
+              sub={substMilestone ? `${substMilestone} · From XER` : 'Detected from XER'} />
+            <DateCell
+              label="Final Completion"
+              value={fmtDate(finalCompletion)}
+              sub={finalMilestone ? `${finalMilestone} · From XER` : 'Detected from XER'} />
+          </div>
+
+          {/* Durations row — 4 cells */}
+          <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-2 md:grid-cols-4 gap-4">
             <DurationCell label="Original Duration" value={originalDuration} />
+            <DurationCell label="Revised Duration" value={revisedDuration} />
             <DurationCell label="Remaining Duration" value={remainingDuration} />
-            <DurationCell label="Duration at Completion" value={durationAtCompletion} delta={daysBehindNum} />
+            <DurationCell label="Duration at Completion" value={durationAtCompletion} delta={daysBehindNum > 0 ? daysBehindNum : undefined} />
           </div>
         </Card>
 
@@ -404,13 +440,13 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
           />
         </div>
 
-        {/* SECTION 4: Schedule Progress chart (NEW) */}
+        {/* SECTION 4: Schedule Progress chart */}
         <Card>
           <div className="flex items-start justify-between mb-3">
             <div>
               <SectionTitle>Schedule Progress</SectionTitle>
               <div className="text-[11px] text-slate-500 mt-0.5">
-                Planned vs Actual completion · Contract end <span className="text-red-600 font-semibold">{fmtDate(contractEnd)}</span>
+                Planned vs Actual completion · Revised end <span className="text-red-600 font-semibold">{fmtDate(revisedContractCompletion || contractEnd)}</span>
                 {' · Projected '}<span className="text-amber-600 font-semibold">{fmtDate(projectedEnd)}{daysBehindNum > 0 ? ` (+${daysBehindNum}d)` : ''}</span>
               </div>
             </div>
@@ -477,7 +513,6 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
 
         {/* SECTION 7: Bottom row */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {/* Operational Pressure */}
           <Card compact>
             <SectionTitle>Operational Pressure</SectionTitle>
             <div className="text-xs">
@@ -492,7 +527,7 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
               ))}
             </div>
           </Card>
-          {/* Recommended Follow-Up */}
+
           <Card compact>
             <SectionTitle>Recommended Follow-Up</SectionTitle>
             <div className="space-y-1.5 text-xs text-slate-700 leading-relaxed">
@@ -506,7 +541,7 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
               ))}
             </div>
           </Card>
-          {/* Communication Summary */}
+
           <div className="bg-sky-50 border border-sky-200 rounded-xl p-3">
             <div className="text-xs font-semibold text-sky-900 mb-1.5">Communication Summary</div>
             <div className="text-xs text-sky-800 leading-relaxed">{communicationSummary}</div>
@@ -521,14 +556,13 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
             </div>
           </div>
         </div>
-
       </div>
     </div>
   )
 }
 
 // =============================================================================
-// Sub-components
+// Sub-components — unchanged from prior version
 // =============================================================================
 
 function Card({ children, compact }: { children: React.ReactNode; compact?: boolean }) {
@@ -668,7 +702,7 @@ function ChartLegend() {
 }
 
 // =============================================================================
-// Schedule Progress chart — SVG-based, monthly buckets, with markers
+// Schedule Progress chart — unchanged
 // =============================================================================
 
 interface ChartBucket {
@@ -681,6 +715,7 @@ interface ChartBucket {
   isContract: boolean
   isProjected: boolean
 }
+
 interface ChartData {
   buckets: ChartBucket[]
   todayIndex: number
@@ -721,14 +756,12 @@ function ScheduleProgressChart({ data }: { data: ChartData }) {
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto' }}>
-      {/* gridlines */}
       {[0, 25, 50, 75, 100].map(p => (
         <g key={p}>
           <line x1={padL} y1={yFor(p)} x2={W - padR} y2={yFor(p)} stroke="#e2e8f0" strokeWidth="0.5" strokeDasharray={p === 0 ? '0' : '2'} />
           <text x={padL - 6} y={yFor(p) + 3} fontSize="9" fill="#94a3b8" textAnchor="end">{p}%</text>
         </g>
       ))}
-      {/* markers */}
       {todayIndex >= 0 && todayIndex < buckets.length && (
         <g>
           <line x1={padL + todayIndex * stepX} y1={padT} x2={padL + todayIndex * stepX} y2={H - padB} stroke="#94a3b8" strokeWidth="0.5" strokeDasharray="2,2" />
@@ -747,7 +780,6 @@ function ScheduleProgressChart({ data }: { data: ChartData }) {
           <text x={padL + projectedIndex * stepX} y={padT - 4} fontSize="9" fill="#d97706" textAnchor="middle" fontWeight="600">Forecast End</text>
         </g>
       )}
-      {/* bars */}
       {buckets.map((b, i) => {
         const x = xAt(i)
         const plannedColor = b.isForecast ? 'rgba(37, 99, 235, 0.3)' : '#2563eb'
@@ -770,7 +802,7 @@ function ScheduleProgressChart({ data }: { data: ChartData }) {
 }
 
 // =============================================================================
-// Helpers
+// Helpers — unchanged
 // =============================================================================
 
 function num(v: any, fallback: number): number {
@@ -778,8 +810,6 @@ function num(v: any, fallback: number): number {
   return isFinite(n) ? n : fallback
 }
 
-// Returns the parsed number when v is a finite number-or-string, else undefined.
-// Use when "no data" needs to be distinguishable from 0.
 function numOrUndefAtTop(v: any): number | undefined {
   if (v === null || v === undefined || v === '') return undefined
   const n = typeof v === 'number' ? v : typeof v === 'string' ? parseFloat(v) : NaN
@@ -791,7 +821,6 @@ function fmtDate(d?: string): string {
   try {
     const dt = new Date(d)
     if (isNaN(dt.getTime())) return String(d)
-    // MM/DD/YYYY format
     const mm = String(dt.getMonth() + 1).padStart(2, '0')
     const dd = String(dt.getDate()).padStart(2, '0')
     const yyyy = dt.getFullYear()
@@ -875,7 +904,7 @@ function defaultCommSummary(daysBehind: number): string {
 }
 
 // =============================================================================
-// Chart data builder
+// Chart data builder — unchanged
 // =============================================================================
 
 function buildScheduleProgressData(input: {
@@ -895,7 +924,6 @@ function buildScheduleProgressData(input: {
     const today = safeDate(input.dataDate) || new Date()
     const workComplete = num(input.workComplete, 0)
 
-    // If both planned and actual time series are provided, use them directly.
     if (Array.isArray(input.plannedByMonth) && Array.isArray(input.actualByMonth)
         && input.plannedByMonth.length === input.actualByMonth.length
         && input.plannedByMonth.length >= 3) {
@@ -925,12 +953,9 @@ function buildScheduleProgressData(input: {
       }
     }
 
-    // Otherwise — compute a plausible monthly progression
     if (!start || !contract || !projected) {
       return synthChartData(workComplete)
     }
-
-    // Sanity check: projected must be > start, contract should be > start
     if (projected.getTime() <= start.getTime() || contract.getTime() <= start.getTime()) {
       return synthChartData(workComplete)
     }
@@ -948,12 +973,8 @@ function buildScheduleProgressData(input: {
       const bucketDate = new Date(startTime + t * totalSpan)
       const isAfterToday = t > todayT
       const isToday = i > 0 && (todayT >= (i - 1) / (numBuckets - 1)) && (todayT <= i / (numBuckets - 1))
-
-      // Planned curve: linear from 0% at start to 100% at contractT
       const localPlannedT = contractT > 0 ? Math.min(1, t / contractT) : 1
       const planned = round1(localPlannedT * 100)
-
-      // Actual: linear from 0 to workComplete at todayT; forecast linear from workComplete to 100% at projected end
       let actual: number
       if (!isAfterToday) {
         const localActT = todayT > 0 ? Math.min(1, t / todayT) : 0
@@ -962,7 +983,6 @@ function buildScheduleProgressData(input: {
         const remainingT = (1 - todayT) > 0 ? (t - todayT) / (1 - todayT) : 1
         actual = round1(Math.min(100, workComplete + remainingT * (100 - workComplete)))
       }
-
       buckets.push({
         label: bucketDate.toLocaleString('en-US', { month: 'short' }),
         sublabel: t === 0 ? `'${String(bucketDate.getFullYear()).slice(2)}` : undefined,
@@ -979,7 +999,6 @@ function buildScheduleProgressData(input: {
     const contractIndex = Math.round(contractT * (numBuckets - 1))
     const projectedIndex = numBuckets - 1
 
-    // Velocity (compare last actual bucket to one ~3 buckets back)
     const actualBuckets = buckets.filter(b => !b.isForecast)
     let velocityPerMonth = 0
     if (actualBuckets.length >= 2) {
@@ -1007,15 +1026,12 @@ function buildScheduleProgressData(input: {
       requiredVelocityToHitContract,
     }
   } catch (err) {
-    // Any unexpected math/date issue — fall back to synthetic data so the
-    // dashboard still renders. The error gets logged for debugging.
     console.warn('[ExecutiveDashboard] chart data builder failed, using fallback:', err)
     return synthChartData(num(input.workComplete, 0))
   }
 }
 
 function synthChartData(workComplete: number): ChartData {
-  // Fallback synthetic data when dates are not available
   const buckets: ChartBucket[] = [
     { label: 'M1', planned: 5, actual: 4, isForecast: false, isToday: false, isContract: false, isProjected: false },
     { label: 'M2', planned: 15, actual: 12, isForecast: false, isToday: false, isContract: false, isProjected: false },
@@ -1041,15 +1057,11 @@ function safeDate(s?: string): Date | null {
   const d = new Date(s)
   return isNaN(d.getTime()) ? null : d
 }
+
 function monthsBetween(a: Date, b: Date): number {
   return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth()) + (b.getDate() - a.getDate()) / 30
 }
-function findIndexClosest(buckets: ChartBucket[], start: Date, end: Date, target: Date): number {
-  if (target <= start) return 0
-  if (target >= end) return buckets.length - 1
-  const t = (target.getTime() - start.getTime()) / (end.getTime() - start.getTime())
-  return Math.round(t * (buckets.length - 1))
-}
+
 function round1(n: number): number {
   return Math.round(n * 10) / 10
 }
