@@ -113,36 +113,48 @@ export interface XERAnalysis {
   remainingDurationDays?: number
   actualDurationDays?: number
   durationAtCompletion?: number
-  // === NEW (Day 5, v2) — Work % Complete using PM-defined formula ===
-  // workCompletePct: Average of effective % complete across all activities.
-  // For each activity:
+  // === Work % Complete (Day 5, v3 — construction only) ===
+  // workCompletePct: Average of effective % complete across CONSTRUCTION
+  // activities only (milestones, submittals, procurement, design, closeout
+  // are excluded — see classifyForWorkPct in analyzeXER).
+  // For each construction activity:
   //   effective% = 100 if (status_code === 'TK_Complete' OR phys_complete_pct >= 80)
   //                else phys_complete_pct
-  // Result = mean of effective% across all activities.
-  // Replaces the old per-task percent_complete average which ignored the
-  // 80% threshold and treated stale TK_NotStart codes too literally.
+  // Result = mean of effective% across construction activities only.
   workCompletePct?: number
-  // Number of activities that meet the >=80% OR status=Complete rule.
+  // Number of construction activities at the >=80% OR status=Complete bar.
   // Displayed as "X of Y complete (>=80%)" subtitle on the dashboard.
   completedAtThreshold?: number
-  // Activities currently in progress: have act_start_date but not at the
-  // 80% threshold. Used in the dashboard's "Work % calculation" explainer.
+  // Construction activities with phys%>0 but <80 (and not flagged Complete).
   workInProgressCount?: number
-  // Average phys_complete_pct of the in-progress activities (the ones that
-  // count toward the % but aren't 100). Used in the explainer text.
+  // Average phys_complete_pct of in-progress construction activities.
   workInProgressAvgPct?: number
-  // Activities with no actual start and 0% physical progress. Used in the
-  // dashboard explainer ("X not started").
+  // Construction activities with no progress (phys%=0 and not Complete).
   workNotStartedCount?: number
-  // === NEW (Day 5, v2) — Long Lead at Risk ===
-  // longLeadTotal: count of long-lead items detected (>=35d duration with
-  // PROC/FABRICAT/DELIVER/LONG LEAD keywords). Just longLeadItems.length
-  // pre-computed for convenience.
+  // Total construction activity count (after exclusions).
+  constructionActivityCount?: number
+  // Total activities excluded (sum of the five buckets below).
+  excludedFromWorkPctCount?: number
+  // Per-category exclusion counts for the dashboard explainer.
+  excludedMilestoneCount?: number
+  excludedSubmittalCount?: number
+  excludedProcurementCount?: number
+  excludedDesignCount?: number
+  excludedCloseoutCount?: number
+  // === Long Lead at Risk (Day 5, v2) ===
+  // longLeadTotal: count of long-lead items detected.
   longLeadTotal?: number
-  // longLeadAtRisk: subset of longLeadItems where floatDays <= 14.
-  // PM threshold — two weeks of float or less = at risk of impacting
-  // critical path. Founder can adjust later.
+  // longLeadAtRisk: subset of longLeadItems where floatDays <= 14
+  // calendar days. PM threshold — two weeks of float or less = at risk.
   longLeadAtRisk?: number
+  // === Risks Detected (Day 5, v3) ===
+  // risksDetected: total count of schedule risk items the analyzer flagged.
+  // Sum of criticalDrivers.length + outOfSequence.length + noTies.length.
+  // Long Lead at Risk is intentionally NOT included (has its own tile).
+  risksDetected?: number
+  // criticalRisks: just the count of critical drivers (float<=0, not done).
+  // Shown in the Risks Detected tile subtitle as "X critical".
+  criticalRisks?: number
 }
 // A single relationship-level violation. An out-of-sequence activity may
 // have multiple violations (one per predecessor whose logic was broken by
@@ -723,32 +735,85 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   const remainingDurationDays = calcCalendarDays(dataDateStr, forecastEnd)
   const durationAtCompletion = calcCalendarDays(planStart, forecastEnd)
   // ==========================================================================
-  // NEW (Day 5, v2) — Work % Complete using PM-defined formula
+  // Work % Complete — PM-defined formula (Day 5, v3 — construction only)
   // ==========================================================================
   //
-  // Founder rule: for each activity, compute an "effective % complete":
+  // Founder rule (REFINED in v3): Physical % complete should reflect the
+  // CONSTRUCTION work in the field — not the milestones, submittals,
+  // procurement items, design activities, or closeout punch list. Those
+  // distort the picture because:
+  //   - Milestones jump from 0% to 100% with no in-between
+  //   - Submittals are admin work, not physical progress
+  //   - Procurement is fabrication/delivery, not site work
+  //   - Design is engineering, separate accounting
+  //   - Closeout (punch, warranty, turnover) happens after substantial
+  //     completion and skews the late-project picture
+  //
+  // For each construction activity, compute "effective % complete":
   //   - If status_code === 'TK_Complete' OR phys_complete_pct >= 80 → 100
   //   - Else → use phys_complete_pct as-is
-  // Then average across ALL activities. That's Work % Complete.
+  // Then average across the CONSTRUCTION subset. That's Work % Complete.
   //
-  // Why: the raw P6 percent_complete field is misleading because some
-  // schedulers leave the status code at TK_NotStart after recording physical
-  // progress, and others mark TK_Active without setting phys_complete_pct.
-  // The >=80% threshold + status check together cover both data quirks.
+  // For DCDGS-like schedules (~1000 activities total) this typically yields
+  // ~350 construction activities. The excluded count is exposed to the
+  // dashboard so the explainer can show "X construction activities (Y
+  // excluded as milestones/submittals/procurement/design/closeout)".
   //
-  // Also computed here for the dashboard explainer:
-  //   workCompletePct          — the % number itself
-  //   completedAtThreshold     — count of activities counted as 100
-  //   workInProgressCount      — count of activities with phys%>0 but <80
-  //                               (and not flagged Complete)
-  //   workInProgressAvgPct     — average phys% of the in-progress ones
-  //   workNotStartedCount      — count with no actual start AND phys%=0
+  // Exclusion rules (any match = exclude):
+  //
+  //   Milestones        task_type === 'TT_Mile' | 'TT_FinMile' | 'TT_StartMile'
+  //   Submittals        name has SUBMIT, SUBMITTAL, REVIEW, APPROVAL, APPROVE
+  //   Procurement       name/code has PROC, PRO-, FABRICAT, DELIVER, PROCURE,
+  //                     LONG LEAD, LEAD TIME
+  //   Design            name has DESIGN, ENGINEERING, ENG-, DWG, DRAWING
+  //   Closeout          name has CLOSEOUT, CLOSE OUT, PUNCH LIST, TURNOVER,
+  //                     FINAL ACCEPTANCE, COMMISSION, COMMISSIONING, WARRANTY,
+  //                     PCD (project completion document)
+  const SUBMITTAL_KW = ['SUBMIT', 'SUBMITTAL', 'REVIEW', 'APPROVAL', 'APPROVE']
+  // PROCUREMENT_KW intentionally mirrors LONG_LEAD_KEYWORDS plus additional
+  // procurement-only terms — anything detected as procurement is excluded
+  // from physical % regardless of duration.
+  const PROCUREMENT_KW = ['PROC', 'PRO-', 'FABRICAT', 'DELIVER', 'PROCURE', 'LONG LEAD', 'LEAD TIME']
+  const DESIGN_KW = ['DESIGN', 'ENGINEERING', 'ENG-', 'DWG', 'DRAWING']
+  const CLOSEOUT_KW = ['CLOSEOUT', 'CLOSE OUT', 'PUNCH LIST', 'TURNOVER', 'FINAL ACCEPTANCE', 'COMMISSION', 'COMMISSIONING', 'WARRANTY', 'PCD']
+  // Classify an activity. Returns the exclusion reason or null if it's
+  // a construction activity. Exposed counters help the dashboard show
+  // the PM exactly what was excluded.
+  const classifyForWorkPct = (t: Task): 'milestone' | 'submittal' | 'procurement' | 'design' | 'closeout' | null => {
+    if (t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile' || t.task_type === 'TT_StartMile') {
+      return 'milestone'
+    }
+    const upper = (t.task_name || '').toUpperCase() + ' ' + (t.task_code || '').toUpperCase()
+    if (SUBMITTAL_KW.some(k => upper.includes(k))) return 'submittal'
+    if (PROCUREMENT_KW.some(k => upper.includes(k))) return 'procurement'
+    if (DESIGN_KW.some(k => upper.includes(k))) return 'design'
+    if (CLOSEOUT_KW.some(k => upper.includes(k))) return 'closeout'
+    return null
+  }
   let sumEffective = 0
   let completedAtThreshold = 0
   let inProgressSum = 0
   let workInProgressCount = 0
   let workNotStartedCount = 0
+  let constructionActivityCount = 0
+  let excludedMilestoneCount = 0
+  let excludedSubmittalCount = 0
+  let excludedProcurementCount = 0
+  let excludedDesignCount = 0
+  let excludedCloseoutCount = 0
   for (const t of taskArr) {
+    const exclusion = classifyForWorkPct(t)
+    if (exclusion) {
+      // Bump the right exclusion counter so the dashboard can show the
+      // PM exactly how the filter trimmed the activity list.
+      if (exclusion === 'milestone') excludedMilestoneCount += 1
+      else if (exclusion === 'submittal') excludedSubmittalCount += 1
+      else if (exclusion === 'procurement') excludedProcurementCount += 1
+      else if (exclusion === 'design') excludedDesignCount += 1
+      else if (exclusion === 'closeout') excludedCloseoutCount += 1
+      continue
+    }
+    constructionActivityCount += 1
     const pctRaw = parseFloat(t.phys_complete_pct || '0')
     const pct = isNaN(pctRaw) ? 0 : pctRaw
     const isDone = t.status_code === 'TK_Complete' || pct >= 80
@@ -764,8 +829,32 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       workNotStartedCount += 1
     }
   }
-  const workCompletePct = taskArr.length > 0 ? sumEffective / taskArr.length : 0
+  const workCompletePct = constructionActivityCount > 0
+    ? sumEffective / constructionActivityCount
+    : 0
   const workInProgressAvgPct = workInProgressCount > 0 ? inProgressSum / workInProgressCount : 0
+  const excludedFromWorkPctCount =
+    excludedMilestoneCount + excludedSubmittalCount + excludedProcurementCount +
+    excludedDesignCount + excludedCloseoutCount
+  // ==========================================================================
+  // RISKS DETECTED — Day 5, v3
+  // ==========================================================================
+  //
+  // PM-defined: the dashboard's "Risks Detected" tile was reading
+  // a.risksDetected which the analyzer wasn't computing, so it always
+  // showed 0 even when the schedule had real issues. Now we sum the
+  // three schedule-risk categories the analyzer already detects:
+  //
+  //   Critical drivers — activities with float<=0 and not complete
+  //   OOS sequence problems — relationship violations from actual progress
+  //   No-ties — activities missing predecessor or successor logic ties
+  //
+  // criticalRisks = just the critical-drivers count (shown in tile subtitle).
+  //
+  // Long Lead at Risk is intentionally NOT included here — it has its own
+  // KPI tile and would double-count if combined.
+  const risksDetected = criticalDrivers.length + outOfSequence.length + noTies.length
+  const criticalRisks = criticalDrivers.length
   return {
     totalActivities: taskArr.length,
     complete, inProgress, notStarted, negativeFloat,
@@ -786,14 +875,24 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     finalCompletionDate: finalDate,
     finalCompletionMilestone: finalMilestone?.task_code,
     originalDurationDays, remainingDurationDays, actualDurationDays, durationAtCompletion,
-    // NEW (Day 5, v2) — Work % Complete fields
+    // Work % Complete fields (Day 5, v3 — construction-only)
     workCompletePct,
     completedAtThreshold,
     workInProgressCount,
     workInProgressAvgPct,
     workNotStartedCount,
-    // NEW (Day 5, v2) — Long Lead at Risk fields
+    constructionActivityCount,
+    excludedFromWorkPctCount,
+    excludedMilestoneCount,
+    excludedSubmittalCount,
+    excludedProcurementCount,
+    excludedDesignCount,
+    excludedCloseoutCount,
+    // Long Lead at Risk fields (v2)
     longLeadTotal,
     longLeadAtRisk,
+    // Risks Detected fields (v3)
+    risksDetected,
+    criticalRisks,
   }
 }

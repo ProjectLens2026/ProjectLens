@@ -272,6 +272,14 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   const wcInProgressCount = numOrUndefAtTop(a.workInProgressCount)
   const wcInProgressAvgPct = numOrUndefAtTop(a.workInProgressAvgPct)
   const wcNotStartedCount = numOrUndefAtTop(a.workNotStartedCount)
+  // v3 — construction-only filtering numbers
+  const wcConstructionCount = numOrUndefAtTop(a.constructionActivityCount)
+  const wcExcludedCount = numOrUndefAtTop(a.excludedFromWorkPctCount)
+  const wcExcludedMilestone = numOrUndefAtTop(a.excludedMilestoneCount)
+  const wcExcludedSubmittal = numOrUndefAtTop(a.excludedSubmittalCount)
+  const wcExcludedProcurement = numOrUndefAtTop(a.excludedProcurementCount)
+  const wcExcludedDesign = numOrUndefAtTop(a.excludedDesignCount)
+  const wcExcludedCloseout = numOrUndefAtTop(a.excludedCloseoutCount)
   const hasWorkCompleteBreakdown =
     wcCompletedAtThreshold !== undefined &&
     wcInProgressCount !== undefined &&
@@ -342,8 +350,22 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   longLeadTotal = longLeadTotal ?? 0
   longLeadAtRisk = longLeadAtRisk ?? 0
 
-  const risksDetected = num(a.risksDetected ?? a.risksCount, 0)
-  const criticalRisks = num(a.criticalRisks, 0)
+  // Risks Detected — Day 5, v3
+  // Analyzer now computes risksDetected = criticalDrivers + outOfSequence + noTies
+  // and criticalRisks = criticalDrivers count. Legacy versions (analyzed
+  // before v3) didn't compute these fields, so fall back to counting from
+  // the arrays directly when present.
+  let risksDetected = numOrUndefAtTop(a.risksDetected ?? a.risksCount)
+  let criticalRisks = numOrUndefAtTop(a.criticalRisks)
+  if (risksDetected === undefined) {
+    const cd = Array.isArray(a.criticalDrivers) ? a.criticalDrivers.length : 0
+    const oos = Array.isArray(a.outOfSequence) ? a.outOfSequence.length : 0
+    const nt = Array.isArray(a.noTies) ? a.noTies.length : 0
+    risksDetected = cd + oos + nt
+  }
+  if (criticalRisks === undefined) {
+    criticalRisks = Array.isArray(a.criticalDrivers) ? a.criticalDrivers.length : 0
+  }
 
   const attentionAreas: AttentionArea[] = Array.isArray(a.attentionAreas) && a.attentionAreas.length
     ? a.attentionAreas
@@ -480,7 +502,9 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
               !hasWorkComplete ? 'No activity data' :
               workCompleteIsTimeBased ? 'Time-based estimate' :
               hasWorkCompleteBreakdown
-                ? `${wcCompletedAtThreshold!.toLocaleString()} of ${totalActivities.toLocaleString()} complete (≥80%)`
+                ? (wcConstructionCount !== undefined
+                    ? `${wcCompletedAtThreshold!.toLocaleString()} of ${wcConstructionCount.toLocaleString()} construction (≥80%)`
+                    : `${wcCompletedAtThreshold!.toLocaleString()} of ${totalActivities.toLocaleString()} complete (≥80%)`)
                 : completedActivities !== undefined
                   ? `${completedActivities.toLocaleString()} of ${totalActivities.toLocaleString()} activities`
                   : totalActivities > 0 ? `${totalActivities.toLocaleString()} activities total` : 'Computed'
@@ -491,7 +515,7 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
             href="/dashboard/procurement"
             label="Long Lead at Risk"
             value={String(longLeadAtRisk)}
-            sub={longLeadAtRisk === 0 ? `✓ ${longLeadTotal} long lead total` : `of ${longLeadTotal} long lead`}
+            sub={longLeadAtRisk === 0 ? `✓ none ≤14d float · ${longLeadTotal} total` : `≤14d float · ${longLeadTotal} total`}
             valueColor={longLeadAtRisk === 0 ? 'green' : 'red'}
           />
           <KPITile
@@ -503,10 +527,12 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
           />
         </div>
 
-        {/* WORK % CALCULATION EXPLAINER — Day 5, v2
+        {/* WORK % CALCULATION EXPLAINER — Day 5, v3
             Shows the math behind the Work Complete tile so PMs see what
-            drove the percentage. Hidden if breakdown data is unavailable
-            (legacy versions analyzed before v2). */}
+            drove the percentage. v3 makes the construction-only scope
+            explicit, and shows which activity categories were excluded
+            from the average. Hidden if breakdown data is unavailable
+            (legacy versions). */}
         {hasWorkComplete && hasWorkCompleteBreakdown && (
           <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 -mt-2 mb-2">
             <div className="flex items-start gap-3">
@@ -520,7 +546,20 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
                 {' + '}
                 <span className="font-semibold text-slate-900">{wcNotStartedCount!.toLocaleString()}</span> not started (0%)
                 {' = '}
-                <span className="font-semibold text-slate-900">{Math.round(workCompleteNum)}%</span> across {totalActivities.toLocaleString()} activities
+                <span className="font-semibold text-slate-900">{Math.round(workCompleteNum)}%</span> across{' '}
+                {wcConstructionCount !== undefined
+                  ? <><span className="font-semibold">{wcConstructionCount.toLocaleString()}</span> construction activities</>
+                  : <>{totalActivities.toLocaleString()} activities</>}
+                {wcExcludedCount !== undefined && wcExcludedCount > 0 && (
+                  <span className="block text-slate-500 mt-1">
+                    Excluded <span className="font-semibold text-slate-700">{wcExcludedCount.toLocaleString()}</span> non-construction activities:{' '}
+                    {wcExcludedMilestone !== undefined && wcExcludedMilestone > 0 && <>{wcExcludedMilestone} milestones · </>}
+                    {wcExcludedSubmittal !== undefined && wcExcludedSubmittal > 0 && <>{wcExcludedSubmittal} submittals · </>}
+                    {wcExcludedProcurement !== undefined && wcExcludedProcurement > 0 && <>{wcExcludedProcurement} procurement · </>}
+                    {wcExcludedDesign !== undefined && wcExcludedDesign > 0 && <>{wcExcludedDesign} design · </>}
+                    {wcExcludedCloseout !== undefined && wcExcludedCloseout > 0 && <>{wcExcludedCloseout} closeout</>}
+                  </span>
+                )}
               </div>
             </div>
           </div>
