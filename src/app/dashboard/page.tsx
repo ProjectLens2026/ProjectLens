@@ -178,24 +178,47 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   const substMilestone = a.substMilestone || (substMilestoneObj?.code || substMilestoneObj?.id || '')
   const finalMilestone = a.finalMilestone || (finalMilestoneObj?.code || finalMilestoneObj?.id || '')
 
-  const originalDuration = num(a.originalDuration, 0)
-  const remainingDuration = num(a.remainingDuration, 0)
-  const hasOriginalDuration = a.originalDuration !== undefined
+  // Durations — compute from dates when possible (more reliable than trusting
+  // an analysis-level field that may be in unexpected units like work-hours).
+  // Falls back to the explicit field only if dates aren't available.
+  const daysBetween = (start?: string, end?: string): number | undefined => {
+    if (!start || !end) return undefined
+    const s = new Date(start)
+    const e = new Date(end)
+    if (isNaN(s.getTime()) || isNaN(e.getTime())) return undefined
+    const sUTC = Date.UTC(s.getFullYear(), s.getMonth(), s.getDate())
+    const eUTC = Date.UTC(e.getFullYear(), e.getMonth(), e.getDate())
+    return Math.max(0, Math.round((eUTC - sUTC) / (1000 * 60 * 60 * 24)))
+  }
+  // Original Duration = NTP → Contract End
+  const originalDurationComputed = daysBetween(projectStart, contractEnd)
+  const originalDuration = originalDurationComputed ?? num(a.originalDuration, 0)
+  // Remaining Duration = Data Date → Projected End
+  const remainingDurationComputed = daysBetween(dataDate, projectedEnd)
+  const remainingDuration = remainingDurationComputed ?? num(a.remainingDuration, 0)
+  const hasOriginalDuration = originalDurationComputed !== undefined
 
   // Days behind — if analysis didn't store it, compute from contractEnd vs projectedEnd.
-  // Positive = behind, negative = ahead, undefined = can't determine.
+  // Normalize to date-only so time-of-day / timezone parsing differences don't
+  // produce phantom +1 day diffs when the dates are actually the same calendar day.
   let daysBehind: number | undefined = numOrUndefAtTop(a.daysBehind ?? a.days_behind ?? a.behindContract)
   if (daysBehind === undefined && contractEnd && projectedEnd) {
-    const cEnd = new Date(contractEnd).getTime()
-    const pEnd = new Date(projectedEnd).getTime()
-    if (isFinite(cEnd) && isFinite(pEnd)) {
-      daysBehind = Math.round((pEnd - cEnd) / (1000 * 60 * 60 * 24))
+    const cD = new Date(contractEnd)
+    const pD = new Date(projectedEnd)
+    if (!isNaN(cD.getTime()) && !isNaN(pD.getTime())) {
+      const cUTC = Date.UTC(cD.getFullYear(), cD.getMonth(), cD.getDate())
+      const pUTC = Date.UTC(pD.getFullYear(), pD.getMonth(), pD.getDate())
+      daysBehind = Math.round((pUTC - cUTC) / (1000 * 60 * 60 * 24))
     }
   }
   const daysBehindNum = daysBehind ?? 0
   const hasDaysBehind = daysBehind !== undefined
 
-  const durationAtCompletion = num(a.durationAtCompletion, originalDuration + daysBehindNum)
+  // Duration at Completion = NTP → Projected End. Compute from dates so we
+  // never trust a stale or wrong-unit field value (saw 802 in real data when
+  // the calendar diff is ~192).
+  const durationAtCompletionComputed = daysBetween(projectStart, projectedEnd)
+  const durationAtCompletion = durationAtCompletionComputed ?? num(a.durationAtCompletion, originalDuration + daysBehindNum)
 
   // Work complete — try many field variants, then compute from activities.
   // undefined when truly no data — UI shows "—" instead of misleading 0%.
@@ -355,19 +378,21 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
           <ScheduleProgressChart data={chartData} />
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3 pt-3 border-t border-slate-100">
             <InsightCell
-              label={behindByPts >= 0 ? 'Ahead of plan by' : 'Behind plan by'}
-              value={`${behindByPts >= 0 ? '+' : ''}${behindByPts.toFixed(1)} percentage pts`}
-              color={behindByPts >= 0 ? 'green' : 'red'}
+              label={!hasWorkComplete ? 'Plan variance' : (behindByPts >= 0 ? 'Ahead of plan by' : 'Behind plan by')}
+              value={!hasWorkComplete ? '—' : `${behindByPts >= 0 ? '+' : ''}${behindByPts.toFixed(1)} percentage pts`}
+              color={!hasWorkComplete ? 'slate' : (behindByPts >= 0 ? 'green' : 'red')}
             />
             <InsightCell
               label="Velocity (last 3 mo)"
-              value={`~${velocityPerMonth.toFixed(1)}% / month`}
+              value={!hasWorkComplete ? '—' : `~${velocityPerMonth.toFixed(1)}% / month`}
               color="slate"
             />
             <InsightCell
               label="Required velocity to hit contract"
-              value={requiredVelocity === Infinity ? '— (already past)' : `~${requiredVelocity.toFixed(1)}% / month`}
-              color={requiredVelocity === Infinity || requiredVelocity > velocityPerMonth * 1.5 ? 'red' : 'slate'}
+              value={!hasWorkComplete
+                ? '—'
+                : (requiredVelocity === Infinity ? '— (already past)' : `~${requiredVelocity.toFixed(1)}% / month`)}
+              color={!hasWorkComplete ? 'slate' : (requiredVelocity === Infinity || requiredVelocity > velocityPerMonth * 1.5 ? 'red' : 'slate')}
             />
           </div>
         </Card>

@@ -435,10 +435,14 @@ function buildRows(projects: Project[]): ProjectRowData[] {
       // Positive = behind, negative = ahead, undefined = unknown.
       let daysBehind: number | undefined = numOrUndef(a.daysBehind ?? a.days_behind ?? a.behindContract)
       if (daysBehind === undefined && projectedEnd && contractEnd) {
-        const cEnd = new Date(contractEnd).getTime()
-        const pEnd = new Date(projectedEnd).getTime()
-        if (isFinite(cEnd) && isFinite(pEnd)) {
-          daysBehind = Math.round((pEnd - cEnd) / (1000 * 60 * 60 * 24))
+        // Normalize both to date-only so time-of-day / timezone parsing differences
+        // don't produce phantom +1 day diffs when the dates are actually the same.
+        const cD = new Date(contractEnd)
+        const pD = new Date(projectedEnd)
+        if (!isNaN(cD.getTime()) && !isNaN(pD.getTime())) {
+          const cUTC = Date.UTC(cD.getFullYear(), cD.getMonth(), cD.getDate())
+          const pUTC = Date.UTC(pD.getFullYear(), pD.getMonth(), pD.getDate())
+          daysBehind = Math.round((pUTC - cUTC) / (1000 * 60 * 60 * 24))
         }
       }
 
