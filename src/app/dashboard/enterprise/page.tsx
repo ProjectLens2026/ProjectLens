@@ -1,5 +1,4 @@
 'use client'
-
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import clsx from 'clsx'
@@ -9,7 +8,6 @@ import {
   getProjectStatus,
   Project, ProjectStatus,
 } from '@/lib/projectStore'
-
 // =============================================================================
 // Enterprise Dashboard — portfolio-level view across ALL projects in the workspace.
 //
@@ -25,30 +23,24 @@ import {
 // field-name variants as the per-project Executive Dashboard, with safe fallbacks
 // where data is missing.
 // =============================================================================
-
 type SortKey = 'health' | 'daysBehind' | 'workComplete' | 'name' | 'contractEnd'
 type StatusFilter = 'all' | 'active' | 'onhold' | 'completed'
-
 export default function EnterpriseDashboard() {
   const [projects, setProjects] = useState<Project[]>([])
   const [sortKey, setSortKey] = useState<SortKey>('health')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
-
   useEffect(() => {
     refresh()
     const interval = setInterval(refresh, 2000)
     return () => clearInterval(interval)
   }, [])
-
   function refresh() {
     setProjects(loadProjects())
   }
-
   // Per-project derived data: health, dates, KPIs.
   // Only projects with Active / On Hold / Completed statuses appear here
   // (Archived and Deleted are excluded — they have their own pages).
   const rows = useMemo(() => buildRows(projects), [projects])
-
   // Filter by status (UI control)
   const filteredRows = useMemo(() => {
     if (statusFilter === 'all') return rows
@@ -59,13 +51,10 @@ export default function EnterpriseDashboard() {
       return true
     })
   }, [rows, statusFilter])
-
   // Sort
   const sortedRows = useMemo(() => sortRows(filteredRows, sortKey), [filteredRows, sortKey])
-
   // Portfolio-level KPIs
   const portfolioKPIs = useMemo(() => computePortfolioKPIs(rows), [rows])
-
   // Empty state
   if (projects.length === 0) {
     return (
@@ -85,10 +74,8 @@ export default function EnterpriseDashboard() {
       </div>
     )
   }
-
   return (
     <div className="flex flex-col h-full bg-slate-50 overflow-y-auto">
-
       {/* Header */}
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center justify-between flex-shrink-0">
         <div>
@@ -99,9 +86,7 @@ export default function EnterpriseDashboard() {
           + New Project
         </Link>
       </div>
-
       <div className="p-6 max-w-7xl mx-auto w-full space-y-4">
-
         {/* Portfolio KPIs */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KPITile
@@ -129,7 +114,6 @@ export default function EnterpriseDashboard() {
             valueColor="text-slate-900"
           />
         </div>
-
         {/* Health Distribution */}
         <div className="bg-white border border-slate-200 rounded-xl p-4">
           <div className="text-sm font-semibold text-slate-800 mb-3">Portfolio Health Distribution</div>
@@ -141,7 +125,6 @@ export default function EnterpriseDashboard() {
             <HealthLegend color="bg-red-500" label="Recovery Required" count={portfolioKPIs.recovery} />
           </div>
         </div>
-
         {/* Filter pills + sort */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex gap-1.5">
@@ -165,7 +148,6 @@ export default function EnterpriseDashboard() {
             </select>
           </div>
         </div>
-
         {/* Projects table */}
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
@@ -196,38 +178,32 @@ export default function EnterpriseDashboard() {
             <div className="text-center py-12 text-sm text-slate-400 italic">No projects match the current filter.</div>
           )}
         </div>
-
       </div>
     </div>
   )
 }
-
 // =============================================================================
 // Project row component
 // =============================================================================
 function ProjectRow({ row }: { row: ProjectRowData }) {
   const { project, status, condition, healthScore } = row
-
   function handleView() {
     setActiveProjectId(project.id)
     const latest = getLatestVersion(project)
     if (latest) setActiveVersionId(latest.id)
   }
-
   const conditionColor =
     condition === 'Recovery Required' ? 'bg-red-500' :
     condition === 'Attention Needed' ? 'bg-amber-500' :
     condition === 'Monitor Closely' ? 'bg-yellow-400' :
     condition === 'Stable' ? 'bg-emerald-500' :
     'bg-slate-400'
-
   return (
     <tr className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
       {/* Health dot */}
       <td className="py-3 pl-4 pr-2">
         <div className={clsx('w-2.5 h-2.5 rounded-full', conditionColor)} title={`${condition || 'Unknown'} · ${healthScore}/100`}/>
       </td>
-
       {/* Project name */}
       <td className="py-3 pr-3 min-w-[200px]">
         <Link href="/dashboard" onClick={handleView} className="text-slate-900 font-semibold hover:text-blue-600">
@@ -235,30 +211,24 @@ function ProjectRow({ row }: { row: ProjectRowData }) {
         </Link>
         <div className="text-[10px] text-slate-500">{condition || '—'} · {healthScore}/100</div>
       </td>
-
       {/* Contract # */}
       <td className="py-3 pr-3 text-xs text-slate-500 font-mono hidden lg:table-cell">{project.projectId || '—'}</td>
-
       {/* Status */}
       <td className="py-3 pr-3"><StatusPill status={status}/></td>
-
       {/* Start */}
       <td className="py-3 pr-3 text-xs text-slate-600 hidden md:table-cell">{row.startDate}</td>
-
       {/* Contract End */}
       <td className="py-3 pr-3 text-xs">
         <span className={clsx(row.contractPast ? 'text-red-600 font-semibold' : 'text-slate-600')}>
           {row.contractEndDate}
         </span>
       </td>
-
       {/* Projected End */}
       <td className="py-3 pr-3 text-xs hidden md:table-cell">
         <span className={clsx((row.daysBehind ?? 0) > 0 ? 'text-amber-600 font-semibold' : 'text-slate-600')}>
           {row.projectedEndDate}
         </span>
       </td>
-
       {/* Days Behind */}
       <td className="py-3 pr-3 text-xs text-right">
         {row.daysBehind === undefined ? (
@@ -274,7 +244,6 @@ function ProjectRow({ row }: { row: ProjectRowData }) {
           </span>
         )}
       </td>
-
       {/* % Complete */}
       <td className="py-3 pr-3 text-xs text-right">
         {row.workComplete === undefined ? (
@@ -288,14 +257,12 @@ function ProjectRow({ row }: { row: ProjectRowData }) {
           </div>
         )}
       </td>
-
       {/* Risks */}
       <td className="py-3 pr-3 text-xs text-right hidden lg:table-cell">
         <span className={clsx('font-semibold', row.criticalRisks > 0 ? 'text-red-600' : 'text-slate-600')}>
           {row.risksDetected}{row.criticalRisks > 0 ? ` (${row.criticalRisks}!)` : ''}
         </span>
       </td>
-
       {/* View button */}
       <td className="py-3 pr-4 text-right">
         <Link
@@ -307,11 +274,9 @@ function ProjectRow({ row }: { row: ProjectRowData }) {
     </tr>
   )
 }
-
 // =============================================================================
 // Sub-components
 // =============================================================================
-
 function KPITile({ label, value, sub, valueColor }: { label: string; value: string; sub: string; valueColor: string }) {
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-3">
@@ -321,7 +286,6 @@ function KPITile({ label, value, sub, valueColor }: { label: string; value: stri
     </div>
   )
 }
-
 function FilterPill({ label, active, onClick, count }: { label: string; active: boolean; onClick: () => void; count: number }) {
   return (
     <button
@@ -339,7 +303,6 @@ function FilterPill({ label, active, onClick, count }: { label: string; active: 
     </button>
   )
 }
-
 function HealthDistributionBar({ rows }: { rows: ProjectRowData[] }) {
   const total = rows.length || 1
   const stable = rows.filter(r => r.condition === 'Stable').length
@@ -367,7 +330,6 @@ function HealthDistributionBar({ rows }: { rows: ProjectRowData[] }) {
     </div>
   )
 }
-
 function HealthLegend({ color, label, count }: { color: string; label: string; count: number }) {
   return (
     <div className="flex items-center gap-2">
@@ -377,7 +339,6 @@ function HealthLegend({ color, label, count }: { color: string; label: string; c
     </div>
   )
 }
-
 function StatusPill({ status }: { status: ProjectStatus }) {
   const cls =
     status === 'Active' ? 'bg-emerald-100 text-emerald-800' :
@@ -386,11 +347,9 @@ function StatusPill({ status }: { status: ProjectStatus }) {
     'bg-slate-100 text-slate-600'
   return <span className={clsx('text-[10px] font-semibold px-2 py-0.5 rounded uppercase tracking-wide', cls)}>{status}</span>
 }
-
 // =============================================================================
 // Data builders
 // =============================================================================
-
 interface ProjectRowData {
   project: Project
   status: ProjectStatus
@@ -406,7 +365,6 @@ interface ProjectRowData {
   contractPast: boolean
   totalActivities: number
 }
-
 function buildRows(projects: Project[]): ProjectRowData[] {
   return projects
     .filter(p => {
@@ -417,19 +375,27 @@ function buildRows(projects: Project[]): ProjectRowData[] {
       const status = getProjectStatus(p)
       const latest = getLatestVersion(p)
       const a: any = latest?.analysis || {}
-
       const condition = a.condition || a.healthLabel
       const healthScore = num(a.healthScore, deriveScoreFromCondition(condition))
-
+      // -----------------------------------------------------------------------
+      // Manual contract dates (Day 5+) — these are the source of truth for
+      // the PM-entered dates. They live at the project level (sticky across
+      // versions), unlike the XER-derived dates which can shift when the
+      // scheduler re-baselines or adjusts.
+      // -----------------------------------------------------------------------
+      const manualNtp = p.contractDates?.ntp
+      const manualOriginalCompletion = p.contractDates?.originalContractCompletion
       // Dates — order matters. We resolve dataDate first because both
       // projectStart and daysBehind depend on it.
       const dataDate = a.dataDate || a.data_date || (latest as any)?.dataDate || latest?.uploadedAt
-      // For projectStart, fall back to dataDate if the analysis didn't capture
-      // a separate NTP / project start. Same fallback the Executive Dashboard uses.
-      const projectStart = a.projectStart || a.project_start || a.ntp || a.ntpDate || dataDate
-      const contractEnd = a.contractEnd || a.contract_end || a.contractFinish || a.contract_finish
+      // Project Start (Day 5, v6) — MANUAL NTP first, then XER-derived dates,
+      // and finally dataDate as a last resort. The enterprise dashboard's Start
+      // column reflects what the PM entered on the upload form, not whatever
+      // the XER analyzer guessed.
+      const projectStart = manualNtp || a.projectStart || a.project_start || a.ntp || a.ntpDate || dataDate
+      // Contract End — MANUAL Original Contract Completion first, then XER fallback.
+      const contractEnd = manualOriginalCompletion || a.contractEnd || a.contract_end || a.contractFinish || a.contract_finish
       const projectedEnd = a.projectedEnd || a.projected_end || a.forecastFinish || a.forecast_finish || a.projectedFinish
-
       // Days behind — if the analysis pipeline didn't store it explicitly,
       // compute as the gap in days between projectedEnd and contractEnd.
       // Positive = behind, negative = ahead, undefined = unknown.
@@ -445,14 +411,13 @@ function buildRows(projects: Project[]): ProjectRowData[] {
           daysBehind = Math.round((pUTC - cUTC) / (1000 * 60 * 60 * 24))
         }
       }
-
-      // Work complete — try many common field names from different analyzer
-      // outputs, then fall back to computing from completedActivities / totalActivities,
-      // then finally fall back to TIME-BASED progress (how far along the project
-      // is on its timeline). Time-based isn't "real" work complete, but it gives
-      // the column something useful instead of empty when the analyzer doesn't
-      // emit a progress field.
+      // Work complete (Day 5, v6) — PRIMARY source is the new analyzer field
+      // `workCompletePct` (the construction-only formula from the Executive
+      // Dashboard). Falls back through legacy field names for old versions
+      // that were analyzed before v3 shipped, then to count-based, then to
+      // time-based as a last resort.
       let workComplete: number | undefined = numOrUndef(
+        a.workCompletePct ??                            // NEW (v3+) — same as Executive Dashboard
         a.workComplete ?? a.percentComplete ?? a.percent_complete ??
         a.physicalPercentComplete ?? a.physical_percent_complete ??
         a.durationPercentComplete ?? a.duration_percent_complete ??
@@ -466,6 +431,7 @@ function buildRows(projects: Project[]): ProjectRowData[] {
       }
       // Time-based fallback — how far along is the project in elapsed time?
       // Uses the data date as "now", relative to project start and projected end.
+      // Only used for legacy versions that have no progress data at all.
       if (workComplete === undefined && projectStart && projectedEnd && dataDate) {
         const pS = new Date(projectStart)
         const pE = new Date(projectedEnd)
@@ -481,13 +447,10 @@ function buildRows(projects: Project[]): ProjectRowData[] {
           }
         }
       }
-
       const risksDetected = num(a.risksDetected ?? a.risksCount ?? a.risks_count, 0)
       const criticalRisks = num(a.criticalRisks ?? a.critical_risks, 0)
-
       const today = new Date()
       const contractPast = contractEnd ? new Date(contractEnd) < today : false
-
       return {
         project: p,
         status,
@@ -505,7 +468,6 @@ function buildRows(projects: Project[]): ProjectRowData[] {
       }
     })
 }
-
 function sortRows(rows: ProjectRowData[], key: SortKey): ProjectRowData[] {
   const conditionRank = (c?: string) => {
     if (c === 'Recovery Required') return 0
@@ -529,7 +491,6 @@ function sortRows(rows: ProjectRowData[], key: SortKey): ProjectRowData[] {
     return 0
   })
 }
-
 function computePortfolioKPIs(rows: ProjectRowData[]) {
   const active = rows.filter(r => r.status === 'Active').length
   const onHold = rows.filter(r => r.status === 'On Hold').length
@@ -558,16 +519,13 @@ function computePortfolioKPIs(rows: ProjectRowData[]) {
     stable, monitor, attention, recovery,
   }
 }
-
 // =============================================================================
 // Helpers
 // =============================================================================
-
 function num(v: any, fallback: number): number {
   const n = typeof v === 'number' ? v : typeof v === 'string' ? parseFloat(v) : NaN
   return isFinite(n) ? n : fallback
 }
-
 // Returns the parsed number when v is a finite number-or-string, else undefined.
 // Use when "no data" needs to be distinguishable from 0.
 function numOrUndef(v: any): number | undefined {
@@ -575,7 +533,6 @@ function numOrUndef(v: any): number | undefined {
   const n = typeof v === 'number' ? v : typeof v === 'string' ? parseFloat(v) : NaN
   return isFinite(n) ? n : undefined
 }
-
 function fmtDate(d?: string): string {
   if (!d) return '—'
   try {
@@ -587,7 +544,6 @@ function fmtDate(d?: string): string {
     return `${mm}/${dd}/${yyyy}`
   } catch { return String(d) }
 }
-
 function deriveScoreFromCondition(c?: string): number {
   if (c === 'Stable') return 85
   if (c === 'Monitor Closely') return 65
