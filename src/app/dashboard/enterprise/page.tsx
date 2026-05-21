@@ -254,7 +254,7 @@ function ProjectRow({ row }: { row: ProjectRowData }) {
 
       {/* Projected End */}
       <td className="py-3 pr-3 text-xs hidden md:table-cell">
-        <span className={clsx(row.daysBehind > 0 ? 'text-amber-600 font-semibold' : 'text-slate-600')}>
+        <span className={clsx((row.daysBehind ?? 0) > 0 ? 'text-amber-600 font-semibold' : 'text-slate-600')}>
           {row.projectedEndDate}
         </span>
       </td>
