@@ -579,6 +579,36 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
             <ChartLegend />
           </div>
           <ScheduleProgressChart data={chartData} />
+          {/* Bar/line description — v8. The KPI legend at the top names
+              the categories; this block explains WHAT each color represents
+              so the chart reads without having to interpret. Placed below
+              the chart so it doesn't compete with the title or pills above. */}
+          <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-x-5 gap-y-1.5 text-[11px] text-slate-600">
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 bg-blue-600 rounded-sm flex-shrink-0"/>
+              <span><span className="font-semibold text-blue-900">Planned</span> — baseline cumulative % at this date</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 bg-emerald-600 rounded-sm flex-shrink-0"/>
+              <span><span className="font-semibold text-emerald-900">Actual</span> — verified progress to date</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 bg-amber-400 rounded-sm flex-shrink-0" style={{opacity: 0.85}}/>
+              <span><span className="font-semibold text-amber-900">Forecast</span> — projected progress after data date</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <svg width="20" height="6" viewBox="0 0 20 6"><line x1="0" y1="3" x2="20" y2="3" stroke="#b45309" strokeWidth="2" strokeDasharray="4,3"/></svg>
+              <span>Dashed line = forecast cumulative</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block px-1 text-[9px] font-bold text-red-700 bg-red-50 border border-red-300 rounded-sm" style={{lineHeight: '12px'}}>CONTRACT END</span>
+              <span>Revised contract completion</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block px-1 text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-300 rounded-sm" style={{lineHeight: '12px'}}>FORECAST END</span>
+              <span>Projected completion from XER</span>
+            </div>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3 pt-3 border-t border-slate-100">
             <InsightCell
               label={!hasWorkComplete ? 'Plan variance' : (behindByPts >= 0 ? 'Ahead of plan by' : 'Behind plan by')}
@@ -1019,25 +1049,24 @@ function ScheduleProgressChart({ data }: { data: ChartData }) {
         const actualH = innerH * (safeActual / 100)
         const plannedLabelColor = b.isForecast ? '#94a3b8' : '#1e40af'
         const actualLabelColor = b.isForecast ? '#b45309' : '#15803d'
-        // Bar labels — position 8px above bar top. For very tall bars
-        // (>= 95%) put label INSIDE the top of the bar in white to avoid
-        // crashing into the marker pills overhead.
-        const insideThreshold = 95
-        const plannedLabelY = safePlanned >= insideThreshold ? yFor(safePlanned) + 9 : yFor(safePlanned) - 4
-        const actualLabelY = safeActual >= insideThreshold ? yFor(safeActual) + 9 : yFor(safeActual) - 4
-        const plannedLabelFill = safePlanned >= insideThreshold ? 'white' : plannedLabelColor
-        const actualLabelFill = safeActual >= insideThreshold ? (b.isForecast ? '#1f2937' : 'white') : actualLabelColor
+        // v8 — labels ALWAYS sit above the bar in their own color. The earlier
+        // inside-the-bar fallback for >=95% rendered white text on bars whose
+        // forecast (semi-transparent blue) bgs were too light to contrast.
+        // The marker pills end at y=18 and labels at 100% land at y=28 — a
+        // clean 10px gap, so there's no need to push labels inside.
+        const plannedLabelY = yFor(safePlanned) - 4
+        const actualLabelY = yFor(safeActual) - 4
         return (
           <g key={i}>
             <rect x={x} y={yFor(safePlanned)} width={barW} height={plannedH} fill={plannedColor} />
             <rect x={x + barW + barGap} y={yFor(safeActual)} width={barW} height={actualH} fill={actualColor} opacity={b.isForecast ? 0.85 : 1} />
             {safePlanned > 0 && (
-              <text x={x + barW / 2} y={plannedLabelY} fontSize="8" fill={plannedLabelFill} textAnchor="middle" fontWeight="600">
+              <text x={x + barW / 2} y={plannedLabelY} fontSize="8" fill={plannedLabelColor} textAnchor="middle" fontWeight="600">
                 {Math.round(safePlanned)}
               </text>
             )}
             {safeActual > 0 && (
-              <text x={x + barW + barGap + barW / 2} y={actualLabelY} fontSize="8" fill={actualLabelFill} textAnchor="middle" fontWeight="600">
+              <text x={x + barW + barGap + barW / 2} y={actualLabelY} fontSize="8" fill={actualLabelColor} textAnchor="middle" fontWeight="600">
                 {Math.round(safeActual)}
               </text>
             )}
