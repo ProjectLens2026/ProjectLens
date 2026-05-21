@@ -151,34 +151,79 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   }
   const findMilestoneDate = (m: any) => m?.date || m?.finish || m?.actualFinish || m?.scheduledFinish || m?.early_finish || null
 
-  const substMilestoneObj = findMilestone(['MILE-195', 'MS-195', '195'], ['substantial', 'subst comp', 'sub completion'])
-  const finalMilestoneObj = findMilestone(['MILE-200', 'MS-200', '200'], ['final completion', 'final compl', 'project finish'])
+  // Federal contract schedules use various milestone code patterns for
+  // Substantial / Final Completion. Try common variants:
+  //   - MILE-195 / MS-195 / 195 (Primavera convention for substantial)
+  //   - BCD (Beneficial Occupancy Date), SUB, M-SUB, ASB, BO (federal common)
+  //   - TCO (Temporary Certificate of Occupancy) — close enough to substantial
+  //   - 100 (sometimes used as the substantial completion code)
+  const substMilestoneObj = findMilestone(
+    ['MILE-195', 'MS-195', '195', 'BCD', 'SUB', 'M-SUB', 'ASB', 'BO', 'TCO', '100'],
+    ['substantial', 'subst comp', 'sub completion', 'beneficial occupancy', 'beneficial occup', 'bo date', 'temp occupancy', 'temporary occupancy']
+  )
+  const finalMilestoneObj = findMilestone(
+    ['MILE-200', 'MS-200', '200', 'FC', 'M-FC', 'PCD', '999'],
+    ['final completion', 'final compl', 'project finish', 'project close', 'closeout', 'project completion', 'punch list complete']
+  )
 
+  // Resolve dates in order so finalCompletion can fall back to projectedEnd.
+  // Per the user's mental model: Final Completion = the projected end of the
+  // project. They're the same milestone in practice.
+  const contractEnd = a.contractEnd || a.contract_end || a.contractFinish || a.contract_finish || a.contractCompletion
+  const projectedEnd = a.projectedEnd || a.projected_end || a.forecastFinish || a.forecast_finish || a.projectedFinish || contractEnd
+  const finalCompletion = a.finalCompletion || a.final_completion || a.projectFinish || a.project_finish || a.finalComp || findMilestoneDate(finalMilestoneObj) || projectedEnd
   const substantialCompletion = a.substantialCompletion || a.substantial_completion || a.substComp || a.subComp || a.substantialComp || a.substCompletion || findMilestoneDate(substMilestoneObj)
-  const finalCompletion = a.finalCompletion || a.final_completion || a.projectFinish || a.project_finish || a.finalComp || findMilestoneDate(finalMilestoneObj)
-  const contractEnd = a.contractEnd || a.contract_end || a.contractFinish || a.contract_finish || a.contractCompletion || finalCompletion
-  const projectedEnd = a.projectedEnd || a.projected_end || a.forecastFinish || a.forecast_finish || a.projectedFinish || finalCompletion
 
   const ntpMilestone = a.ntpMilestone || 'NTP'
   const substMilestone = a.substMilestone || (substMilestoneObj?.code || substMilestoneObj?.id || '')
   const finalMilestone = a.finalMilestone || (finalMilestoneObj?.code || finalMilestoneObj?.id || '')
 
-  const originalDuration = num(a.originalDuration, 261)
-  const remainingDuration = num(a.remainingDuration, 317)
-  const durationAtCompletion = num(a.durationAtCompletion, originalDuration + num(a.daysBehind, 56))
+  const originalDuration = num(a.originalDuration, 0)
+  const remainingDuration = num(a.remainingDuration, 0)
+  const hasOriginalDuration = a.originalDuration !== undefined
 
-  const daysBehind = num(a.daysBehind, 56)
-  const workComplete = num(a.workComplete ?? a.percentComplete, 39)
-  const completedActivities = num(a.completedActivities, 134)
-  const totalActivities = num(a.totalActivities, 348)
+  // Days behind — if analysis didn't store it, compute from contractEnd vs projectedEnd.
+  // Positive = behind, negative = ahead, undefined = can't determine.
+  let daysBehind: number | undefined = numOrUndefAtTop(a.daysBehind ?? a.days_behind ?? a.behindContract)
+  if (daysBehind === undefined && contractEnd && projectedEnd) {
+    const cEnd = new Date(contractEnd).getTime()
+    const pEnd = new Date(projectedEnd).getTime()
+    if (isFinite(cEnd) && isFinite(pEnd)) {
+      daysBehind = Math.round((pEnd - cEnd) / (1000 * 60 * 60 * 24))
+    }
+  }
+  const daysBehindNum = daysBehind ?? 0
+  const hasDaysBehind = daysBehind !== undefined
+
+  const durationAtCompletion = num(a.durationAtCompletion, originalDuration + daysBehindNum)
+
+  // Work complete — try many field variants, then compute from activities.
+  // undefined when truly no data — UI shows "—" instead of misleading 0%.
+  let workComplete: number | undefined = numOrUndefAtTop(
+    a.workComplete ?? a.percentComplete ?? a.percent_complete ??
+    a.physicalPercentComplete ?? a.physical_percent_complete ??
+    a.durationPercentComplete ?? a.duration_percent_complete ??
+    a.percentDone ?? a.percent_done ?? a.progress ??
+    a.pctComplete ?? a.pct_complete ?? a.completion
+  )
+  const completedActivities = numOrUndefAtTop(a.completedActivities ?? a.completed_activities ?? a.completed ?? a.completedCount)
+  const totalActivities = num(a.totalActivities ?? a.total_activities ?? a.activityCount ?? a.activity_count, 0)
+  if (workComplete === undefined && completedActivities !== undefined && totalActivities > 0) {
+    workComplete = (completedActivities / totalActivities) * 100
+  }
+  const workCompleteNum = workComplete ?? 0
+  const hasWorkComplete = workComplete !== undefined
+
   const longLeadAtRisk = num(a.longLeadAtRisk, 0)
-  const longLeadTotal = num(a.longLeadTotal, 6)
-  const risksDetected = num(a.risksDetected ?? a.risksCount, 3)
-  const criticalRisks = num(a.criticalRisks, 2)
+  const longLeadTotal = num(a.longLeadTotal, 0)
+  const hasLongLeadData = a.longLeadTotal !== undefined
+  const risksDetected = num(a.risksDetected ?? a.risksCount, 0)
+  const criticalRisks = num(a.criticalRisks, 0)
+  const hasRiskData = a.risksDetected !== undefined || a.risksCount !== undefined
 
   const attentionAreas: AttentionArea[] = Array.isArray(a.attentionAreas) && a.attentionAreas.length
     ? a.attentionAreas
-    : defaultAttentionAreas(daysBehind)
+    : defaultAttentionAreas(daysBehindNum)
 
   const lookahead: LookaheadItem[] = Array.isArray(a.lookahead) && a.lookahead.length
     ? a.lookahead
@@ -190,10 +235,10 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
 
   const followUp: FollowUpItem[] = Array.isArray(a.followUp) && a.followUp.length
     ? a.followUp
-    : defaultFollowUp(daysBehind)
+    : defaultFollowUp(daysBehindNum)
 
   const communicationSummary = a.communicationSummary
-    || defaultCommSummary(daysBehind)
+    || defaultCommSummary(daysBehindNum)
 
   // --------- Schedule Progress chart data ----------
   // Computes a 7-bucket monthly chart from project start → forecast end.
@@ -205,15 +250,15 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
       contractEnd,
       projectedEnd,
       dataDate,
-      workComplete,
+      workComplete: workCompleteNum,
       planVelocityHint: a.plannedVelocity,
       actualByMonth: a.actualByMonth,
       plannedByMonth: a.plannedByMonth,
     }),
-    [projectStart, contractEnd, projectedEnd, dataDate, workComplete, a.plannedVelocity, a.actualByMonth, a.plannedByMonth]
+    [projectStart, contractEnd, projectedEnd, dataDate, workCompleteNum, a.plannedVelocity, a.actualByMonth, a.plannedByMonth]
   )
 
-  const behindByPts = workComplete - chartData.plannedAtToday
+  const behindByPts = workCompleteNum - chartData.plannedAtToday
   const velocityPerMonth = chartData.velocityPerMonth
   const requiredVelocity = chartData.requiredVelocityToHitContract
 
@@ -257,7 +302,7 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
           <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-4">
             <DurationCell label="Original Duration" value={originalDuration} />
             <DurationCell label="Remaining Duration" value={remainingDuration} />
-            <DurationCell label="Duration at Completion" value={durationAtCompletion} delta={daysBehind} />
+            <DurationCell label="Duration at Completion" value={durationAtCompletion} delta={daysBehindNum} />
           </div>
         </Card>
 
@@ -266,30 +311,32 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
           <KPITile
             href="/dashboard/tia"
             label="Days Behind Contract"
-            value={daysBehind > 0 ? `+${daysBehind}` : String(daysBehind)}
-            sub={daysBehind > 0 ? '↓ TIA territory' : 'On contract'}
-            valueColor={daysBehind > 0 ? 'red' : 'green'}
+            value={!hasDaysBehind ? '—' : (daysBehindNum > 0 ? `+${daysBehindNum}` : String(daysBehindNum))}
+            sub={!hasDaysBehind ? 'Not yet computed' : (daysBehindNum > 0 ? '↓ TIA territory' : 'On contract')}
+            valueColor={!hasDaysBehind ? 'slate' : (daysBehindNum > 0 ? 'red' : 'green')}
           />
           <KPITile
             href="/dashboard/lens"
             label="Work Complete"
-            value={`${workComplete}%`}
-            sub={`${completedActivities.toLocaleString()} of ${totalActivities.toLocaleString()} activities`}
+            value={hasWorkComplete ? `${Math.round(workCompleteNum)}%` : '—'}
+            sub={hasWorkComplete && completedActivities !== undefined
+              ? `${completedActivities.toLocaleString()} of ${totalActivities.toLocaleString()} activities`
+              : totalActivities > 0 ? `${totalActivities.toLocaleString()} activities total` : 'No activity data'}
             valueColor="slate"
           />
           <KPITile
             href="/dashboard/procurement"
             label="Long Lead at Risk"
-            value={String(longLeadAtRisk)}
-            sub={longLeadAtRisk === 0 ? `✓ ${longLeadTotal} long lead total` : `of ${longLeadTotal} long lead`}
-            valueColor={longLeadAtRisk === 0 ? 'green' : 'red'}
+            value={hasLongLeadData ? String(longLeadAtRisk) : '—'}
+            sub={!hasLongLeadData ? 'Not yet computed' : (longLeadAtRisk === 0 ? `✓ ${longLeadTotal} long lead total` : `of ${longLeadTotal} long lead`)}
+            valueColor={!hasLongLeadData ? 'slate' : (longLeadAtRisk === 0 ? 'green' : 'red')}
           />
           <KPITile
             href="/dashboard/risks"
             label="Risks Detected"
-            value={String(risksDetected)}
-            sub={criticalRisks > 0 ? `${criticalRisks} critical` : 'Auto-detected'}
-            valueColor={criticalRisks > 0 ? 'red' : 'amber'}
+            value={hasRiskData ? String(risksDetected) : '—'}
+            sub={!hasRiskData ? 'Not yet computed' : (criticalRisks > 0 ? `${criticalRisks} critical` : 'Auto-detected')}
+            valueColor={!hasRiskData ? 'slate' : (criticalRisks > 0 ? 'red' : 'amber')}
           />
         </div>
 
@@ -300,7 +347,7 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
               <SectionTitle>Schedule Progress</SectionTitle>
               <div className="text-[11px] text-slate-500 mt-0.5">
                 Planned vs Actual completion · Contract end <span className="text-red-600 font-semibold">{fmtDate(contractEnd)}</span>
-                {' · Projected '}<span className="text-amber-600 font-semibold">{fmtDate(projectedEnd)}{daysBehind > 0 ? ` (+${daysBehind}d)` : ''}</span>
+                {' · Projected '}<span className="text-amber-600 font-semibold">{fmtDate(projectedEnd)}{daysBehindNum > 0 ? ` (+${daysBehindNum}d)` : ''}</span>
               </div>
             </div>
             <ChartLegend />
@@ -663,6 +710,14 @@ function ScheduleProgressChart({ data }: { data: ChartData }) {
 function num(v: any, fallback: number): number {
   const n = typeof v === 'number' ? v : typeof v === 'string' ? parseFloat(v) : NaN
   return isFinite(n) ? n : fallback
+}
+
+// Returns the parsed number when v is a finite number-or-string, else undefined.
+// Use when "no data" needs to be distinguishable from 0.
+function numOrUndefAtTop(v: any): number | undefined {
+  if (v === null || v === undefined || v === '') return undefined
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? parseFloat(v) : NaN
+  return isFinite(n) ? n : undefined
 }
 
 function fmtDate(d?: string): string {
