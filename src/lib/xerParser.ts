@@ -113,6 +113,36 @@ export interface XERAnalysis {
   remainingDurationDays?: number
   actualDurationDays?: number
   durationAtCompletion?: number
+  // === NEW (Day 5, v2) — Work % Complete using PM-defined formula ===
+  // workCompletePct: Average of effective % complete across all activities.
+  // For each activity:
+  //   effective% = 100 if (status_code === 'TK_Complete' OR phys_complete_pct >= 80)
+  //                else phys_complete_pct
+  // Result = mean of effective% across all activities.
+  // Replaces the old per-task percent_complete average which ignored the
+  // 80% threshold and treated stale TK_NotStart codes too literally.
+  workCompletePct?: number
+  // Number of activities that meet the >=80% OR status=Complete rule.
+  // Displayed as "X of Y complete (>=80%)" subtitle on the dashboard.
+  completedAtThreshold?: number
+  // Activities currently in progress: have act_start_date but not at the
+  // 80% threshold. Used in the dashboard's "Work % calculation" explainer.
+  workInProgressCount?: number
+  // Average phys_complete_pct of the in-progress activities (the ones that
+  // count toward the % but aren't 100). Used in the explainer text.
+  workInProgressAvgPct?: number
+  // Activities with no actual start and 0% physical progress. Used in the
+  // dashboard explainer ("X not started").
+  workNotStartedCount?: number
+  // === NEW (Day 5, v2) — Long Lead at Risk ===
+  // longLeadTotal: count of long-lead items detected (>=35d duration with
+  // PROC/FABRICAT/DELIVER/LONG LEAD keywords). Just longLeadItems.length
+  // pre-computed for convenience.
+  longLeadTotal?: number
+  // longLeadAtRisk: subset of longLeadItems where floatDays <= 14.
+  // PM threshold — two weeks of float or less = at risk of impacting
+  // critical path. Founder can adjust later.
+  longLeadAtRisk?: number
 }
 // A single relationship-level violation. An out-of-sequence activity may
 // have multiple violations (one per predecessor whose logic was broken by
@@ -139,7 +169,6 @@ export interface SequenceViolation {
   // Plain-language explanation a non-scheduler PM can read directly.
   description: string
 }
-
 export interface OutOfSequence {
   // The successor activity that started/finished before its predecessor
   // logic allowed. One OutOfSequence entry per affected successor activity
@@ -289,7 +318,6 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   // P6 Schedule Log convention (one warning per affected activity).
   const HOUR_MS = 60 * 60 * 1000
   const DAY_MS = 24 * HOUR_MS
-
   /** Parse a P6 date string ("2024-04-01 17:00") to ms, or null if invalid. */
   const dateMs = (s: string | undefined): number | null => {
     if (!s) return null
@@ -297,14 +325,12 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     const ms = d.getTime()
     return isNaN(ms) ? null : ms
   }
-
   /** Format ms back to a P6-style "YYYY-MM-DD HH:MM" string. */
   const fmtDate = (ms: number): string => {
     const d = new Date(ms)
     const pad = (n: number) => String(n).padStart(2, '0')
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
   }
-
   /** Friendly label for a P6 relationship type code. */
   const relTypeLabel = (predType: string): string => {
     switch (predType) {
@@ -315,18 +341,14 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       default: return predType.replace(/^PR_/, '')
     }
   }
-
   const oosMap = new Map<string, OutOfSequence>()
-
   for (const r of relationships) {
     const t = tasks[r.task_id]
     const p = tasks[r.pred_task_id]
     if (!t || !p) continue
-
     // Lag in milliseconds. Positive = delay required, negative = lead allowed.
     const lagMs = parseFloat(r.lag_hr_cnt || '0') * HOUR_MS
     if (isNaN(lagMs)) continue
-
     // Compute whether this relationship is violated by actual progress.
     // `predAnchorMs`/`succActualMs` hold the dates we're comparing.
     // `null` for either means we lack the actual data to evaluate.
@@ -335,7 +357,6 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     let predAnchorDateStr = ''
     let succActualDateStr = ''
     let kindLabel = ''  // human-readable label for the explanation
-
     switch (r.pred_type) {
       case 'PR_FS':
         predAnchorMs = dateMs(p.act_end_date)
@@ -369,16 +390,13 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
         continue  // unknown rel type
     }
     if (predAnchorMs === null || succActualMs === null) continue
-
     const requiredMs = predAnchorMs + lagMs
     const violated = succActualMs < requiredMs
     if (!violated) continue
-
     // Build the violation record
     const varianceDays = Math.max(0, Math.round((requiredMs - succActualMs) / DAY_MS))
     const lagHours = lagMs / HOUR_MS
     const relLabel = relTypeLabel(r.pred_type)
-
     // Plain-language explanation. Examples:
     //   FS: "Predecessor PRO-750 finished 2024-04-15 17:00, but PRO-770
     //        started 2024-04-10 08:00 — 5 days early (FS, no lag)."
@@ -401,7 +419,6 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       `Predecessor ${p.task_code} ${kindLabel} ${predAnchorDateStr?.slice(0, 16) || '—'}, ` +
       `but ${t.task_code} ${succAction} ${succActualDateStr?.slice(0, 16) || '—'} ` +
       `— ${varianceDays} day${varianceDays === 1 ? '' : 's'} too early${lagPhrase}.`
-
     const violation: SequenceViolation = {
       pred: p,
       relType: r.pred_type,
@@ -413,13 +430,11 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       varianceDays,
       description,
     }
-
     // Categorize the affected activity by code prefix (used by the Risks UI
     // and Lens Logic Check to group violations).
     let category = 'Other'
     if (t.task_code?.includes('PRO-') || t.task_code?.includes('PROC')) category = 'Procurement'
     else if (t.task_code?.includes('PRE-CON')) category = 'Pre-Construction'
-
     const existing = oosMap.get(t.task_id)
     if (existing) {
       existing.predecessors.push(p)
@@ -472,6 +487,20 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   }
   longLeadItems.sort((a, b) => a.floatDays - b.floatDays)
   shortLeadItems.sort((a, b) => a.floatDays - b.floatDays)
+  // ==========================================================================
+  // NEW (Day 5, v2) — Long Lead at Risk
+  // ==========================================================================
+  // PM-defined: any long-lead item with <= 14 calendar days of float is at
+  // risk of slipping the critical path. Exclude items already complete
+  // (status_code === 'TK_Complete' OR phys_complete_pct >= 100) since those
+  // can't slip anything anymore.
+  const longLeadTotal = longLeadItems.length
+  const longLeadAtRisk = longLeadItems.filter(item => {
+    if (item.status_code === 'TK_Complete') return false
+    const pct = parseFloat(item.phys_complete_pct || '0')
+    if (!isNaN(pct) && pct >= 100) return false
+    return item.floatDays <= 14
+  }).length
   // Milestones — extract from XER for dashboard display
   const milestones = taskArr
     .filter(t => {
@@ -693,6 +722,50 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   const actualDurationDays = calcCalendarDays(planStart, dataDateStr)
   const remainingDurationDays = calcCalendarDays(dataDateStr, forecastEnd)
   const durationAtCompletion = calcCalendarDays(planStart, forecastEnd)
+  // ==========================================================================
+  // NEW (Day 5, v2) — Work % Complete using PM-defined formula
+  // ==========================================================================
+  //
+  // Founder rule: for each activity, compute an "effective % complete":
+  //   - If status_code === 'TK_Complete' OR phys_complete_pct >= 80 → 100
+  //   - Else → use phys_complete_pct as-is
+  // Then average across ALL activities. That's Work % Complete.
+  //
+  // Why: the raw P6 percent_complete field is misleading because some
+  // schedulers leave the status code at TK_NotStart after recording physical
+  // progress, and others mark TK_Active without setting phys_complete_pct.
+  // The >=80% threshold + status check together cover both data quirks.
+  //
+  // Also computed here for the dashboard explainer:
+  //   workCompletePct          — the % number itself
+  //   completedAtThreshold     — count of activities counted as 100
+  //   workInProgressCount      — count of activities with phys%>0 but <80
+  //                               (and not flagged Complete)
+  //   workInProgressAvgPct     — average phys% of the in-progress ones
+  //   workNotStartedCount      — count with no actual start AND phys%=0
+  let sumEffective = 0
+  let completedAtThreshold = 0
+  let inProgressSum = 0
+  let workInProgressCount = 0
+  let workNotStartedCount = 0
+  for (const t of taskArr) {
+    const pctRaw = parseFloat(t.phys_complete_pct || '0')
+    const pct = isNaN(pctRaw) ? 0 : pctRaw
+    const isDone = t.status_code === 'TK_Complete' || pct >= 80
+    if (isDone) {
+      sumEffective += 100
+      completedAtThreshold += 1
+    } else if (pct > 0) {
+      sumEffective += pct
+      inProgressSum += pct
+      workInProgressCount += 1
+    } else {
+      // pct == 0 and not done — counts as 0 in the average
+      workNotStartedCount += 1
+    }
+  }
+  const workCompletePct = taskArr.length > 0 ? sumEffective / taskArr.length : 0
+  const workInProgressAvgPct = workInProgressCount > 0 ? inProgressSum / workInProgressCount : 0
   return {
     totalActivities: taskArr.length,
     complete, inProgress, notStarted, negativeFloat,
@@ -713,5 +786,14 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     finalCompletionDate: finalDate,
     finalCompletionMilestone: finalMilestone?.task_code,
     originalDurationDays, remainingDurationDays, actualDurationDays, durationAtCompletion,
+    // NEW (Day 5, v2) — Work % Complete fields
+    workCompletePct,
+    completedAtThreshold,
+    workInProgressCount,
+    workInProgressAvgPct,
+    workNotStartedCount,
+    // NEW (Day 5, v2) — Long Lead at Risk fields
+    longLeadTotal,
+    longLeadAtRisk,
   }
 }

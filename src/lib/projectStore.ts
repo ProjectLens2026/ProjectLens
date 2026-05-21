@@ -36,6 +36,13 @@ export type ProjectStatus = 'Active' | 'Completed' | 'On Hold' | 'Archived' | 'D
 export interface ContractDates {
   ntp?: string                          // ISO date (YYYY-MM-DD)
   originalContractCompletion?: string   // ISO date (YYYY-MM-DD)
+  // NEW (Day 5, v2) — manual Substantial Completion date.
+  // Displayed on the dashboard alongside the XER-detected Substantial
+  // Completion milestone, so PMs can compare what the contract says
+  // (manual) vs what the schedule shows (auto-detected from milestone
+  // name keywords like SUBSTANTIAL / BENEFICIAL OCCUPANCY).
+  // Sticky at the project level — pre-fills on subsequent version uploads.
+  substantialCompletion?: string        // ISO date (YYYY-MM-DD)
 }
 
 export interface VersionDates {

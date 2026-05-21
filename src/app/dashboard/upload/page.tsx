@@ -38,6 +38,7 @@ interface ContractDatesFormState {
   timeExtensionDays: number         // default 0
   revisedContractCompletion: string // pre-filled from formula, editable
   manualDataDate: string            // optional, XER fills if blank
+  substantialCompletion: string     // NEW (Day 5, v2) — optional, shown alongside XER-detected
 }
 
 const EMPTY_CONTRACT_DATES: ContractDatesFormState = {
@@ -46,6 +47,7 @@ const EMPTY_CONTRACT_DATES: ContractDatesFormState = {
   timeExtensionDays: 0,
   revisedContractCompletion: '',
   manualDataDate: '',
+  substantialCompletion: '',
 }
 
 // Read a File as text with encoding auto-detection.
@@ -133,6 +135,7 @@ export default function UploadPage() {
     const latestVersionDates = project.versions[0]?.versionDates
     const ntp = projCD?.ntp || ''
     const origComp = projCD?.originalContractCompletion || ''
+    const substComp = projCD?.substantialCompletion || ''
     const timeExt = latestVersionDates?.timeExtensionDays ?? 0
     const revised = computeRevisedCompletion(origComp, timeExt) || ''
     setCd({
@@ -141,6 +144,7 @@ export default function UploadPage() {
       timeExtensionDays: timeExt,
       revisedContractCompletion: revised,
       manualDataDate: '',
+      substantialCompletion: substComp,
     })
     setDateError('')
   }, [projectMode, selectedProjectId, existingProjects])
@@ -322,6 +326,7 @@ export default function UploadPage() {
         const projectContractDates: ContractDates = {
           ntp: cd.ntp,
           originalContractCompletion: cd.originalContractCompletion,
+          substantialCompletion: cd.substantialCompletion || undefined,
         }
 
         console.log('[ControlLens] Saving version', {
@@ -599,15 +604,27 @@ export default function UploadPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">
-                  Data Date for this Version (optional)
-                </label>
-                <input type="date"
-                  value={cd.manualDataDate}
-                  onChange={e => setCd(c => ({...c, manualDataDate: e.target.value}))}
-                  className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
-                <div className="text-[10px] text-slate-500 mt-1">Leave blank — the XER's data date will be used.</div>
+              <div className="grid grid-cols-2 gap-4 mb-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">
+                    Substantial Completion (optional)
+                  </label>
+                  <input type="date"
+                    value={cd.substantialCompletion}
+                    onChange={e => setCd(c => ({...c, substantialCompletion: e.target.value}))}
+                    className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
+                  <div className="text-[10px] text-slate-500 mt-1">Per contract. Dashboard shows this next to the XER-detected one.</div>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">
+                    Data Date for this Version (optional)
+                  </label>
+                  <input type="date"
+                    value={cd.manualDataDate}
+                    onChange={e => setCd(c => ({...c, manualDataDate: e.target.value}))}
+                    className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
+                  <div className="text-[10px] text-slate-500 mt-1">Leave blank — the XER's data date will be used.</div>
+                </div>
               </div>
 
               {dateError && (

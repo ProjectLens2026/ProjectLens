@@ -126,6 +126,7 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   // ============================================================================
   const manualNtp = project.contractDates?.ntp || undefined
   const manualOriginalCompletion = project.contractDates?.originalContractCompletion || undefined
+  const manualSubstantialCompletion = project.contractDates?.substantialCompletion || undefined
   const timeExtensionDays = version.versionDates?.timeExtensionDays ?? 0
   const manualRevisedCompletion = version.versionDates?.revisedContractCompletion || undefined
   const manualDataDate = version.versionDates?.manualDataDate || undefined
@@ -251,14 +252,41 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   )
   const durationAtCompletion = durationAtCompletionComputed ?? durationAtCompletionField ?? (revisedDuration + Math.max(0, daysBehindNum))
 
-  // ----- Work complete (unchanged) -----
-  let workComplete: number | undefined = numOrUndefAtTop(
-    a.workComplete ?? a.percentComplete ?? a.percent_complete ??
-    a.physicalPercentComplete ?? a.physical_percent_complete ??
-    a.durationPercentComplete ?? a.duration_percent_complete ??
-    a.percentDone ?? a.percent_done ?? a.progress ??
-    a.pctComplete ?? a.pct_complete ?? a.completion
-  )
+  // ============================================================================
+  // WORK % COMPLETE — PM-defined formula (Day 5, v2)
+  //
+  // Analyzer computes this now using:
+  //   effective_pct per activity = 100 if (status=Complete OR phys%>=80)
+  //                                else phys_complete_pct as-is
+  //   workCompletePct = mean(effective_pct) across ALL activities
+  //
+  // Dashboard reads it directly from a.workCompletePct. Falls back to the
+  // pre-v2 logic only for legacy versions analyzed before v2 ships (where
+  // workCompletePct will be undefined).
+  // ============================================================================
+  let workComplete: number | undefined = numOrUndefAtTop(a.workCompletePct)
+
+  // Breakdown numbers for the explainer text. All come from the analyzer.
+  // If they're missing (legacy version), the explainer hides itself.
+  const wcCompletedAtThreshold = numOrUndefAtTop(a.completedAtThreshold)
+  const wcInProgressCount = numOrUndefAtTop(a.workInProgressCount)
+  const wcInProgressAvgPct = numOrUndefAtTop(a.workInProgressAvgPct)
+  const wcNotStartedCount = numOrUndefAtTop(a.workNotStartedCount)
+  const hasWorkCompleteBreakdown =
+    wcCompletedAtThreshold !== undefined &&
+    wcInProgressCount !== undefined &&
+    wcNotStartedCount !== undefined
+
+  // --- Legacy fallback chain (pre-v2 versions or non-XER analyses) ---
+  if (workComplete === undefined) {
+    workComplete = numOrUndefAtTop(
+      a.workComplete ?? a.percentComplete ?? a.percent_complete ??
+      a.physicalPercentComplete ?? a.physical_percent_complete ??
+      a.durationPercentComplete ?? a.duration_percent_complete ??
+      a.percentDone ?? a.percent_done ?? a.progress ??
+      a.pctComplete ?? a.pct_complete ?? a.completion
+    )
+  }
   const completedActivities = numOrUndefAtTop(a.completedActivities ?? a.completed_activities ?? a.completed ?? a.completedCount)
   const totalActivities = num(a.totalActivities ?? a.total_activities ?? a.activityCount ?? a.activity_count, 0)
 
@@ -287,8 +315,32 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   const workCompleteNum = workComplete ?? 0
   const hasWorkComplete = workComplete !== undefined
 
-  const longLeadAtRisk = num(a.longLeadAtRisk, 0)
-  const longLeadTotal = num(a.longLeadTotal, 0)
+  // ============================================================================
+  // LONG LEAD AT RISK — Day 5, v2
+  //
+  // Analyzer now returns longLeadTotal (count of detected long-lead items)
+  // and longLeadAtRisk (those with float<=14 days). Earlier versions of
+  // the dashboard read fields that didn't exist on the analysis object,
+  // so this number was always 0 even when 28 long-lead items were detected.
+  //
+  // Fallback path: if the analyzer fields are missing (legacy version),
+  // compute on the fly from the longLeadItems array if present.
+  // ============================================================================
+  let longLeadTotal = numOrUndefAtTop(a.longLeadTotal)
+  let longLeadAtRisk = numOrUndefAtTop(a.longLeadAtRisk)
+  if (longLeadTotal === undefined && Array.isArray(a.longLeadItems)) {
+    longLeadTotal = a.longLeadItems.length
+  }
+  if (longLeadAtRisk === undefined && Array.isArray(a.longLeadItems)) {
+    longLeadAtRisk = a.longLeadItems.filter((it: any) => {
+      const f = typeof it.floatDays === 'number' ? it.floatDays : parseFloat(it.floatDays || '999')
+      if (isNaN(f)) return false
+      if (it.status_code === 'TK_Complete') return false
+      return f <= 14
+    }).length
+  }
+  longLeadTotal = longLeadTotal ?? 0
+  longLeadAtRisk = longLeadAtRisk ?? 0
 
   const risksDetected = num(a.risksDetected ?? a.risksCount, 0)
   const criticalRisks = num(a.criticalRisks, 0)
@@ -355,8 +407,8 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
         <Card>
           <SectionTitle>Key Dates & Durations</SectionTitle>
 
-          {/* Manual contract dates row */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          {/* Manual contract dates row — 4 cells */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
             <DateCell
               label="NTP / Contract Start"
               value={fmtDate(projectStart)}
@@ -375,22 +427,31 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
                 'No time extension'
               }
               highlightColor="amber" />
+            <DateCell
+              label="Substantial — Manual"
+              value={fmtDate(manualSubstantialCompletion)}
+              sub={manualSubstantialCompletion ? 'Per contract' : 'Add via Upload → Contract Dates'} />
           </div>
 
-          {/* XER-detected dates row */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-slate-100">
+          {/* XER-detected dates row — 4 cells */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-slate-100">
             <DateCell
               label="Data Date"
               value={fmtDate(dataDate)}
               sub={manualDataDate ? 'Manual entry' : 'From XER'} />
             <DateCell
-              label="Substantial Completion"
+              label="Substantial — XER"
               value={fmtDate(substantialCompletion)}
               sub={substMilestone ? `${substMilestone} · From XER` : 'Detected from XER'} />
             <DateCell
               label="Final Completion"
               value={fmtDate(finalCompletion)}
               sub={finalMilestone ? `${finalMilestone} · From XER` : 'Detected from XER'} />
+            <DateCell
+              label="Projected End"
+              value={fmtDate(projectedEnd)}
+              sub={daysBehindNum > 0 ? `+${daysBehindNum}d vs revised` : 'XER forecast'}
+              highlightColor={daysBehindNum > 0 ? 'amber' : undefined} />
           </div>
 
           {/* Durations row — 4 cells */}
@@ -418,9 +479,11 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
             sub={
               !hasWorkComplete ? 'No activity data' :
               workCompleteIsTimeBased ? 'Time-based estimate' :
-              completedActivities !== undefined
-                ? `${completedActivities.toLocaleString()} of ${totalActivities.toLocaleString()} activities`
-                : totalActivities > 0 ? `${totalActivities.toLocaleString()} activities total` : 'Computed'
+              hasWorkCompleteBreakdown
+                ? `${wcCompletedAtThreshold!.toLocaleString()} of ${totalActivities.toLocaleString()} complete (≥80%)`
+                : completedActivities !== undefined
+                  ? `${completedActivities.toLocaleString()} of ${totalActivities.toLocaleString()} activities`
+                  : totalActivities > 0 ? `${totalActivities.toLocaleString()} activities total` : 'Computed'
             }
             valueColor="slate"
           />
@@ -439,6 +502,29 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
             valueColor={risksDetected === 0 ? 'green' : (criticalRisks > 0 ? 'red' : 'amber')}
           />
         </div>
+
+        {/* WORK % CALCULATION EXPLAINER — Day 5, v2
+            Shows the math behind the Work Complete tile so PMs see what
+            drove the percentage. Hidden if breakdown data is unavailable
+            (legacy versions analyzed before v2). */}
+        {hasWorkComplete && hasWorkCompleteBreakdown && (
+          <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 -mt-2 mb-2">
+            <div className="flex items-start gap-3">
+              <div className="text-[11px] font-bold text-slate-600 uppercase tracking-wider mt-0.5 whitespace-nowrap">
+                Work % calculation
+              </div>
+              <div className="flex-1 text-[12px] text-slate-700 leading-relaxed">
+                <span className="font-semibold text-slate-900">{wcCompletedAtThreshold!.toLocaleString()}</span> complete (≥80%, counted as 100%)
+                {' + '}
+                <span className="font-semibold text-slate-900">{wcInProgressCount!.toLocaleString()}</span> in-progress (avg <span className="font-semibold">{Math.round(wcInProgressAvgPct ?? 0)}%</span>)
+                {' + '}
+                <span className="font-semibold text-slate-900">{wcNotStartedCount!.toLocaleString()}</span> not started (0%)
+                {' = '}
+                <span className="font-semibold text-slate-900">{Math.round(workCompleteNum)}%</span> across {totalActivities.toLocaleString()} activities
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* SECTION 4: Schedule Progress chart */}
         <Card>
