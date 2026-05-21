@@ -1,4 +1,5 @@
 'use client'
+
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
@@ -25,23 +26,17 @@ const DEMO_USER = {
   company: 'Nobel Project Control Services, LLC',
 }
 
-// Statuses pickable from the ⋮ menu. NOTE: 'Deleted' is intentionally excluded —
-// users get to Deleted via the Delete action, not by picking it as a status.
 const STATUS_OPTIONS: ProjectStatus[] = ['Active', 'Completed', 'On Hold', 'Archived']
 
 export default function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
-
   const [activeProject, setActiveProject] = useState<Project | null>(null)
   const [activeVersion, setActiveVersion] = useState<ScheduleVersion | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
-
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(new Set())
-
   const [openActionMenu, setOpenActionMenu] = useState<string | null>(null)
-
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [editProjectIdField, setEditProjectIdField] = useState('')
@@ -139,7 +134,7 @@ export default function Sidebar({ user }: SidebarProps) {
   }
 
   function handleDeleteProject(id: string) {
-    deleteProject(id)  // Soft delete now — moves to "Deleted" status
+    deleteProject(id)
     refresh()
     setConfirmDeleteProjectId(null)
   }
@@ -157,10 +152,6 @@ export default function Sidebar({ user }: SidebarProps) {
   }
 
   function handleSetStatus(projectId: string, status: ProjectStatus) {
-    // Active is a "safe" status (restoring a project). Apply immediately.
-    // Other statuses (Completed, On Hold, Archived) change visibility or
-    // significance, so prompt for confirmation first so users don't accidentally
-    // hide a project by misclicking the radio.
     if (status === 'Active') {
       setProjectStatus(projectId, status)
       setOpenActionMenu(null)
@@ -178,9 +169,6 @@ export default function Sidebar({ user }: SidebarProps) {
     refresh()
   }
 
-  // Build the warning message + button color shown in the status change confirmation.
-  // Keeps the verbiage specific to each destination state so users know exactly
-  // what will happen.
   function statusChangeMessage(status: ProjectStatus): { headline: string; body: string; confirmBg: string } {
     if (status === 'Completed') return {
       headline: 'Mark as Completed?',
@@ -200,18 +188,12 @@ export default function Sidebar({ user }: SidebarProps) {
     return { headline: 'Change status?', body: '', confirmBg: 'bg-blue-600 hover:bg-blue-700' }
   }
 
-  // Counts for the Workspace section badges.
-  // Archive count now includes BOTH Archived AND Completed projects, since
-  // completed projects also live in the Archive page (they're no longer active work).
   const archivedCount = projects.filter(p => {
     const s = getProjectStatus(p)
     return s === 'Archived' || s === 'Completed'
   }).length
   const deletedCount = projects.filter(p => getProjectStatus(p) === 'Deleted').length
 
-  // Project tree shows ONLY active-work projects: Active and On Hold.
-  // Completed projects move to the Archive page so the sidebar stays focused
-  // on what the user is currently working on.
   const filteredProjects = (() => {
     const q = searchQuery.trim().toLowerCase()
     let pool = projects.filter(p => {
@@ -262,13 +244,14 @@ export default function Sidebar({ user }: SidebarProps) {
     { href: '/dashboard/tia', icon: '📑', label: 'TIA Comparison' },
   ] : []
 
+  const isEnterpriseActive = pathname.startsWith('/dashboard/enterprise')
   const isArchiveActive = pathname.startsWith('/dashboard/archive')
   const isDeletedActive = pathname.startsWith('/dashboard/deleted')
   const isSettingsActive = pathname.startsWith('/dashboard/settings')
 
   return (
     <aside className="w-64 flex-shrink-0 flex flex-col h-full no-print" style={{ background: '#0d1b2e' }}>
-      {/* Brand */}
+
       <div className="px-4 py-4 border-b border-white/10 flex-shrink-0">
         <Link href="/dashboard" className="flex items-center gap-2.5">
           <div className="flex-shrink-0">
@@ -288,7 +271,6 @@ export default function Sidebar({ user }: SidebarProps) {
         </Link>
       </div>
 
-      {/* Workspace */}
       {showTeamMode && (
         <div className="px-4 py-2.5 border-b border-white/5 flex-shrink-0">
           <div className="text-white/30 text-[9px] uppercase tracking-widest mb-0.5">Workspace</div>
@@ -296,7 +278,6 @@ export default function Sidebar({ user }: SidebarProps) {
         </div>
       )}
 
-      {/* User */}
       {displayUser && (
         <div className="px-4 py-2.5 border-b border-white/5 flex-shrink-0 flex items-center gap-2.5">
           <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
@@ -309,7 +290,6 @@ export default function Sidebar({ user }: SidebarProps) {
         </div>
       )}
 
-      {/* Search */}
       <div className="px-3 py-2 border-b border-white/5 flex-shrink-0 relative">
         <input
           value={searchQuery}
@@ -320,7 +300,6 @@ export default function Sidebar({ user }: SidebarProps) {
         <span className="absolute left-5 top-1/2 -translate-y-1/2 text-white/40 text-[11px] pointer-events-none">🔍</span>
       </div>
 
-      {/* Scrollable projects tree — shows only Active/Completed/On Hold */}
       <div className="flex-1 overflow-y-auto px-2 py-1.5">
         {projects.length === 0 && (
           <div className="text-center py-4 text-white/40 text-xs">No projects yet</div>
@@ -506,7 +485,6 @@ export default function Sidebar({ user }: SidebarProps) {
                 </div>
               )}
 
-              {/* VERSIONS */}
               {isExpanded && !isEditing && !isConfirmingDelete && !isConfirmingStatusChange && p.versions.length > 0 && (
                 <div className="ml-5 pl-2 border-l border-white/5 py-0.5">
                   {[...p.versions]
@@ -641,7 +619,6 @@ export default function Sidebar({ user }: SidebarProps) {
         )}
       </div>
 
-      {/* Views for active project */}
       {activeProject && (
         <div className="border-t border-white/10 px-2 py-2 flex-shrink-0">
           <div className="text-white/30 text-[9px] uppercase tracking-widest px-2 py-1 truncate" title={activeProject.name}>
@@ -670,11 +647,24 @@ export default function Sidebar({ user }: SidebarProps) {
         </div>
       )}
 
-      {/* WORKSPACE NAV — Archive / Deleted / Settings */}
+      {/* WORKSPACE NAV — Enterprise / Archive / Deleted / Settings */}
       <div className="border-t border-white/10 px-2 py-2 flex-shrink-0">
         <div className="text-white/30 text-[9px] uppercase tracking-widest px-2 py-1">
           Workspace
         </div>
+
+        {/* NEW: Enterprise Dashboard link */}
+        <Link href="/dashboard/enterprise"
+          className={clsx(
+            'flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2',
+            isEnterpriseActive
+              ? 'bg-blue-600/20 text-white border-blue-500'
+              : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
+          )}>
+          <span className="text-sm w-4 text-center">📊</span>
+          <span className="flex-1">Enterprise Dashboard</span>
+        </Link>
+
         <Link href="/dashboard/archive"
           className={clsx(
             'flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2',
@@ -717,7 +707,6 @@ export default function Sidebar({ user }: SidebarProps) {
         </Link>
       </div>
 
-      {/* Sign out */}
       <div className="px-3 py-2.5 border-t border-white/10 flex-shrink-0">
         <button
           onClick={handleSignOut}
