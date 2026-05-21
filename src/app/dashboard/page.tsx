@@ -178,12 +178,10 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   const substMilestone = a.substMilestone || (substMilestoneObj?.code || substMilestoneObj?.id || '')
   const finalMilestone = a.finalMilestone || (finalMilestoneObj?.code || finalMilestoneObj?.id || '')
 
-  // Durations — prefer the analyzer's value if present (it's the authoritative
-  // figure from the XER), otherwise compute from dates as INCLUSIVE calendar
-  // days per the P6 convention (NTP day 1 + Contract End day = duration).
-  //
-  // Try many field name variants since different XER analyzers use different
-  // shapes for the same value.
+  // Durations — compute from dates FIRST (truthful calendar-day count).
+  // The analyzer's field value is unreliable (it can be in wrong units,
+  // refer to a sub-window, or be plain wrong). Use it only as fallback
+  // when dates aren't available.
   const daysBetween = (start?: string, end?: string): number | undefined => {
     if (!start || !end) return undefined
     const s = new Date(start)
@@ -194,7 +192,8 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
     // +1 makes this inclusive: both start and end days are counted.
     return Math.max(0, Math.round((eUTC - sUTC) / (1000 * 60 * 60 * 24))) + 1
   }
-  // Original Duration = NTP → Contract End (inclusive)
+  // Original Duration = NTP → Contract End (inclusive, calendar days)
+  const originalDurationComputed = daysBetween(projectStart, contractEnd)
   const originalDurationField = numOrUndefAtTop(
     a.originalDuration ?? a.original_duration ??
     a.targetDuration ?? a.target_duration ??
@@ -202,16 +201,15 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
     a.baselineDuration ?? a.baseline_duration ??
     a.contractDuration ?? a.contract_duration
   )
-  const originalDurationComputed = daysBetween(projectStart, contractEnd)
-  const originalDuration = originalDurationField ?? originalDurationComputed ?? 0
+  const originalDuration = originalDurationComputed ?? originalDurationField ?? 0
   // Remaining Duration = Data Date → Projected End (inclusive)
+  const remainingDurationComputed = daysBetween(dataDate, projectedEnd)
   const remainingDurationField = numOrUndefAtTop(
     a.remainingDuration ?? a.remaining_duration ??
     a.atCompletionRemainingDuration
   )
-  const remainingDurationComputed = daysBetween(dataDate, projectedEnd)
-  const remainingDuration = remainingDurationField ?? remainingDurationComputed ?? 0
-  const hasOriginalDuration = originalDurationField !== undefined || originalDurationComputed !== undefined
+  const remainingDuration = remainingDurationComputed ?? remainingDurationField ?? 0
+  const hasOriginalDuration = originalDurationComputed !== undefined || originalDurationField !== undefined
 
   // Days behind — if analysis didn't store it, compute from contractEnd vs projectedEnd.
   // Normalize to date-only so time-of-day / timezone parsing differences don't
@@ -230,15 +228,16 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   const hasDaysBehind = daysBehind !== undefined
 
   // Duration at Completion = NTP → Projected End (inclusive)
+  const durationAtCompletionComputed = daysBetween(projectStart, projectedEnd)
   const durationAtCompletionField = numOrUndefAtTop(
     a.durationAtCompletion ?? a.duration_at_completion ??
     a.atCompletionDuration ?? a.at_completion_duration
   )
-  const durationAtCompletionComputed = daysBetween(projectStart, projectedEnd)
-  const durationAtCompletion = durationAtCompletionField ?? durationAtCompletionComputed ?? (originalDuration + daysBehindNum)
+  const durationAtCompletion = durationAtCompletionComputed ?? durationAtCompletionField ?? (originalDuration + daysBehindNum)
 
   // Work complete — try many field variants, then compute from activities.
-  // undefined when truly no data — UI shows "—" instead of misleading 0%.
+  // Final fallback: time-based progress (where the project is on its timeline)
+  // so the Schedule Progress insights show something instead of "—".
   let workComplete: number | undefined = numOrUndefAtTop(
     a.workComplete ?? a.percentComplete ?? a.percent_complete ??
     a.physicalPercentComplete ?? a.physical_percent_complete ??
@@ -250,6 +249,27 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   const totalActivities = num(a.totalActivities ?? a.total_activities ?? a.activityCount ?? a.activity_count, 0)
   if (workComplete === undefined && completedActivities !== undefined && totalActivities > 0) {
     workComplete = (completedActivities / totalActivities) * 100
+  }
+  // Time-based fallback: how far along is the project in elapsed time?
+  // Not "real" work-complete (which needs activity progress from the XER), but
+  // gives the chart and insights useful values instead of "—" until the analysis
+  // pipeline outputs real progress data.
+  let workCompleteIsTimeBased = false
+  if (workComplete === undefined && projectStart && projectedEnd && dataDate) {
+    const pS = new Date(projectStart)
+    const pE = new Date(projectedEnd)
+    const dD = new Date(dataDate)
+    if (!isNaN(pS.getTime()) && !isNaN(pE.getTime()) && !isNaN(dD.getTime())) {
+      const pSUTC = Date.UTC(pS.getFullYear(), pS.getMonth(), pS.getDate())
+      const pEUTC = Date.UTC(pE.getFullYear(), pE.getMonth(), pE.getDate())
+      const dDUTC = Date.UTC(dD.getFullYear(), dD.getMonth(), dD.getDate())
+      const total = pEUTC - pSUTC
+      const elapsed = dDUTC - pSUTC
+      if (total > 0) {
+        workComplete = Math.max(0, Math.min(100, (elapsed / total) * 100))
+        workCompleteIsTimeBased = true
+      }
+    }
   }
   const workCompleteNum = workComplete ?? 0
   const hasWorkComplete = workComplete !== undefined
@@ -359,9 +379,13 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
             href="/dashboard/lens"
             label="Work Complete"
             value={hasWorkComplete ? `${Math.round(workCompleteNum)}%` : '—'}
-            sub={hasWorkComplete && completedActivities !== undefined
-              ? `${completedActivities.toLocaleString()} of ${totalActivities.toLocaleString()} activities`
-              : totalActivities > 0 ? `${totalActivities.toLocaleString()} activities total` : 'No activity data'}
+            sub={
+              !hasWorkComplete ? 'No activity data' :
+              workCompleteIsTimeBased ? 'Time-based estimate' :
+              completedActivities !== undefined
+                ? `${completedActivities.toLocaleString()} of ${totalActivities.toLocaleString()} activities`
+                : totalActivities > 0 ? `${totalActivities.toLocaleString()} activities total` : 'Computed'
+            }
             valueColor="slate"
           />
           <KPITile
