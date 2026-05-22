@@ -34,6 +34,31 @@ import type { ScheduleType } from '../versionLabeler'
 
 const BUCKET = 'schedule-artifacts'
 
+// Translate ControlLens status values ('Active', 'On Hold', etc.) to the
+// lowercase/snake_case format the Supabase CHECK constraint accepts.
+function toDbStatus(s?: ProjectStatus): string {
+  switch (s) {
+    case 'Active': return 'active'
+    case 'On Hold': return 'on_hold'
+    case 'Completed': return 'completed'
+    case 'Archived': return 'archived'
+    case 'Deleted': return 'deleted'
+    default: return 'active'
+  }
+}
+
+// Reverse — translate DB status back to ControlLens format on load
+function fromDbStatus(s?: string): ProjectStatus {
+  switch (s) {
+    case 'active': return 'Active'
+    case 'on_hold': return 'On Hold'
+    case 'completed': return 'Completed'
+    case 'archived': return 'Archived'
+    case 'deleted': return 'Deleted'
+    default: return 'Active'
+  }
+}
+
 // =============================================================================
 // ID translation — local store uses 'proj_xxx' / 'ver_xxx' strings, Supabase
 // uses UUIDs. Maintain a translation map in localStorage so the same local
@@ -186,7 +211,7 @@ function rowToProject(row: any): Project {
     owner: row.owner_party || undefined,
     contractValue: row.contract_value || undefined,
     phase: row.phase || undefined,
-    status: (row.status as ProjectStatus) || 'Active',
+    status: fromDbStatus(row.status),
     contractDates: row.contract_dates || undefined,
     evm: row.evm || undefined,
     versions,
@@ -265,7 +290,7 @@ export async function insertProjectToSupabase(project: Project): Promise<boolean
       contractor: gcFromContext,
       contract_value: project.contractValue || null,
       phase: project.phase || null,
-      status: project.status || 'Active',
+      status: toDbStatus(project.status),
       contract_dates: project.contractDates || null,
       evm: project.evm || null,
     })
@@ -424,7 +449,7 @@ export async function updateProjectStatusInSupabase(
   const supabase = createClient()
   const { error } = await supabase
     .from('projects')
-    .update({ status, updated_at: new Date().toISOString() })
+    .update({ status: toDbStatus(status), updated_at: new Date().toISOString() })
     .eq('id', toUuid(projectId))
   if (error) {
     console.error('[db.updateStatus] failed:', error.message)
