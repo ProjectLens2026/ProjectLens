@@ -146,11 +146,11 @@ export function findDataDateDuplicates(versions: VersionLabelInput[]): Set<strin
     dateToIds.set(key, list)
   }
   const dupes = new Set<string>()
-  for (const [, ids] of dateToIds.entries()) {
+  dateToIds.forEach((ids) => {
     if (ids.length > 1) {
       for (const id of ids) dupes.add(id)
     }
-  }
+  })
   return dupes
 }
 
