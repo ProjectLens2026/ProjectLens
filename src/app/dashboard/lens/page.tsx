@@ -3,7 +3,13 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { getActiveProject, getActiveVersion, updateVersionNarrative, updateProjectEvm } from '@/lib/projectStore'
 import type { EvmData, EvmMonth, DistributionMode } from '@/lib/evm'
-import { buildEvmMonths, evmCumulative, monthCPI, monthSPI, fmtDollars, fmtRatio } from '@/lib/evm'
+import {
+  buildEvmMonths, evmCumulative,
+  monthPlanned, monthEarned, monthCPI, monthSPI, monthSV, monthCV,
+  fmtDollars, fmtRatio, fmtPct,
+  spiMeaning, cpiMeaning,
+  migrateEvmData,
+} from '@/lib/evm'
 
 export default function ControlLensAnalysisPage() {
   const [analysis, setAnalysis] = useState<any>(null)
@@ -703,52 +709,47 @@ export default function ControlLensAnalysisPage() {
 }
 
 // =============================================================================
-// ProjectProduction — Day 5, v10
-// EVM (Earned Value Management) input + visualization tab.
+// ProjectProduction — Day 5, v12 (final model)
 //
-// Inputs (all PM-entered):
-//   - Total Budget (one number per project, sticky)
-//   - Distribution mode: S-curve (default) / Linear / Manual
-//   - Per-month: Planned % (auto from distribution, editable in manual),
-//                Earned $ (entered as work completes),
-//                Actual $ (entered as bills are paid)
+// PM enters Earned % per month — always required. Actual Cost is OPTIONAL
+// and only needed if PM wants CPI. ControlLens' focus is schedule (SPI).
 //
-// Derived:
-//   - Per-month Planned $ = totalBudget * plannedPct / 100
-//   - Per-month CPI = EV / AC
-//   - Per-month SPI = EV / PV
-//   - Cumulative PV / EV / AC up to data-date month
-//   - Project-level CPI = sum(EV) / sum(AC) up to data-date
-//   - Project-level SPI = sum(EV) / sum(PV) up to data-date
+// Per-project setup (sticky across versions):
+//   - Total Budget
+//   - Distribution mode (S-curve default / Linear / Manual)
 //
-// Months come from the project's manual contract dates: NTP → Revised
-// Contract Completion (fallback to Original Contract Completion). If no
-// dates are entered, shows an empty state pointing PM to set them on
-// the upload form first.
+// Per-row derived:
+//   - Planned $   = budget × plannedPct / 100
+//   - Earned $    = budget × earnedPct  / 100
+//   - SPI         = earnedPct ÷ plannedPct   (always shown; primary metric)
+//   - CPI         = Earned $ ÷ Actual Cost   (shown only when AC entered)
+//
+// Excel-like UX:
+//   - "× Clear" button on Earned % AND Actual Cost column headers
+//   - Per-cell delete via standard input behavior
 // =============================================================================
 function ProjectProduction({ project, dataDate }: { project: any; dataDate?: string }) {
   const ntp = project.contractDates?.ntp
-  const revisedEnd = project.contractDates?.originalContractCompletion  // ContractDates uses originalContractCompletion as the project-end source of truth
+  const projectEnd = project.contractDates?.originalContractCompletion
 
-  // Local editing state — synced from project.evm on mount and project changes.
-  // We hold a draft locally and persist on every change (debounced via
-  // updateProjectEvm calling IndexedDB writes). React renders are driven
-  // off this local state for snappy edits.
+  // Migrate any legacy schema (v10 dollar-based / v11 retainage-based) to v12.
+  // Idempotent — running on a v12 row is a no-op.
+  const migrated = migrateEvmData(project.evm)
+
   const [budget, setBudget] = useState<string>(
-    project.evm?.totalBudget ? String(project.evm.totalBudget) : ''
+    migrated?.totalBudget ? String(migrated.totalBudget) : ''
   )
   const [distMode, setDistMode] = useState<DistributionMode>(
-    project.evm?.distributionMode || 'scurve'
+    migrated?.distributionMode || 'scurve'
   )
-  const [months, setMonths] = useState<EvmMonth[]>(project.evm?.months || [])
+  const [months, setMonths] = useState<EvmMonth[]>(migrated?.months || [])
 
-  // Sync from project when version/project changes — defensive against
-  // multi-window edits or projectStore notifications mid-edit.
   useEffect(() => {
-    if (project.evm) {
-      setBudget(project.evm.totalBudget ? String(project.evm.totalBudget) : '')
-      setDistMode(project.evm.distributionMode || 'scurve')
-      setMonths(project.evm.months || [])
+    const m = migrateEvmData(project.evm)
+    if (m) {
+      setBudget(m.totalBudget ? String(m.totalBudget) : '')
+      setDistMode(m.distributionMode || 'scurve')
+      setMonths(m.months || [])
     } else {
       setBudget('')
       setDistMode('scurve')
@@ -767,53 +768,65 @@ function ProjectProduction({ project, dataDate }: { project: any; dataDate?: str
     updateProjectEvm(project.id, data)
   }
 
-  // Initial setup — called when PM clicks "Set up EVM" on the empty state.
-  // Requires manual NTP and Revised Contract Completion to be set on the
-  // upload form first; otherwise we can't generate the month range.
   function setupEvm() {
-    if (!ntp || !revisedEnd) return
-    const budgetNum = parseFloat(budget) || 0
-    const newMonths = buildEvmMonths(ntp, revisedEnd, distMode, months)
+    if (!ntp || !projectEnd) return
+    const newMonths = buildEvmMonths(ntp, projectEnd, distMode, months)
     setMonths(newMonths)
-    persist({ totalBudget: budgetNum, distributionMode: distMode, months: newMonths })
+    persist({ months: newMonths })
   }
 
   function handleBudgetChange(value: string) {
     setBudget(value)
-    const budgetNum = parseFloat(value) || 0
-    persist({ totalBudget: budgetNum })
+    persist({ totalBudget: parseFloat(value) || 0 })
   }
-
   function handleDistChange(mode: DistributionMode) {
     setDistMode(mode)
-    // For S-curve / Linear, regenerate percentages. For Manual, leave
-    // current values alone — PM is now in control of every row.
     if (mode === 'scurve' || mode === 'linear') {
-      const newMonths = buildEvmMonths(ntp, revisedEnd, mode, months)
+      const newMonths = buildEvmMonths(ntp, projectEnd, mode, months)
       setMonths(newMonths)
       persist({ distributionMode: mode, months: newMonths })
     } else {
       persist({ distributionMode: mode })
     }
   }
-
-  function updateMonth(idx: number, field: keyof EvmMonth, value: number) {
+  function updateMonth(idx: number, field: keyof EvmMonth, value: number | undefined) {
     const newMonths = months.map((m, i) =>
       i === idx ? { ...m, [field]: value } : m
     )
     setMonths(newMonths)
     persist({ months: newMonths })
   }
-
   function regenerateDistribution() {
-    if (!ntp || !revisedEnd) return
-    const newMonths = buildEvmMonths(ntp, revisedEnd, distMode, months)
+    if (!ntp || !projectEnd) return
+    const newMonths = buildEvmMonths(ntp, projectEnd, distMode, months)
     setMonths(newMonths)
     persist({ months: newMonths })
   }
 
-  // EMPTY STATE — no contract dates set
-  if (!ntp || !revisedEnd) {
+  // Excel-like bulk clear by column
+  function clearEarnedColumn() {
+    if (months.length === 0) return
+    if (!confirm('Clear all Earned % values? You can re-enter them anytime.')) return
+    const newMonths = months.map(m => ({ ...m, earnedPct: 0 }))
+    setMonths(newMonths)
+    persist({ months: newMonths })
+  }
+  function clearActualCostColumn() {
+    if (months.length === 0) return
+    if (!confirm('Clear all Actual Cost values? CPI will reset to "—" until you re-enter.')) return
+    const newMonths = months.map(m => ({ ...m, actualCost: undefined }))
+    setMonths(newMonths)
+    persist({ months: newMonths })
+  }
+  function clearPlannedColumn() {
+    if (months.length === 0 || distMode !== 'manual') return
+    if (!confirm('Clear all Planned % values? You can re-enter or regenerate from the distribution.')) return
+    const newMonths = months.map(m => ({ ...m, plannedPct: 0 }))
+    setMonths(newMonths)
+    persist({ months: newMonths })
+  }
+
+  if (!ntp || !projectEnd) {
     return (
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
         <div className="flex gap-3 items-start">
@@ -828,7 +841,7 @@ function ProjectProduction({ project, dataDate }: { project: any; dataDate?: str
             <div className="text-xs text-amber-700">
               Current NTP: <span className="font-mono font-bold">{ntp || '(not set)'}</span>
               {' · '}
-              Original Contract Completion: <span className="font-mono font-bold">{revisedEnd || '(not set)'}</span>
+              Original Contract Completion: <span className="font-mono font-bold">{projectEnd || '(not set)'}</span>
             </div>
           </div>
         </div>
@@ -839,7 +852,6 @@ function ProjectProduction({ project, dataDate }: { project: any; dataDate?: str
   const totalBudgetNum = parseFloat(budget) || 0
   const hasMonths = months.length > 0
 
-  // Data-date month for cumulative cutoff (YYYY-MM)
   const cutoff = (() => {
     const d = dataDate ? new Date(dataDate) : new Date()
     if (isNaN(d.getTime())) return undefined
@@ -854,18 +866,20 @@ function ProjectProduction({ project, dataDate }: { project: any; dataDate?: str
     <div>
       <h3 className="text-sm font-bold mb-1">Project Production</h3>
       <p className="text-xs text-slate-500 mb-4">
-        Earned Value tracking — enter your budget, then per-month earned ($ of physical work completed) and actual ($ billed).
-        CPI &amp; SPI are calculated automatically. All data is manually entered, not derived from XER.
+        Schedule Performance tracking (SPI is the primary metric).
+        Enter <strong>Earned %</strong> each month as physical work completes.
+        Actual Cost is optional — enter it only if you want CPI computed.
+        All data is manually entered.
       </p>
 
-      {/* Setup controls */}
+      {/* Setup row — Budget + Distribution + Date Range. No retainage. */}
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
             <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">Total Budget (USD)</label>
             <input type="number" value={budget}
               onChange={e => handleBudgetChange(e.target.value)}
-              placeholder="e.g. 25000000"
+              placeholder="e.g. 3000000"
               className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
             <div className="text-[10px] text-slate-500 mt-1">{totalBudgetNum > 0 ? fmtDollars(totalBudgetNum) : 'Enter total contract value'}</div>
           </div>
@@ -882,15 +896,15 @@ function ProjectProduction({ project, dataDate }: { project: any; dataDate?: str
               ))}
             </div>
             <div className="text-[10px] text-slate-500 mt-1">
-              {distMode === 'scurve' ? 'Construction-standard S shape' :
+              {distMode === 'scurve' ? 'Construction-standard S' :
                distMode === 'linear' ? 'Equal % every month' :
-               'You enter each month manually'}
+               'You enter each month'}
             </div>
           </div>
           <div>
             <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">Date Range</label>
             <div className="text-xs text-slate-700 px-3 py-2 bg-white border border-blue-200 rounded-lg">
-              <div className="font-semibold">{ntp} → {revisedEnd}</div>
+              <div className="font-semibold">{ntp} → {projectEnd}</div>
               <div className="text-[10px] text-slate-500">{months.length} months</div>
             </div>
             <button onClick={hasMonths ? regenerateDistribution : setupEvm}
@@ -905,7 +919,7 @@ function ProjectProduction({ project, dataDate }: { project: any; dataDate?: str
         <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-8 text-center">
           <div className="text-4xl mb-3">💰</div>
           <div className="text-sm font-bold text-slate-700 mb-1">Generate the monthly grid to start</div>
-          <div className="text-xs text-slate-500 mb-4">Enter your total budget above, then click "Generate monthly grid".</div>
+          <div className="text-xs text-slate-500 mb-4">Enter Total Budget above, then click "Generate monthly grid".</div>
           <button onClick={setupEvm}
             className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg">
             Generate monthly grid →
@@ -913,83 +927,147 @@ function ProjectProduction({ project, dataDate }: { project: any; dataDate?: str
         </div>
       ) : (
         <>
-          {/* KPI tiles — cumulative to data date */}
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-2 mb-4">
-            <KpiCell label="Total Budget"     value={fmtDollars(totalBudgetNum)} subtle />
-            <KpiCell label="Planned (PV)"     value={fmtDollars(cumulative.pv)} />
-            <KpiCell label="Earned (EV)"      value={fmtDollars(cumulative.ev)} valueColor="text-emerald-700" />
-            <KpiCell label="Actual (AC)"      value={fmtDollars(cumulative.ac)} valueColor="text-amber-700" />
-            <KpiCell label="CPI"              value={fmtRatio(cumulative.cpi)}
-              valueColor={cumulative.cpi !== null && cumulative.cpi < 1 ? 'text-red-600' : 'text-emerald-600'}
-              subtitle={cumulative.cpi !== null && cumulative.cpi < 1 ? 'Over budget' : 'On / under budget'} />
-            <KpiCell label="SPI"              value={fmtRatio(cumulative.spi)}
-              valueColor={cumulative.spi !== null && cumulative.spi < 1 ? 'text-red-600' : 'text-emerald-600'}
-              subtitle={cumulative.spi !== null && cumulative.spi < 1 ? 'Behind schedule' : 'On / ahead of schedule'} />
+          {/* KPI tiles — cumulative through data-date month. SPI gets prominent
+              placement since that's ControlLens' primary metric. */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 mb-4">
+            <KpiCell label="Total Budget" value={fmtDollars(totalBudgetNum)} subtle />
+            <KpiCell label={`Planned (${fmtPct(cumulative.plannedPct)})`} value={fmtDollars(cumulative.pv)} />
+            <KpiCell label={`Earned (${fmtPct(cumulative.earnedPct)})`} value={fmtDollars(cumulative.ev)} valueColor="text-emerald-700" />
+            <KpiCell label="Schedule Variance" value={cumulative.sv >= 0 ? '+' + fmtDollars(cumulative.sv) : '−' + fmtDollars(Math.abs(cumulative.sv))}
+              valueColor={cumulative.sv < 0 ? 'text-red-600' : cumulative.sv > 0 ? 'text-emerald-600' : 'text-slate-700'}
+              subtitle="EV − PV" />
+            <KpiCell label="SPI" value={fmtRatio(cumulative.spi)}
+              valueColor={cumulative.spi === null ? 'text-slate-400' : cumulative.spi < 0.995 ? 'text-red-600' : cumulative.spi > 1.005 ? 'text-emerald-600' : 'text-slate-700'}
+              subtitle={spiMeaning(cumulative.spi)} prominent />
+            <KpiCell label="CPI" value={fmtRatio(cumulative.cpi)}
+              valueColor={cumulative.cpi === null ? 'text-slate-400' : cumulative.cpi < 0.995 ? 'text-red-600' : cumulative.cpi > 1.005 ? 'text-emerald-600' : 'text-slate-700'}
+              subtitle={cpiMeaning(cumulative.cpi)} />
           </div>
 
-          {/* Bar chart — PV / EV / AC per month */}
+          {/* Bar chart */}
           <EvmBarChart months={months} totalBudget={totalBudgetNum} cutoff={cutoff} />
 
           {/* Editable monthly table */}
           <div className="mt-4 bg-white border border-slate-200 rounded-xl overflow-hidden">
-            <div className="bg-slate-50 border-b border-slate-200 px-3 py-2 grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-600 uppercase tracking-wider">
-              <div className="col-span-2">Month</div>
-              <div className="col-span-1 text-right">Plan %</div>
-              <div className="col-span-2 text-right">Planned ($)</div>
-              <div className="col-span-2 text-right">Earned ($)</div>
-              <div className="col-span-2 text-right">Actual ($)</div>
-              <div className="col-span-1 text-right">CPI</div>
-              <div className="col-span-1 text-right">SPI</div>
-              <div className="col-span-1 text-center">Status</div>
+            <div className="bg-slate-50 border-b border-slate-200 px-3 py-2 grid gap-2 text-[10px] font-bold text-slate-600 uppercase tracking-wider items-center"
+              style={{ gridTemplateColumns: '1.2fr 1fr 1.1fr 1fr 1.1fr 1.2fr 0.8fr 0.8fr 0.7fr' }}>
+              <div>Month</div>
+              <div className="text-right flex items-center justify-end gap-1">
+                <span>Planned %</span>
+                {distMode === 'manual' && (
+                  <button onClick={clearPlannedColumn}
+                    title="Clear all Planned % values"
+                    className="text-[9px] font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 px-1 rounded">
+                    × Clear
+                  </button>
+                )}
+              </div>
+              <div className="text-right">Planned $</div>
+              <div className="text-right flex items-center justify-end gap-1">
+                <span>Earned %</span>
+                <button onClick={clearEarnedColumn}
+                  title="Clear all Earned % values"
+                  className="text-[9px] font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 px-1 rounded">
+                  × Clear
+                </button>
+              </div>
+              <div className="text-right">Earned $</div>
+              <div className="text-right flex items-center justify-end gap-1">
+                <span>Actual Cost</span>
+                <span className="text-[8px] text-slate-400 font-normal normal-case">(optional)</span>
+                <button onClick={clearActualCostColumn}
+                  title="Clear all Actual Cost values"
+                  className="text-[9px] font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 px-1 rounded">
+                  × Clear
+                </button>
+              </div>
+              <div className="text-right">SPI</div>
+              <div className="text-right">CPI</div>
+              <div className="text-center">When</div>
             </div>
             <div className="max-h-[500px] overflow-y-auto">
               {months.map((m, i) => {
-                const pv = (m.plannedPct / 100) * totalBudgetNum
-                const cpi = monthCPI(m.earnedDollars, m.actualDollars)
-                const spi = monthSPI(m.earnedDollars, pv)
+                const pv = monthPlanned(m.plannedPct, totalBudgetNum)
+                const ev = monthEarned(m.earnedPct, totalBudgetNum)
+                const cpi = monthCPI(m.earnedPct, totalBudgetNum, m.actualCost)
+                const spi = monthSPI(m.earnedPct, m.plannedPct)
                 const isCurrent = cutoff && m.isoMonth === cutoff
                 const isPast = cutoff && m.isoMonth < cutoff
                 const rowBg = isCurrent ? 'bg-blue-50' : i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'
                 return (
-                  <div key={m.isoMonth} className={`grid grid-cols-12 gap-2 px-3 py-2 text-xs border-b border-slate-100 last:border-0 ${rowBg} items-center`}>
-                    <div className="col-span-2 font-mono font-semibold text-slate-900">{m.label}</div>
-                    <div className="col-span-1 text-right">
+                  <div key={m.isoMonth} className={`grid gap-2 px-3 py-1.5 text-xs border-b border-slate-100 last:border-0 ${rowBg} items-center`}
+                    style={{ gridTemplateColumns: '1.2fr 1fr 1.1fr 1fr 1.1fr 1.2fr 0.8fr 0.8fr 0.7fr' }}>
+                    <div className="font-mono font-semibold text-slate-900">{m.label}</div>
+                    <div className="text-right">
                       <input type="number" step="0.1"
-                        value={m.plannedPct.toFixed(2)}
+                        value={m.plannedPct ? m.plannedPct.toFixed(2) : ''}
                         onChange={e => updateMonth(i, 'plannedPct', parseFloat(e.target.value) || 0)}
                         disabled={distMode !== 'manual'}
-                        className={`w-full text-right px-1 py-0.5 text-xs border rounded ${distMode === 'manual' ? 'border-slate-200 bg-white' : 'border-transparent bg-transparent text-slate-500'}`}
+                        placeholder="0"
+                        className={`w-full text-right px-1.5 py-0.5 text-xs border rounded ${distMode === 'manual' ? 'border-slate-200 bg-white' : 'border-transparent bg-transparent text-slate-500'}`}
                       />
                     </div>
-                    <div className="col-span-2 text-right text-slate-700 font-mono">{fmtDollars(pv)}</div>
-                    <div className="col-span-2 text-right">
-                      <input type="number"
-                        value={m.earnedDollars || ''}
-                        onChange={e => updateMonth(i, 'earnedDollars', parseFloat(e.target.value) || 0)}
+                    <div className="text-right text-slate-700 font-mono">{fmtDollars(pv)}</div>
+                    <div className="text-right">
+                      <input type="number" step="0.1"
+                        value={m.earnedPct ? m.earnedPct.toFixed(2) : ''}
+                        onChange={e => updateMonth(i, 'earnedPct', parseFloat(e.target.value) || 0)}
                         placeholder="0"
-                        className="w-full text-right px-2 py-1 text-xs border border-slate-200 rounded bg-white focus:outline-none focus:border-blue-400" />
+                        className="w-full text-right px-1.5 py-0.5 text-xs border border-slate-200 rounded bg-white focus:outline-none focus:border-blue-400" />
                     </div>
-                    <div className="col-span-2 text-right">
+                    <div className="text-right text-emerald-700 font-mono">{ev > 0 ? fmtDollars(ev) : '—'}</div>
+                    <div className="text-right">
                       <input type="number"
-                        value={m.actualDollars || ''}
-                        onChange={e => updateMonth(i, 'actualDollars', parseFloat(e.target.value) || 0)}
-                        placeholder="0"
-                        className="w-full text-right px-2 py-1 text-xs border border-slate-200 rounded bg-white focus:outline-none focus:border-blue-400" />
+                        value={m.actualCost && m.actualCost > 0 ? m.actualCost : ''}
+                        onChange={e => {
+                          const v = parseFloat(e.target.value)
+                          updateMonth(i, 'actualCost', isNaN(v) || v <= 0 ? undefined : v)
+                        }}
+                        placeholder="—"
+                        className="w-full text-right px-1.5 py-0.5 text-xs border border-slate-200 rounded bg-white focus:outline-none focus:border-blue-400" />
                     </div>
-                    <div className={`col-span-1 text-right font-bold ${cpi === null ? 'text-slate-300' : cpi < 1 ? 'text-red-600' : 'text-emerald-600'}`}>
-                      {fmtRatio(cpi)}
-                    </div>
-                    <div className={`col-span-1 text-right font-bold ${spi === null ? 'text-slate-300' : spi < 1 ? 'text-red-600' : 'text-emerald-600'}`}>
+                    <div className={`text-right font-bold ${spi === null ? 'text-slate-300' : spi < 0.995 ? 'text-red-600' : spi > 1.005 ? 'text-emerald-600' : 'text-slate-700'}`}>
                       {fmtRatio(spi)}
                     </div>
-                    <div className="col-span-1 text-center">
+                    <div className={`text-right font-bold ${cpi === null ? 'text-slate-300' : cpi < 0.995 ? 'text-red-600' : cpi > 1.005 ? 'text-emerald-600' : 'text-slate-700'}`}>
+                      {fmtRatio(cpi)}
+                    </div>
+                    <div className="text-center">
                       <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${isCurrent ? 'bg-blue-100 text-blue-800' : isPast ? 'bg-slate-100 text-slate-600' : 'bg-amber-50 text-amber-700'}`}>
-                        {isCurrent ? 'NOW' : isPast ? 'PAST' : 'FUTURE'}
+                        {isCurrent ? 'NOW' : isPast ? 'PAST' : 'NEXT'}
                       </span>
                     </div>
                   </div>
                 )
               })}
+            </div>
+          </div>
+
+          {/* Formula key + plain English meanings */}
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* SPI explainer — primary */}
+            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-[11px] leading-relaxed">
+              <div className="font-bold text-emerald-900 mb-1">📊 Schedule Performance Index (SPI)</div>
+              <div className="font-mono text-[10px] text-emerald-700 mb-2">SPI = Earned % ÷ Planned %</div>
+              <div className="space-y-1 text-slate-700">
+                <div><span className="font-bold text-slate-900">SPI = 1.00</span> → Project is on schedule</div>
+                <div><span className="font-bold text-emerald-700">SPI &gt; 1.00</span> → Ahead of schedule (production faster than planned)</div>
+                <div><span className="font-bold text-red-700">SPI &lt; 1.00</span> → Behind schedule (production slower than planned)</div>
+              </div>
+            </div>
+            {/* CPI explainer — optional, mention it depends on PM entering AC */}
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-[11px] leading-relaxed">
+              <div className="font-bold text-slate-900 mb-1">💵 Cost Performance Index (CPI) — optional</div>
+              <div className="font-mono text-[10px] text-slate-600 mb-2">CPI = Earned $ ÷ Actual Cost</div>
+              <div className="space-y-1 text-slate-700">
+                <div><span className="font-bold text-slate-900">CPI = 1.00</span> → On budget</div>
+                <div><span className="font-bold text-emerald-700">CPI &gt; 1.00</span> → Under budget (earned more than spent)</div>
+                <div><span className="font-bold text-red-700">CPI &lt; 1.00</span> → Over budget (spent more than earned)</div>
+              </div>
+              <div className="mt-2 pt-2 border-t border-slate-200 text-[10px] text-slate-500">
+                ControlLens does not record project expenditures from XER.
+                Actual Cost is what you spent that month — enter it manually if you want CPI computed.
+              </div>
             </div>
           </div>
         </>
@@ -998,12 +1076,15 @@ function ProjectProduction({ project, dataDate }: { project: any; dataDate?: str
   )
 }
 
-function KpiCell({ label, value, subtle, valueColor, subtitle }: {
-  label: string; value: string; subtle?: boolean; valueColor?: string; subtitle?: string
+function KpiCell({ label, value, subtle, valueColor, subtitle, prominent }: {
+  label: string; value: string; subtle?: boolean; valueColor?: string; subtitle?: string; prominent?: boolean
 }) {
   return (
-    <div className={`rounded-lg p-3 ${subtle ? 'bg-slate-50' : 'bg-white border border-slate-200'}`}>
-      <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{label}</div>
+    <div className={`rounded-lg p-2.5 ${
+      prominent ? 'bg-emerald-50 border-2 border-emerald-300' :
+      subtle ? 'bg-slate-50' : 'bg-white border border-slate-200'
+    }`}>
+      <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wider truncate" title={label}>{label}</div>
       <div className={`text-base font-bold ${valueColor || 'text-slate-900'} tabular-nums mt-0.5`}>{value}</div>
       {subtitle && <div className="text-[9px] text-slate-500 mt-0.5">{subtitle}</div>}
     </div>
@@ -1011,9 +1092,7 @@ function KpiCell({ label, value, subtle, valueColor, subtitle }: {
 }
 
 // =============================================================================
-// EVM Bar Chart — three bars per month (PV, EV, AC)
-// Forecast (future) months render PV in lighter blue, EV/AC at 0 (no data
-// entered yet). Past + current months render all three at full intensity.
+// EVM Bar Chart — three bars per month (PV / EV / AC if entered).
 // =============================================================================
 function EvmBarChart({ months, totalBudget, cutoff }: {
   months: EvmMonth[]; totalBudget: number; cutoff?: string
@@ -1026,40 +1105,35 @@ function EvmBarChart({ months, totalBudget, cutoff }: {
   const innerW = W - padL - padR
   const innerH = H - padT - padB
 
-  // Compute max value across PV/EV/AC for y-axis scaling
   let maxValue = 0
   for (const m of months) {
-    const pv = (m.plannedPct / 100) * totalBudget
-    maxValue = Math.max(maxValue, pv, m.earnedDollars, m.actualDollars)
+    const pv = monthPlanned(m.plannedPct, totalBudget)
+    const ev = monthEarned(m.earnedPct, totalBudget)
+    const ac = m.actualCost && m.actualCost > 0 ? m.actualCost : 0
+    maxValue = Math.max(maxValue, pv, ev, ac)
   }
-  if (maxValue === 0) maxValue = totalBudget / months.length  // sane default
+  if (maxValue === 0) maxValue = totalBudget / months.length
 
   const stepX = innerW / Math.max(months.length, 1)
   const barW = Math.max(4, Math.min(8, (stepX - 8) / 3))
   const yFor = (v: number) => padT + innerH * (1 - v / maxValue)
   const heightFor = (v: number) => innerH * (v / maxValue)
-
-  // Y-axis gridlines at sensible $ values
   const yTicks = [0, 0.25, 0.5, 0.75, 1.0].map(t => t * maxValue)
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-3">
-      <div className="text-[11px] font-bold text-slate-700 mb-2">Monthly Production — Planned vs Earned vs Actual</div>
+      <div className="text-[11px] font-bold text-slate-700 mb-2">Monthly Production — Planned vs Earned vs Actual Cost</div>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto' }}>
-        {/* Gridlines */}
         {yTicks.map((v, i) => (
           <g key={i}>
             <line x1={padL} y1={yFor(v)} x2={W - padR} y2={yFor(v)} stroke="#e2e8f0" strokeWidth="0.5" strokeDasharray={v === 0 ? '0' : '2'} />
-            <text x={padL - 4} y={yFor(v) + 3} fontSize="8" fill="#94a3b8" textAnchor="end">
-              {fmtDollars(v)}
-            </text>
+            <text x={padL - 4} y={yFor(v) + 3} fontSize="8" fill="#94a3b8" textAnchor="end">{fmtDollars(v)}</text>
           </g>
         ))}
-        {/* Bars per month */}
         {months.map((m, i) => {
-          const pv = (m.plannedPct / 100) * totalBudget
-          const ev = m.earnedDollars || 0
-          const ac = m.actualDollars || 0
+          const pv = monthPlanned(m.plannedPct, totalBudget)
+          const ev = monthEarned(m.earnedPct, totalBudget)
+          const ac = m.actualCost && m.actualCost > 0 ? m.actualCost : 0
           const isPast = cutoff && m.isoMonth <= cutoff
           const isFuture = !isPast
           const groupCenter = padL + (i + 0.5) * stepX
@@ -1068,23 +1142,14 @@ function EvmBarChart({ months, totalBudget, cutoff }: {
           const x3 = groupCenter + barW / 2 + 2
           return (
             <g key={m.isoMonth}>
-              {/* PV — blue (lighter if future) */}
               <rect x={x1} y={yFor(pv)} width={barW} height={heightFor(pv)} fill={isFuture ? 'rgba(37,99,235,0.4)' : '#2563eb'} />
-              {/* EV — green */}
-              {ev > 0 && (
-                <rect x={x2} y={yFor(ev)} width={barW} height={heightFor(ev)} fill="#16a34a" />
-              )}
-              {/* AC — amber */}
-              {ac > 0 && (
-                <rect x={x3} y={yFor(ac)} width={barW} height={heightFor(ac)} fill="#d97706" />
-              )}
-              {/* Month label */}
+              {ev > 0 && <rect x={x2} y={yFor(ev)} width={barW} height={heightFor(ev)} fill="#16a34a" />}
+              {ac > 0 && <rect x={x3} y={yFor(ac)} width={barW} height={heightFor(ac)} fill="#d97706" />}
               <text x={groupCenter} y={H - padB + 12} fontSize="8" fill="#64748b" textAnchor="middle">{m.label}</text>
             </g>
           )
         })}
       </svg>
-      {/* Legend */}
       <div className="flex flex-wrap gap-4 mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-600">
         <div className="flex items-center gap-1.5">
           <span className="inline-block w-3 h-3 bg-blue-600 rounded-sm"/>
@@ -1096,10 +1161,7 @@ function EvmBarChart({ months, totalBudget, cutoff }: {
         </div>
         <div className="flex items-center gap-1.5">
           <span className="inline-block w-3 h-3 bg-amber-600 rounded-sm"/>
-          <span><span className="font-semibold">AC</span> Actual Cost (billed/paid)</span>
-        </div>
-        <div className="ml-auto text-slate-500">
-          CPI &lt; 1 = over budget · SPI &lt; 1 = behind schedule
+          <span><span className="font-semibold">AC</span> Actual Cost (shown only when entered)</span>
         </div>
       </div>
     </div>

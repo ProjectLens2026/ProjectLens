@@ -9,6 +9,7 @@ import {
   Project, ProjectStatus,
 } from '@/lib/projectStore'
 import { countRiskCategories } from '@/lib/riskDetector'
+import { evmCumulative, migrateEvmData, fmtRatio, spiMeaning } from '@/lib/evm'
 // =============================================================================
 // Enterprise Dashboard — portfolio-level view across ALL projects in the workspace.
 //
@@ -164,6 +165,7 @@ export default function EnterpriseDashboard() {
                   <th className="text-left font-semibold py-3 pr-3 hidden md:table-cell">Projected End</th>
                   <th className="text-right font-semibold py-3 pr-3">Behind</th>
                   <th className="text-right font-semibold py-3 pr-3">% Comp.</th>
+                  <th className="text-right font-semibold py-3 pr-3" title="Schedule Performance Index from manual EVM data">SPI</th>
                   <th className="text-right font-semibold py-3 pr-3 hidden lg:table-cell">Risks</th>
                   <th className="text-right font-semibold py-3 pr-4 w-12"></th>
                 </tr>
@@ -256,6 +258,23 @@ function ProjectRow({ row }: { row: ProjectRowData }) {
             </div>
             <span className="font-semibold text-slate-900">{Math.round(row.workComplete)}%</span>
           </div>
+        )}
+      </td>
+      {/* SPI — Day 5, v12. From manual EVM data; "—" if not entered. */}
+      <td className="py-3 pr-3 text-xs text-right">
+        {row.spi === null ? (
+          <span className="text-slate-400" title="No EVM data — open Project Production tab to set up">—</span>
+        ) : (
+          <span
+            className={clsx(
+              'font-semibold tabular-nums',
+              row.spi < 0.995 ? 'text-red-600' :
+              row.spi > 1.005 ? 'text-emerald-600' :
+              'text-slate-700'
+            )}
+            title={spiMeaning(row.spi)}>
+            {fmtRatio(row.spi)}
+          </span>
         )}
       </td>
       {/* Risks */}
@@ -365,6 +384,9 @@ interface ProjectRowData {
   projectedEndDate: string
   contractPast: boolean
   totalActivities: number
+  // SPI computed from project.evm cumulative through the latest version's
+  // data date. null if PM hasn't set up EVM data for this project.
+  spi: number | null
 }
 function buildRows(projects: Project[]): ProjectRowData[] {
   return projects
@@ -449,11 +471,25 @@ function buildRows(projects: Project[]): ProjectRowData[] {
         }
       }
       // Risks — Day 5, v9: count CATEGORIES (matches Risks page), not activities.
-      // risksDetected = total categories triggered (e.g., 6 of 7)
-      // criticalRisks = critical-severity categories (e.g., 5 of 6)
       const riskCats = countRiskCategories(a)
       const risksDetected = riskCats.all
       const criticalRisks = riskCats.critical
+      // SPI — Day 5, v12. Compute cumulative SPI from the project's manual
+      // EVM data, using the latest XER's data date as the cutoff month.
+      // null if PM hasn't entered EVM yet (no setup, no data).
+      let spi: number | null = null
+      const evmData = migrateEvmData(p.evm)
+      if (evmData && evmData.totalBudget > 0 && evmData.months.length > 0) {
+        const ddIso = a.dataDate ? (() => {
+          const d = new Date(a.dataDate)
+          if (isNaN(d.getTime())) return undefined
+          const yy = d.getFullYear()
+          const mm = String(d.getMonth() + 1).padStart(2, '0')
+          return `${yy}-${mm}`
+        })() : undefined
+        const cum = evmCumulative(evmData.totalBudget, evmData.months, ddIso)
+        spi = cum.spi
+      }
       const today = new Date()
       const contractPast = contractEnd ? new Date(contractEnd) < today : false
       return {
@@ -470,6 +506,7 @@ function buildRows(projects: Project[]): ProjectRowData[] {
         projectedEndDate: fmtDate(projectedEnd),
         contractPast,
         totalActivities,
+        spi,
       }
     })
 }

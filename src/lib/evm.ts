@@ -1,48 +1,55 @@
 // =============================================================================
 // EVM (Earned Value Management) — helpers for the Project Production tab
-// Day 5, v10
+// Day 5, v12 (final model)
 //
-// All data here is MANUALLY entered by the PM — nothing is derived from XER.
-// This module handles:
-//   - Month range generation (from project NTP → contract end)
-//   - Distribution math (S-curve and Linear) for spreading a budget across
-//     months
-//   - Type definitions for storage
+// PERCENTAGE-BASED INPUT MODEL:
 //
-// The S-curve formula uses a sigmoid steepness=6 which produces the typical
-// construction cash-flow shape — slow ramp at start, peak velocity around
-// mid-project, slow taper at end. PMs can override to Linear or fully
-// Manual mode if their project doesn't fit the S.
+//   Per-month, PM enters:
+//     - Earned %    (always; this is what physical work was completed)
+//     - Actual Cost (OPTIONAL; in dollars; what was actually spent that month)
+//
+//   Planned % is auto-distributed from total budget across the project months
+//   (S-curve / Linear / Manual). Total Budget is set once per project.
+//
+//   Everything else is derived:
+//     - Planned $   = budget × planned% / 100
+//     - Earned $    = budget × earned% / 100         ← Earned Value
+//     - CPI         = Earned $ ÷ Actual Cost          ← standard EVM CPI
+//                     (null if PM hasn't entered actual cost)
+//     - SPI         = Earned % ÷ Planned %            ← schedule performance
+//
+// ControlLens emphasizes SCHEDULE performance (SPI). Cost performance (CPI)
+// is optional — PM only sees it if they choose to record monthly actual cost
+// (we don't pull that from the XER; it's accounting data outside our scope).
+//
+// CHANGES FROM v11 (don't carry forward):
+//   - retainagePct REMOVED from EvmData
+//   - Cash-CPI formula REMOVED — back to standard EV/AC
+//   - actualCost added per-month as optional manual input
 // =============================================================================
 
 export type DistributionMode = 'scurve' | 'linear' | 'manual'
 
 export interface EvmMonth {
-  // Stable identifier for this month — used as React key + dedupe.
-  // Format: YYYY-MM (e.g., '2025-03')
   isoMonth: string
-  // Display label, e.g., 'Mar 25'
   label: string
-  // Percentage of total budget planned for this month (0–100). The sum
-  // across all months should be ~100 (rounding may cause tiny drift).
   plannedPct: number
-  // Dollar value of physical work actually completed this month.
-  // PM-entered. 0 if no work credited yet.
-  earnedDollars: number
-  // What was billed / paid this month. PM-entered. 0 if not yet billed.
-  actualDollars: number
+  earnedPct: number
+  // OPTIONAL: actual cost in dollars for this month. PM enters manually if
+  // they want CPI computed. Leave undefined / 0 to skip cost tracking.
+  // ControlLens does not derive this — it's accounting data.
+  actualCost?: number
 }
 
 export interface EvmData {
   totalBudget: number
-  currency: string           // 'USD' default; 'AED' or others later
+  currency: string
   distributionMode: DistributionMode
   months: EvmMonth[]
 }
 
-// Generate one entry per calendar month spanning [startIso, endIso] inclusive
-// at the month level. Both args are ISO date strings — anything new Date()
-// can parse. Returns [] if either is missing or end < start.
+// ----- Month generation ----------------------------------------------------
+
 export function generateMonthRange(startIso: string | undefined, endIso: string | undefined):
   Array<{ isoMonth: string; label: string }> {
   if (!startIso || !endIso) return []
@@ -53,9 +60,6 @@ export function generateMonthRange(startIso: string | undefined, endIso: string 
   const result: Array<{ isoMonth: string; label: string }> = []
   const cursor = new Date(start.getFullYear(), start.getMonth(), 1)
   const endMarker = new Date(end.getFullYear(), end.getMonth(), 1)
-  // Safety cap — never generate more than 10 years of months even if dates
-  // are garbage. Prevents an infinite loop if endIso is malformed enough
-  // to slip past the parse check.
   let safety = 0
   while (cursor.getTime() <= endMarker.getTime() && safety < 120) {
     const yy = cursor.getFullYear()
@@ -70,33 +74,24 @@ export function generateMonthRange(startIso: string | undefined, endIso: string 
   return result
 }
 
-// S-curve distribution percentages summing to 100.
-// Returns ONE percentage per month — these are MONTHLY increments,
-// not cumulative.
-//
-// Implementation: sigmoid normalized so first cumulative point = 0 and last
-// cumulative point = 1, then differenced into monthly increments, then
-// scaled so the sum is exactly 100.
+// ----- Distribution math ---------------------------------------------------
+
 export function computeScurveDistribution(n: number, steepness = 6): number[] {
   if (n <= 0) return []
   if (n === 1) return [100]
-  // Cumulative sigmoid values
   const cumulative: number[] = []
   for (let i = 0; i < n; i++) {
     const t = i / (n - 1)
     cumulative.push(1 / (1 + Math.exp(-steepness * (t - 0.5))))
   }
-  // Normalize cumulative to start at 0 and end at 1
   const min = cumulative[0]
   const max = cumulative[cumulative.length - 1]
   const normalized = cumulative.map(c => (c - min) / Math.max(0.0001, max - min))
-  // Difference to get monthly increments (percentages * 100)
   const increments: number[] = []
   for (let i = 0; i < n; i++) {
     const prev = i === 0 ? 0 : normalized[i - 1]
     increments.push((normalized[i] - prev) * 100)
   }
-  // Rounding cleanup — scale so sum is exactly 100
   const sum = increments.reduce((a, b) => a + b, 0)
   if (sum > 0 && Math.abs(sum - 100) > 0.0001) {
     const factor = 100 / sum
@@ -105,19 +100,14 @@ export function computeScurveDistribution(n: number, steepness = 6): number[] {
   return increments.map(v => +v.toFixed(4))
 }
 
-// Linear distribution: equal percentage every month.
 export function computeLinearDistribution(n: number): number[] {
   if (n <= 0) return []
   return Array(n).fill(+(100 / n).toFixed(4))
 }
 
-// Build a fresh months array given start/end dates and the chosen distribution.
-// When distribution is 'manual', all percentages start at 0 — the PM enters
-// values per row.
-//
-// PRESERVES earned/actual dollars from an existing months array (keyed by
-// isoMonth). This lets the PM switch distribution modes or re-extend the
-// date range without losing the per-month actuals they've already entered.
+// Build a fresh months array — preserves earnedPct AND actualCost from
+// existing months (keyed by isoMonth) so switching distribution mode never
+// loses PM-entered data.
 export function buildEvmMonths(
   startIso: string | undefined,
   endIso: string | undefined,
@@ -132,8 +122,6 @@ export function buildEvmMonths(
   } else if (distribution === 'linear') {
     percentages = computeLinearDistribution(n)
   } else {
-    // 'manual' — leave plannedPct at whatever the existing month had,
-    // or 0 if this is a new month.
     percentages = Array(n).fill(0)
   }
   const existingMap = new Map<string, EvmMonth>()
@@ -150,58 +138,156 @@ export function buildEvmMonths(
       plannedPct: distribution === 'manual'
         ? (prior?.plannedPct ?? 0)
         : percentages[i] ?? 0,
-      earnedDollars: prior?.earnedDollars ?? 0,
-      actualDollars: prior?.actualDollars ?? 0,
+      earnedPct: prior?.earnedPct ?? 0,
+      actualCost: prior?.actualCost,
     }
   })
 }
 
-// Single-month CPI = EV ÷ AC. Returns null when AC is zero (undefined ratio).
-export function monthCPI(earnedDollars: number, actualDollars: number): number | null {
-  if (!actualDollars || actualDollars === 0) return null
-  return earnedDollars / actualDollars
+// ----- Per-month derived values --------------------------------------------
+
+export function monthPlanned(plannedPct: number, totalBudget: number): number {
+  return (plannedPct / 100) * (totalBudget || 0)
+}
+export function monthEarned(earnedPct: number, totalBudget: number): number {
+  return (earnedPct / 100) * (totalBudget || 0)
 }
 
-// Single-month SPI = EV ÷ PV. Returns null when PV is zero.
-export function monthSPI(earnedDollars: number, plannedDollars: number): number | null {
-  if (!plannedDollars || plannedDollars === 0) return null
-  return earnedDollars / plannedDollars
+// Standard CPI = Earned $ ÷ Actual Cost.
+// Returns null if PM hasn't entered actual cost (we don't fabricate it).
+//   CPI > 1 → under budget (earned more than spent)
+//   CPI = 1 → on budget
+//   CPI < 1 → over budget (spent more than earned)
+export function monthCPI(earnedPct: number, totalBudget: number, actualCost: number | undefined): number | null {
+  if (!actualCost || actualCost <= 0) return null
+  const ev = monthEarned(earnedPct, totalBudget)
+  if (ev === 0) return null
+  return ev / actualCost
 }
 
-// Cumulative summary helper. Pass the months array and the cutoff isoMonth
-// (typically the data-date month). Returns cumulative PV/EV/AC up to and
-// INCLUDING the cutoff month, plus the to-date CPI and SPI.
+// SPI = Earned % ÷ Planned %.
+//   SPI > 1 → ahead of schedule
+//   SPI = 1 → on schedule
+//   SPI < 1 → behind schedule
+export function monthSPI(earnedPct: number, plannedPct: number): number | null {
+  if (!plannedPct || plannedPct === 0) return null
+  return earnedPct / plannedPct
+}
+
+// Cost / Schedule Variance — useful as $ amounts alongside the ratios.
+//   CV = EV − AC  (positive = under budget)
+//   SV = EV − PV  (positive = ahead of schedule)
+export function monthCV(earnedPct: number, totalBudget: number, actualCost: number | undefined): number | null {
+  if (!actualCost || actualCost <= 0) return null
+  return monthEarned(earnedPct, totalBudget) - actualCost
+}
+export function monthSV(earnedPct: number, plannedPct: number, totalBudget: number): number {
+  return monthEarned(earnedPct, totalBudget) - monthPlanned(plannedPct, totalBudget)
+}
+
+// ----- Cumulative summary --------------------------------------------------
+
 export function evmCumulative(
   totalBudget: number,
   months: EvmMonth[],
   cutoffIsoMonth: string | undefined,
 ) {
-  if (!Array.isArray(months) || months.length === 0) {
-    return { pv: 0, ev: 0, ac: 0, cpi: null as number | null, spi: null as number | null }
+  const empty = {
+    pv: 0, ev: 0, ac: 0,
+    cpi: null as number | null,
+    spi: null as number | null,
+    cv: null as number | null,
+    sv: 0,
+    plannedPct: 0, earnedPct: 0,
+    hasAnyActualCost: false,
   }
-  let pv = 0, ev = 0, ac = 0
+  if (!Array.isArray(months) || months.length === 0 || totalBudget === 0) return empty
+  let plannedPctSum = 0, earnedPctSum = 0, acSum = 0, anyAc = false
   for (const m of months) {
     if (cutoffIsoMonth && m.isoMonth > cutoffIsoMonth) break
-    pv += (m.plannedPct / 100) * totalBudget
-    ev += m.earnedDollars || 0
-    ac += m.actualDollars || 0
+    plannedPctSum += m.plannedPct || 0
+    earnedPctSum += m.earnedPct || 0
+    if (m.actualCost && m.actualCost > 0) {
+      acSum += m.actualCost
+      anyAc = true
+    }
   }
-  const cpi = ac > 0 ? ev / ac : null
-  const spi = pv > 0 ? ev / pv : null
-  return { pv, ev, ac, cpi, spi }
+  const pv = (plannedPctSum / 100) * totalBudget
+  const ev = (earnedPctSum / 100) * totalBudget
+  const cpi = anyAc && ev > 0 ? ev / acSum : null
+  const spi = plannedPctSum > 0 ? earnedPctSum / plannedPctSum : null
+  const cv = anyAc ? ev - acSum : null
+  const sv = ev - pv
+  return {
+    pv, ev, ac: acSum, cpi, spi, cv, sv,
+    plannedPct: plannedPctSum, earnedPct: earnedPctSum,
+    hasAnyActualCost: anyAc,
+  }
 }
 
-// Format a dollar amount as "$1,234,567" (no decimals).
-// Used for KPI tiles and chart labels — kept simple for readability.
+// ----- Plain-English meaning helpers --------------------------------------
+
+export function spiMeaning(spi: number | null): string {
+  if (spi === null) return 'Enter Earned % to compute'
+  if (Math.abs(spi - 1) < 0.005) return 'On schedule'
+  if (spi > 1) return 'Ahead of schedule'
+  return 'Behind schedule'
+}
+
+export function cpiMeaning(cpi: number | null): string {
+  if (cpi === null) return 'Enter Actual Cost to compute'
+  if (Math.abs(cpi - 1) < 0.005) return 'On budget'
+  if (cpi > 1) return 'Under budget'
+  return 'Over budget'
+}
+
+// ----- Format helpers -----------------------------------------------------
+
 export function fmtDollars(amount: number, currency: string = 'USD'): string {
   if (!isFinite(amount)) return '—'
   const symbol = currency === 'USD' ? '$' : currency === 'AED' ? 'AED ' : `${currency} `
   const rounded = Math.round(amount)
   return symbol + rounded.toLocaleString('en-US')
 }
-
-// Format a ratio like CPI/SPI to 2 decimals, or '—' if null.
 export function fmtRatio(r: number | null | undefined): string {
   if (r === null || r === undefined || !isFinite(r)) return '—'
   return r.toFixed(2)
+}
+export function fmtPct(p: number): string {
+  if (!isFinite(p)) return '—'
+  return p.toFixed(2) + '%'
+}
+
+// =============================================================================
+// Migration — handle v10 (earnedDollars/actualDollars dollar schema) and v11
+// (retainagePct schema) to the current v12 model.
+// =============================================================================
+export function migrateEvmData(raw: any): EvmData | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const totalBudget = Number(raw.totalBudget) || 0
+  const distributionMode: DistributionMode = ['scurve', 'linear', 'manual'].includes(raw.distributionMode)
+    ? raw.distributionMode : 'scurve'
+  const currency = raw.currency || 'USD'
+  const months: EvmMonth[] = Array.isArray(raw.months) ? raw.months.map((m: any) => {
+    if (typeof m.earnedPct === 'number') {
+      return {
+        isoMonth: m.isoMonth,
+        label: m.label,
+        plannedPct: Number(m.plannedPct) || 0,
+        earnedPct: Number(m.earnedPct) || 0,
+        actualCost: typeof m.actualCost === 'number' ? m.actualCost : undefined,
+      }
+    }
+    const earnedDollars = Number(m.earnedDollars) || 0
+    const earnedPct = totalBudget > 0 ? (earnedDollars / totalBudget) * 100 : 0
+    const actualDollars = Number(m.actualDollars) || 0
+    return {
+      isoMonth: m.isoMonth,
+      label: m.label,
+      plannedPct: Number(m.plannedPct) || 0,
+      earnedPct,
+      actualCost: actualDollars > 0 ? actualDollars : undefined,
+    }
+  }) : []
+  return { totalBudget, currency, distributionMode, months }
 }
