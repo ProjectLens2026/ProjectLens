@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import clsx from 'clsx'
@@ -21,7 +21,7 @@ const DEMO_USER = {
   name: 'Mike Anderson',
   role: 'Admin',
   initials: 'MA',
-  company: 'Nobel Project Control Services, LLC',
+  company: 'ControlLens',
 }
 const STATUS_OPTIONS: ProjectStatus[] = ['Active', 'Completed', 'On Hold', 'Archived']
 export default function Sidebar({ user }: SidebarProps) {
@@ -88,6 +88,60 @@ export default function Sidebar({ user }: SidebarProps) {
     if (isDragging) return
     try { localStorage.setItem('pl_sidebar_width', String(sidebarWidth)) } catch {}
   }, [sidebarWidth, isDragging])
+
+  // v14 — resizable Views section. Default 288px (matches the old max-h-72).
+  // Drag the handle above "Views · {project}" to give it more or less room.
+  // Projects list above auto-shrinks/grows via flex-1.
+  const [viewsHeight, setViewsHeight] = useState<number>(288)
+  const [isDraggingViews, setIsDraggingViews] = useState(false)
+  const viewsDragStart = useRef<{ y: number; h: number } | null>(null)
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('pl_sidebar_views_height')
+      if (saved) {
+        const n = parseInt(saved, 10)
+        if (!isNaN(n) && n >= 100 && n <= 800) setViewsHeight(n)
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    if (!isDraggingViews) return
+    function onMove(e: MouseEvent) {
+      if (!viewsDragStart.current) return
+      // Drag UP = positive delta = views section grows taller
+      const delta = viewsDragStart.current.y - e.clientY
+      const maxH = Math.max(200, Math.floor(window.innerHeight * 0.65))
+      const newH = Math.max(100, Math.min(maxH, viewsDragStart.current.h + delta))
+      setViewsHeight(newH)
+    }
+    function onUp() {
+      setIsDraggingViews(false)
+      viewsDragStart.current = null
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    document.body.style.cursor = 'row-resize'
+    document.body.style.userSelect = 'none'
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [isDraggingViews])
+
+  useEffect(() => {
+    if (isDraggingViews) return
+    try { localStorage.setItem('pl_sidebar_views_height', String(viewsHeight)) } catch {}
+  }, [viewsHeight, isDraggingViews])
+
+  function startDragViews(e: React.MouseEvent) {
+    e.preventDefault()
+    viewsDragStart.current = { y: e.clientY, h: viewsHeight }
+    setIsDraggingViews(true)
+  }
 
   // v14 — per-user toggle state for the 4 date rows shown on each project
   // (NTP, Contract End, Revised End, Data Date). Stored in localStorage so
@@ -462,7 +516,7 @@ export default function Sidebar({ user }: SidebarProps) {
                         <div className={clsx('w-1.5 h-1.5 rounded-full flex-shrink-0', getConditionDotColor(condition))} title={condition} />
                       )}
                       <span className={clsx(
-                        'text-xs font-semibold font-mono truncate tracking-tight',
+                        'text-sm font-semibold font-mono truncate tracking-tight',
                         isCompleted ? 'text-white/60' : 'text-white'
                       )} title={p.projectId || '(no Project ID)'}>{p.projectId || '— no ID —'}</span>
                       {isActiveStatus && (
@@ -691,7 +745,7 @@ export default function Sidebar({ user }: SidebarProps) {
                           <span className={clsx('w-3 flex-shrink-0 text-[10px]', isActiveVersion ? 'text-blue-400' : 'text-transparent')}>✓</span>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1">
-                              <span className={clsx('truncate flex-1 min-w-0 font-mono text-[10px]', isActiveVersion ? 'text-white font-semibold' : isBaseline ? 'text-white/85' : 'text-white/70')}>
+                              <span className={clsx('truncate flex-1 min-w-0 font-mono text-[11px]', isActiveVersion ? 'text-white font-semibold' : isBaseline ? 'text-white/85' : 'text-white/70')}>
                                 {versionLabel}
                               </span>
                               {isDuplicate && (
@@ -766,31 +820,45 @@ export default function Sidebar({ user }: SidebarProps) {
         )}
       </div>
       {activeProject && (
-        <div className="border-t border-white/10 px-2 py-2 flex-shrink-0">
-          <div className="text-white/30 text-[9px] uppercase tracking-widest px-2 py-1 truncate" title={activeProject.name}>
-            Views · {activeProject.name}
+        <>
+          {/* v14 — resize handle. Drag UP to grow the Views section, DOWN
+              to give the projects list more room. */}
+          <div
+            onMouseDown={startDragViews}
+            className={`h-1.5 cursor-row-resize transition-colors flex-shrink-0 ${
+              isDraggingViews ? 'bg-blue-500/60' : 'bg-white/10 hover:bg-blue-500/40'
+            }`}
+            title="Drag up/down to resize"
+          />
+          <div
+            className="px-2 py-2 flex-shrink-0 flex flex-col"
+            style={{ height: `${viewsHeight}px` }}
+          >
+            <div className="text-white/30 text-[9px] uppercase tracking-widest px-2 py-1 truncate" title={activeProject.name}>
+              Views · {activeProject.name}
+            </div>
+            <div className="overflow-y-auto flex-1 min-h-0">
+              {views.map(item => {
+                const active = pathname === item.href
+                return (
+                  <Link key={item.href} href={item.href}
+                    className={clsx(
+                      'flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2',
+                      active
+                        ? 'bg-blue-600/20 text-white border-blue-500'
+                        : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
+                    )}>
+                    <span className="text-sm w-4 text-center">{item.icon}</span>
+                    <span className="flex-1">{item.label}</span>
+                    {(item as any).badge && (
+                      <span className="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">{(item as any).badge}</span>
+                    )}
+                  </Link>
+                )
+              })}
+            </div>
           </div>
-          <div className="max-h-72 overflow-y-auto">
-            {views.map(item => {
-              const active = pathname === item.href
-              return (
-                <Link key={item.href} href={item.href}
-                  className={clsx(
-                    'flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2',
-                    active
-                      ? 'bg-blue-600/20 text-white border-blue-500'
-                      : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
-                  )}>
-                  <span className="text-sm w-4 text-center">{item.icon}</span>
-                  <span className="flex-1">{item.label}</span>
-                  {(item as any).badge && (
-                    <span className="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">{(item as any).badge}</span>
-                  )}
-                </Link>
-              )
-            })}
-          </div>
-        </div>
+        </>
       )}
       {/* WORKSPACE NAV — Enterprise / Archive / Deleted / Settings */}
       <div className="border-t border-white/10 px-2 py-2 flex-shrink-0">
