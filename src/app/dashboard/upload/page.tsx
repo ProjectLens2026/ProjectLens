@@ -32,6 +32,7 @@ import {
   buildDateSnapshot,
   validateProjectId,
   sanitizeProjectId,
+  sanitizeProjectIdLive,
   canUploadType,
   getNextSequenceNumber,
   type ScheduleType,
@@ -175,14 +176,18 @@ export default function UploadPage() {
   }
 
   // v14 — Project ID input handler with live validation. Sanitizes as user
-  // types (uppercase + hyphens) and validates against the format rules.
+  // types (uppercase + filter chars + spaces→hyphens) but allows trailing
+  // hyphens and repeated hyphens during typing. On save, runAnalysis runs
+  // the strict sanitizeProjectId() that trims and collapses.
   function updateProjectId(raw: string) {
-    const cleaned = sanitizeProjectId(raw)
+    const cleaned = sanitizeProjectIdLive(raw)
     setNewProjectId(cleaned)
     if (cleaned.length === 0) {
       setProjectIdError('')  // hide error while empty (shown only on submit)
     } else {
-      const err = validateProjectId(cleaned)
+      // Validate against the strict form so the user knows the trailing
+      // hyphen will get trimmed on save — but don't block typing.
+      const err = validateProjectId(sanitizeProjectId(cleaned))
       setProjectIdError(err || '')
     }
   }
@@ -285,7 +290,7 @@ export default function UploadPage() {
     }
     // v14 — Project ID required for new projects
     if (projectMode === 'new') {
-      const trimmed = newProjectId.trim()
+      const trimmed = sanitizeProjectId(newProjectId)  // strict: trim + collapse hyphens
       const idErr = validateProjectId(trimmed)
       if (idErr) {
         setProjectIdError(idErr)
@@ -301,6 +306,9 @@ export default function UploadPage() {
         setDateError('')
         return
       }
+      // Save the cleaned form back into state so the label preview and save
+      // path both use the strict version.
+      setNewProjectId(trimmed)
     }
     // Validate contract dates
     if (!cd.ntp) {
@@ -466,7 +474,7 @@ export default function UploadPage() {
         } else {
           // NEW project — schedule type is always baseline (UI enforces it).
           // Sequence number is 0 for baseline.
-          const pid = newProjectId.trim()
+          const pid = sanitizeProjectId(newProjectId)
           const projectName = ctx.projectName.trim()
             || data.analysis?.projectName
             || file?.name?.replace(/\.[a-z]+$/i, '')

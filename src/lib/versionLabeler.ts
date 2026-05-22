@@ -158,6 +158,10 @@ export function findDataDateDuplicates(versions: VersionLabelInput[]): Set<strin
 
 // Sanitize a string into a valid Project ID — letters/numbers/hyphens only,
 // 3-20 chars. Drops accents, spaces become hyphens, multiple hyphens collapse.
+//
+// STRICT version — used at save time. Trims leading/trailing hyphens and
+// collapses repeated hyphens. Don't use this on every keystroke or the user
+// can't type "DC-" without the trailing hyphen disappearing.
 export function sanitizeProjectId(raw: string): string {
   if (!raw) return ''
   let s = raw
@@ -168,6 +172,22 @@ export function sanitizeProjectId(raw: string): string {
     .replace(/-+/g, '-')                                // collapse multi hyphens
     .replace(/^-+|-+$/g, '')                            // trim leading/trailing hyphens
   return s.slice(0, 20)
+}
+
+// LIVE version — used by the upload form's onChange so users can actually
+// type hyphens and spaces. Keeps the same character set (letters, numbers,
+// hyphens) but does NOT trim or collapse. Spaces are still converted to
+// hyphens so "DC GEN" types as "DC-GEN" without weird intermediate states.
+// On save, runAnalysis calls sanitizeProjectId() to clean up any stray
+// leading/trailing/repeated hyphens.
+export function sanitizeProjectIdLive(raw: string): string {
+  if (!raw) return ''
+  return raw
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9-\s]/g, '')
+    .replace(/\s/g, '-')                               // spaces → hyphen (preserves repeats)
+    .slice(0, 20)
 }
 
 // Validates a Project ID. Returns null if valid, error string if not.
