@@ -180,7 +180,32 @@ export async function loadProjectsFromSupabase(): Promise<Project[] | null> {
   }
   if (!rows) return []
 
-  return rows.map(rowToProject)
+  // For each project, hydrate the full analysis for each version from
+  // storage (analyses are stored as files, not inline in jsonb, since
+  // they can be multi-megabyte). Done in parallel for speed.
+  const projects: Project[] = []
+  for (const row of rows) {
+    const project = rowToProject(row)
+    if (project.versions.length > 0) {
+      await Promise.all(project.versions.map(async (v, idx) => {
+        const versionRow = row.schedule_versions?.[idx]
+        const path = versionRow?.analysis_path
+        if (!path) return
+        try {
+          const { data: blob, error: dlErr } = await supabase.storage
+            .from(BUCKET)
+            .download(path)
+          if (dlErr || !blob) return
+          const text = await blob.text()
+          v.analysis = JSON.parse(text)
+        } catch (e) {
+          console.warn('[db] could not load analysis for', v.versionLabel, e)
+        }
+      }))
+    }
+    projects.push(project)
+  }
+  return projects
 }
 
 function getLocalIdForUuid(cloudUuid: string, prefix: 'proj' | 'ver'): string {
@@ -224,9 +249,10 @@ function rowToProject(row: any): Project {
 
 function rowToVersion(row: any): ScheduleVersion {
   const context = row.context || {}
-  // Prefer the full saved analysis if present, else reconstruct a stub from
-  // the flat columns (covers the listing view when full analysis is not loaded).
-  const analysis = context.fullAnalysis || {
+  // v15 — full analysis lives in Storage (loaded async by loadProjectsFromSupabase).
+  // For the initial row mapping, build a stub from the flat columns so the
+  // listing renders immediately, then the storage load swaps in the full data.
+  const analysis = {
     totalActivities: row.total_activities ?? 0,
     complete: row.complete ?? 0,
     inProgress: row.in_progress ?? 0,
@@ -327,7 +353,7 @@ export async function addVersionToSupabase(
   return insertVersionToSupabase(cloudProjectId, version, orgId, user.id)
 }
 
-// Internal — handles the actual version insert + raw XER upload
+// Internal — handles the actual version insert + raw XER upload + analysis upload
 async function insertVersionToSupabase(
   projectId: string,
   version: ScheduleVersion,
@@ -347,22 +373,43 @@ async function insertVersionToSupabase(
       .upload(rawXerPath, blob, { upsert: true, contentType: 'text/plain' })
     if (upErr) {
       console.error('[db.addVersion] raw XER upload failed:', upErr.message)
-      // Non-fatal — continue with row insert, just without the raw file
       rawXerPath = null
     } else {
       console.log('[db] uploaded raw XER to storage', rawXerPath, `(${(version.rawXER.length / 1024).toFixed(0)} KB)`)
     }
   }
 
-  // 2. Build context bundle (full analysis + PM context + per-version dates)
+  // 2. Upload the FULL analysis JSON to storage (was inline jsonb — caused
+  //    silent failures on large analyses). Now stored as a file just like
+  //    the raw XER, with a path reference in analysis_path.
+  let analysisPath: string | null = null
+  if (version.analysis) {
+    analysisPath = `${orgId}/${projectId}/${cloudVersionId}.analysis.json`
+    try {
+      const json = JSON.stringify(version.analysis)
+      const blob = new Blob([json], { type: 'application/json' })
+      const { error: upErr } = await supabase.storage
+        .from(BUCKET)
+        .upload(analysisPath, blob, { upsert: true, contentType: 'application/json' })
+      if (upErr) {
+        console.error('[db.addVersion] analysis upload failed:', upErr.message)
+        analysisPath = null
+      } else {
+        console.log('[db] uploaded analysis JSON to storage', analysisPath, `(${(json.length / 1024).toFixed(0)} KB)`)
+      }
+    } catch (e) {
+      console.error('[db.addVersion] analysis stringify/upload failed:', e)
+    }
+  }
+
+  // 3. Build a SMALL context bundle (no full analysis) — PM context + per-version dates only
   const contextBundle = {
-    fullAnalysis: version.analysis || null,
     projectContext: version.context || null,
     versionDates: version.versionDates || null,
   }
   const a = version.analysis || {}
 
-  // 3. Insert the schedule_versions row
+  // 4. Insert the schedule_versions row (slim — heavy analysis is in storage now)
   const { error: rowErr } = await supabase
     .from('schedule_versions')
     .insert({
@@ -387,6 +434,7 @@ async function insertVersionToSupabase(
       out_of_sequence: Array.isArray(a.outOfSequence) ? a.outOfSequence.length : 0,
       ai_narrative: version.aiNarrative || null,
       raw_xer_path: rawXerPath,
+      analysis_path: analysisPath,
       context: contextBundle,
       schedule_type: version.scheduleType || null,
       sequence_number: typeof version.sequenceNumber === 'number' ? version.sequenceNumber : null,
