@@ -56,161 +56,62 @@ export interface XERAnalysis {
   ganttActivities: Task[]
   inProgressActivities: Task[]
   milestones: Task[]
-  // Two-week lookahead — activities scheduled to start OR finish within 14
-  // calendar days after the schedule's data date. Used by the Schedule Filter
-  // tab on the Full Analysis page. Excludes already-completed activities.
   twoWeekLookahead?: Task[]
-  // Activities Not Started — activities with no actual start date and no
-  // physical progress recorded. Sorted by planned start ascending so the
-  // soonest-due-to-start are at the top. Excludes completed activities
-  // (defensive — if it's complete it can't be "not started", but the parser
-  // shouldn't trust status_code alone since some scheduled report data is
-  // inconsistent). Used by the Schedule Filter tab > Activities Not Started.
   notStartedActivities?: Task[]
-  // Activities Finished — activities with an actual finish date (work is
-  // complete). Sorted by actual finish DESCENDING so the most recently
-  // completed appear first — useful for "what did we just finish" review.
-  // Includes activities that may have status_code other than TK_Complete
-  // if they have a populated act_end_date (XER data can be inconsistent
-  // — some schedulers update actual dates without re-running the status
-  // calculation). Used by the Schedule Filter tab > Activities Finished.
   finishedActivities?: Task[]
-  // Longest Path — activities that P6 has marked as being on the longest
-  // path via the driving_path_flag = 'Y' field. The longest path is the
-  // chain of activities that determines the project finish date; it differs
-  // from the critical path when the schedule has multiple float-zero chains
-  // or when there's a "Must Finish By" constraint pulling float negative
-  // on a non-longest chain. Falls back to criticalDrivers in the page UI
-  // when no activities have the flag set (typical in schedules where P6
-  // hasn't been told to calculate longest path).
   longestPathActivities?: Task[]
-  // Submittals — Submit activities + their Review/Approval successor pairs.
-  // Detected by activity NAME (not ID), case-insensitive:
-  //   - Name contains SUBMIT or SUBMITTAL → counts as a submit activity
-  //   - Successor of a submit activity whose name contains REVIEW or APPROVAL
-  //     → counts as the paired approval activity
-  // Only the verified pairs are returned. Standalone review/approval
-  // activities (no submit predecessor) are excluded. Used by the Submittals
-  // page in the sidebar — page classifies into Critical/Near-Critical/Healthy
-  // tiers based on each activity's total float.
   submittals?: Task[]
   healthScore: number
   condition: string
   delayDays: number
-  // Data date — the actual schedule "as-of" date pulled from the XER's
-  // PROJECT.last_recalc_date field. Used by the trend analyzer to order
-  // versions chronologically by their real schedule date, not by upload time.
   dataDate?: string
-  // Key dates
   projectStartDate?: string
   projectStartSource?: string
   substantialCompletionDate?: string
   substantialCompletionMilestone?: string
   finalCompletionDate?: string
   finalCompletionMilestone?: string
-  // Durations
   originalDurationDays?: number
   remainingDurationDays?: number
   actualDurationDays?: number
   durationAtCompletion?: number
-  // === Work % Complete (Day 5, v3 — construction only) ===
-  // workCompletePct: Average of effective % complete across CONSTRUCTION
-  // activities only (milestones, submittals, procurement, design, closeout
-  // are excluded — see classifyForWorkPct in analyzeXER).
-  // For each construction activity:
-  //   effective% = 100 if (status_code === 'TK_Complete' OR phys_complete_pct >= 80)
-  //                else phys_complete_pct
-  // Result = mean of effective% across construction activities only.
   workCompletePct?: number
-  // Number of construction activities at the >=80% OR status=Complete bar.
-  // Displayed as "X of Y complete (>=80%)" subtitle on the dashboard.
   completedAtThreshold?: number
-  // Construction activities with phys%>0 but <80 (and not flagged Complete).
   workInProgressCount?: number
-  // Average phys_complete_pct of in-progress construction activities.
   workInProgressAvgPct?: number
-  // Construction activities with no progress (phys%=0 and not Complete).
   workNotStartedCount?: number
-  // Total construction activity count (after exclusions).
   constructionActivityCount?: number
-  // Total activities excluded (sum of the five buckets below).
   excludedFromWorkPctCount?: number
-  // Per-category exclusion counts for the dashboard explainer.
   excludedMilestoneCount?: number
   excludedSubmittalCount?: number
   excludedProcurementCount?: number
   excludedDesignCount?: number
   excludedCloseoutCount?: number
-  // === Long Lead at Risk (Day 5, v2) ===
-  // longLeadTotal: count of long-lead items detected.
   longLeadTotal?: number
-  // longLeadAtRisk: subset of longLeadItems where floatDays <= 14
-  // calendar days. PM threshold — two weeks of float or less = at risk.
   longLeadAtRisk?: number
-  // === Risks Detected (Day 5, v3+v4) ===
-  // risksDetected: total count of schedule-risk activities the analyzer
-  // flagged, categorized by float severity. As of v4 this is:
-  //   risksCritical + risksHigh + risksMedium
-  // (Long Lead at Risk excluded — has its own tile.)
   risksDetected?: number
-  // criticalRisks: legacy field kept for backward compat with the dashboard
-  // tile subtitle. Now equals risksCritical.
   criticalRisks?: number
-  // v4 categorized counts:
-  // Critical 🚨 — activities with float < 0 (already behind on critical path)
   risksCritical?: number
-  // High ⚠️ — activities with float = 0 (zero float, no buffer)
   risksHigh?: number
-  // Medium ⚡ — activities with 1 ≤ floatDays ≤ 7 (near critical, < 1 week buffer)
   risksMedium?: number
 }
-// A single relationship-level violation. An out-of-sequence activity may
-// have multiple violations (one per predecessor whose logic was broken by
-// actual progress). Each violation carries enough evidence for a PM to
-// review and dispute or accept independently.
 export interface SequenceViolation {
-  pred: Task               // the predecessor on the violating relationship
-  relType: string          // 'PR_FS' | 'PR_SS' | 'PR_FF' | 'PR_SF'
-  relTypeLabel: string     // 'FS' | 'SS' | 'FF' | 'SF' for display
-  // The predecessor's actual date that anchors this relationship
-  // (act_end for FS/FF, act_start for SS/SF). Plain ISO string from XER.
+  pred: Task
+  relType: string
+  relTypeLabel: string
   predDate: string
-  // The successor's actual date that the predecessor's date is compared
-  // against (act_start for FS/SS, act_end for FF/SF).
   succDate: string
-  // The date the successor's actual progress should have been at OR after,
-  // accounting for relationship lag. If actual succDate is earlier than
-  // this, the relationship is violated.
   requiredDate: string
   lagHours: number
-  // How many calendar days the successor's actual happened before the
-  // required date. Always positive — bigger numbers = bigger violation.
   varianceDays: number
-  // Plain-language explanation a non-scheduler PM can read directly.
   description: string
 }
 export interface OutOfSequence {
-  // The successor activity that started/finished before its predecessor
-  // logic allowed. One OutOfSequence entry per affected successor activity
-  // — matches how Primavera P6 reports out-of-sequence in its Schedule Log
-  // (by activity, not by relationship).
   task: Task
-  // First violating predecessor. Kept for backwards compatibility with any
-  // existing UI that reads .pred — older code continues to work unchanged.
   pred: Task
-  // All violating predecessors for this successor. A single successor can
-  // have multiple OOS predecessors (e.g. a CMU install where rebar, footing
-  // inspection, and form-stripping all finished after the install started).
   predecessors: Task[]
   category: string
-  // Full per-relationship evidence for each violation involving this
-  // activity. Lets the UI show WHY each activity is flagged, with the
-  // specific dates and variances. This is what powers the "Construction
-  // Sequence Problems" detail view — gives the PM the receipts so they
-  // can dispute or accept each violation rather than just trusting a count.
   violations: SequenceViolation[]
-  // The relationship type that triggered the FIRST violation (FS / SS / FF / SF).
-  // Stored as P6's pred_type string. Useful for debugging.
   relType?: string
 }
 export interface LongLeadItem extends Task {
@@ -220,18 +121,14 @@ export interface LongLeadItem extends Task {
   calendarName: string
 }
 const LONG_LEAD_KEYWORDS = ['PROC', 'PRO-', 'FABRICAT', 'DELIVER', 'PROCURE', 'LONG LEAD', 'LEAD TIME']
-// Convert P6 hours to calendar days using the activity's assigned calendar
 export function hoursToDays(hours: string | number, calendar?: Calendar): number {
   const h = typeof hours === 'string' ? parseFloat(hours || '0') : hours
   if (isNaN(h) || h === 0) return 0
-  if (!calendar) return Math.round(h / 8) // default working days
+  if (!calendar) return Math.round(h / 8)
   const dayHr = parseFloat(calendar.day_hr_cnt || '8')
   const weekHr = parseFloat(calendar.week_hr_cnt || '40')
-  // 7-day calendar: week_hr >= 56 (7 days × 8 hrs)
   if (weekHr >= 56) return Math.round(h / (weekHr / 7))
-  // 6-day calendar: week_hr between 44-55
   if (weekHr >= 44) return Math.round(h / (weekHr / 6))
-  // 5-day calendar (standard working days)
   return Math.round(h / dayHr)
 }
 export function parseXER(content: string): ParsedXER {
@@ -290,6 +187,17 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   const { tasks, relationships, predMap, succMap, calendars } = parsed
   const taskArr = Object.values(tasks)
   const getCalendar = (t: Task) => calendars[t.clndr_id]
+  // ==========================================================================
+  // STATUS COUNTS — single source of truth for not-started/complete/in-progress.
+  //
+  // FIX (Day 7): align the COUNTS with the LISTS shown on the Schedule Filter
+  // page. Previously the counts used status_code while the lists used
+  // act_start_date / act_end_date / phys_complete_pct heuristics, so a PM
+  // would see "100 not started" in a tile but the list would show 80 or 120.
+  // Now both come from status_code, which is what P6 itself uses for its
+  // "Not Started" and "Completed" activity filters. Result: ControlLens
+  // matches P6's filter counts exactly.
+  // ==========================================================================
   const complete = taskArr.filter(t => t.status_code === 'TK_Complete').length
   const inProgress = taskArr.filter(t => t.status_code === 'TK_Active').length
   const notStarted = taskArr.filter(t => t.status_code === 'TK_NotStart').length
@@ -297,61 +205,23 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     const f = parseFloat(t.total_float_hr_cnt || '0')
     return !isNaN(f) && f < 0
   }).length
+
   // ============================================================================
-  // CONSTRUCTION SEQUENCE PROBLEMS — lag-aware, with full per-violation evidence
+  // CONSTRUCTION SEQUENCE PROBLEMS — unchanged from v13
   // ============================================================================
-  //
-  // Renamed from "Out of Sequence" to "Construction Sequence Problems" in the
-  // UI — sidesteps the false-precision claim of matching P6's exact OOS count
-  // (P6 uses proprietary driving-constraint logic). We instead show the PM
-  // every relationship-level violation with full evidence, so they can review
-  // each one with their scheduler and decide whether it's legitimate
-  // fast-tracking, a logic gap, or a true problem.
-  //
-  // Detection rules per relationship type (lag is in HOURS in TASKPRED.lag_hr_cnt):
-  //
-  //   PR_FS (Finish-to-Start):
-  //     succ.act_start must be >= (pred.act_end + lag)
-  //     If lag is negative ("lead"), succ can legitimately start before pred
-  //     finishes — that's INTENTIONAL fast-tracking and NOT a violation.
-  //
-  //   PR_SS (Start-to-Start):
-  //     succ.act_start must be >= (pred.act_start + lag)
-  //
-  //   PR_FF (Finish-to-Finish):
-  //     succ.act_end must be >= (pred.act_end + lag)
-  //
-  //   PR_SF (Start-to-Finish):
-  //     succ.act_end must be >= (pred.act_start + lag)
-  //
-  // For each violation we record:
-  //   - The relationship type (FS/SS/FF/SF)
-  //   - The predecessor's anchor date (the date used in the comparison)
-  //   - The successor's actual date that should have been after the anchor + lag
-  //   - The REQUIRED date (anchor + lag) — i.e. the earliest legitimate value
-  //   - How many days early the successor's actual occurred (varianceDays)
-  //   - A plain-language description for non-scheduler PMs
-  //
-  // One OutOfSequence entry per affected SUCCESSOR activity. If the activity
-  // has multiple violated predecessors, we collect them all into the
-  // `predecessors[]` and `violations[]` arrays for that one entry. Matches
-  // P6 Schedule Log convention (one warning per affected activity).
   const HOUR_MS = 60 * 60 * 1000
   const DAY_MS = 24 * HOUR_MS
-  /** Parse a P6 date string ("2024-04-01 17:00") to ms, or null if invalid. */
   const dateMs = (s: string | undefined): number | null => {
     if (!s) return null
     const d = new Date(s.replace(' ', 'T'))
     const ms = d.getTime()
     return isNaN(ms) ? null : ms
   }
-  /** Format ms back to a P6-style "YYYY-MM-DD HH:MM" string. */
   const fmtDate = (ms: number): string => {
     const d = new Date(ms)
     const pad = (n: number) => String(n).padStart(2, '0')
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
   }
-  /** Friendly label for a P6 relationship type code. */
   const relTypeLabel = (predType: string): string => {
     switch (predType) {
       case 'PR_FS': return 'FS'
@@ -366,17 +236,13 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     const t = tasks[r.task_id]
     const p = tasks[r.pred_task_id]
     if (!t || !p) continue
-    // Lag in milliseconds. Positive = delay required, negative = lead allowed.
     const lagMs = parseFloat(r.lag_hr_cnt || '0') * HOUR_MS
     if (isNaN(lagMs)) continue
-    // Compute whether this relationship is violated by actual progress.
-    // `predAnchorMs`/`succActualMs` hold the dates we're comparing.
-    // `null` for either means we lack the actual data to evaluate.
     let predAnchorMs: number | null = null
     let succActualMs: number | null = null
     let predAnchorDateStr = ''
     let succActualDateStr = ''
-    let kindLabel = ''  // human-readable label for the explanation
+    let kindLabel = ''
     switch (r.pred_type) {
       case 'PR_FS':
         predAnchorMs = dateMs(p.act_end_date)
@@ -407,23 +273,15 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
         kindLabel = 'started'
         break
       default:
-        continue  // unknown rel type
+        continue
     }
     if (predAnchorMs === null || succActualMs === null) continue
     const requiredMs = predAnchorMs + lagMs
     const violated = succActualMs < requiredMs
     if (!violated) continue
-    // Build the violation record
     const varianceDays = Math.max(0, Math.round((requiredMs - succActualMs) / DAY_MS))
     const lagHours = lagMs / HOUR_MS
     const relLabel = relTypeLabel(r.pred_type)
-    // Plain-language explanation. Examples:
-    //   FS: "Predecessor PRO-750 finished 2024-04-15 17:00, but PRO-770
-    //        started 2024-04-10 08:00 — 5 days early (FS, no lag)."
-    //   FS with positive lag: "Predecessor PRE-CON-170 finished ... ; PRO-100
-    //        should not have started until ... (FS + 3 day lag), but started ..."
-    //   FS with lead: "Lead of 5 days allowed, but successor started 8 days
-    //        before predecessor finished."
     const succAction = (r.pred_type === 'PR_FS' || r.pred_type === 'PR_SS') ? 'started' : 'finished'
     let lagPhrase = ''
     if (lagHours > 0) {
@@ -450,8 +308,6 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       varianceDays,
       description,
     }
-    // Categorize the affected activity by code prefix (used by the Risks UI
-    // and Lens Logic Check to group violations).
     let category = 'Other'
     if (t.task_code?.includes('PRO-') || t.task_code?.includes('PROC')) category = 'Procurement'
     else if (t.task_code?.includes('PRE-CON')) category = 'Pre-Construction'
@@ -465,7 +321,7 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     } else {
       oosMap.set(t.task_id, {
         task: t,
-        pred: p,                     // first violating predecessor (back-compat)
+        pred: p,
         predecessors: [p],
         category,
         violations: [violation],
@@ -473,10 +329,9 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       })
     }
   }
-  // Sort by task_code ascending — matches how P6's Schedule Log lists OOS
-  // when sorted alphabetically by Activity ID.
   const outOfSequence: OutOfSequence[] = Array.from(oosMap.values())
     .sort((a, b) => (a.task.task_code || '').localeCompare(b.task.task_code || ''))
+
   // No logic ties
   const noTies: Task[] = []
   for (const t of taskArr) {
@@ -485,8 +340,8 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     const hasSucc = succMap[t.task_id]?.length > 0
     if (!hasPred || !hasSucc) noTies.push(t)
   }
-  // Long lead & short lead using calendar-aware durations
-  // Long lead: >= 35 calendar days, Short lead: 20-34 calendar days
+
+  // Long lead & short lead — unchanged
   const longLeadItems: LongLeadItem[] = []
   const shortLeadItems: LongLeadItem[] = []
   for (const t of taskArr) {
@@ -499,21 +354,11 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     const floatDays = hoursToDays(t.total_float_hr_cnt || '0', cal)
     const calendarName = cal?.clndr_name || 'Standard'
     const item: LongLeadItem = { ...t, durationDays, remainingDays, floatDays, calendarName }
-    if (durationDays >= 35) {
-      longLeadItems.push(item)
-    } else {
-      shortLeadItems.push(item)
-    }
+    if (durationDays >= 35) longLeadItems.push(item)
+    else shortLeadItems.push(item)
   }
   longLeadItems.sort((a, b) => a.floatDays - b.floatDays)
   shortLeadItems.sort((a, b) => a.floatDays - b.floatDays)
-  // ==========================================================================
-  // NEW (Day 5, v2) — Long Lead at Risk
-  // ==========================================================================
-  // PM-defined: any long-lead item with <= 14 calendar days of float is at
-  // risk of slipping the critical path. Exclude items already complete
-  // (status_code === 'TK_Complete' OR phys_complete_pct >= 100) since those
-  // can't slip anything anymore.
   const longLeadTotal = longLeadItems.length
   const longLeadAtRisk = longLeadItems.filter(item => {
     if (item.status_code === 'TK_Complete') return false
@@ -521,7 +366,8 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     if (!isNaN(pct) && pct >= 100) return false
     return item.floatDays <= 14
   }).length
-  // Milestones — extract from XER for dashboard display
+
+  // Milestones — for dashboard display
   const milestones = taskArr
     .filter(t => {
       const isMilestone = t.task_type === 'TT_FinMile' || t.task_type === 'TT_Mile'
@@ -538,7 +384,7 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       return fa.localeCompare(fb)
     })
     .slice(0, 10)
-  // Critical drivers — sorted by early finish date ascending
+
   const criticalDrivers = taskArr
     .filter(t => {
       const f = parseFloat(t.total_float_hr_cnt || '999')
@@ -549,7 +395,6 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       const fb = b.early_end_date || b.act_end_date || ''
       return fa.localeCompare(fb)
     })
-  // Gantt activities — all with 0 or negative float, sorted by early finish
   const ganttActivities = taskArr
     .filter(t => {
       const f = parseFloat(t.total_float_hr_cnt || '999')
@@ -563,8 +408,8 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   const inProgressActivities = taskArr
     .filter(t => t.status_code === 'TK_Active')
     .sort((a, b) => parseFloat(a.total_float_hr_cnt || '0') - parseFloat(b.total_float_hr_cnt || '0'))
-  // Two-week lookahead — activities scheduled to start or finish within 14
-  // calendar days after the data date.
+
+  // Two-week lookahead — unchanged
   let twoWeekLookahead: Task[] = []
   if (parsed.dataDate) {
     const dataDateObj = new Date(parsed.dataDate.replace(' ', 'T'))
@@ -591,80 +436,71 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
         })
     }
   }
-  // ACTIVITIES NOT STARTED — activities the contractor has not yet begun.
+
+  // ==========================================================================
+  // ACTIVITIES NOT STARTED — Day 7 fix
   //
-  // An activity counts as "not started" if BOTH:
-  //   - It has no actual start date (act_start_date is empty)
-  //   - Its physical complete % is 0 or missing
-  // We do NOT rely solely on status_code === 'TK_NotStart' because some XER
-  // files come out with stale status codes after manual progress updates.
-  // The actual-date + percent-complete check is more reliable.
+  // PRIMARY rule: match P6 exactly using status_code === 'TK_NotStart'. P6's
+  // "Not Started" filter is status-code-based; the count tile (notStarted)
+  // above already uses this. The list now matches.
   //
-  // Sort by planned start ascending so the soonest-due-to-start are at the
-  // top — that's the operational order the PM cares about ("what should
-  // already have started but hasn't").
+  // Removed previous restrictions:
+  //   - No longer filtering on empty act_start_date (status_code already does that)
+  //   - No longer filtering on phys_complete_pct === 0 (same)
+  //   - No longer excluding milestones — P6 includes them in the filter and
+  //     PMs need to see "Not Started" milestones (NTP, key dates, etc.)
+  //
+  // Sort by planned start ascending — soonest-due-to-start at the top.
+  // ==========================================================================
   const notStartedActivities = taskArr
-    .filter(t => {
-      // Skip if it has an actual start
-      if (t.act_start_date && t.act_start_date.trim() !== '') return false
-      // Skip if it has any physical progress
-      const pct = parseFloat(t.phys_complete_pct || '0')
-      if (!isNaN(pct) && pct > 0) return false
-      // Skip milestones — they're not "activities" in the field sense and
-      // would clutter the list. Milestone status is shown on the dashboard.
-      if (t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile' || t.task_type === 'TT_StartMile') return false
-      return true
-    })
+    .filter(t => t.status_code === 'TK_NotStart')
     .sort((a, b) => {
       const aStr = a.early_start_date || a.target_start_date || ''
       const bStr = b.early_start_date || b.target_start_date || ''
       return aStr.localeCompare(bStr)
     })
-  // ACTIVITIES FINISHED — completed activities with an actual finish date.
+
+  // ==========================================================================
+  // ACTIVITIES FINISHED — Day 7 fix
   //
-  // An activity counts as "finished" if it has a populated act_end_date.
-  // We don't filter by status_code alone — some XERs have act_end_date set
-  // without status being updated to TK_Complete (or vice versa). The
-  // actual-date check is more reliable.
+  // PRIMARY rule: match P6 exactly using status_code === 'TK_Complete'. The
+  // count tile (complete) above already uses this; the list now matches.
   //
-  // Sort by actual finish DESCENDING so most recently completed work
-  // appears first — that's the natural "what did we just finish" review
-  // order for the PM. Milestones are EXCLUDED here too for the same reason
-  // as Not Started — they belong on the milestones display, not in the
-  // finished activities list.
+  // Removed previous restrictions:
+  //   - No longer filtering on populated act_end_date (status_code is canonical)
+  //   - No longer excluding milestones — P6 includes them; PMs need to see
+  //     completed milestones (NTP achieved, key dates hit, etc.)
+  //
+  // Sort by actual finish DESCENDING — most recently completed at the top.
+  // ==========================================================================
   const finishedActivities = taskArr
-    .filter(t => {
-      if (!t.act_end_date || t.act_end_date.trim() === '') return false
-      if (t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile' || t.task_type === 'TT_StartMile') return false
-      return true
-    })
+    .filter(t => t.status_code === 'TK_Complete')
     .sort((a, b) => {
-      // Descending by actual finish (most recent first)
       const aStr = a.act_end_date || ''
       const bStr = b.act_end_date || ''
       return bStr.localeCompare(aStr)
     })
-  // LONGEST PATH — activities P6 has flagged via driving_path_flag = 'Y'.
+
+  // ==========================================================================
+  // LONGEST PATH — Day 7 review
   //
-  // The longest path is the chain of activities that determines when the
-  // project finishes. It's similar to the critical path but doesn't depend
-  // on float being zero — P6 calculates it independently and marks each
-  // activity on the path with driving_path_flag = 'Y'. Useful when a
-  // schedule has positive total float everywhere (no constraint pulling
-  // float negative) and the critical path view shows nothing useful.
-  //
-  // Sort by early start ascending so the path reads left-to-right
-  // chronologically. Empty array when no activities have the flag set —
-  // the page UI falls back to criticalDrivers in that case so the tab
-  // never shows nothing.
-  const longestPathActivities = taskArr
-    .filter(t => t.driving_path_flag === 'Y')
+  // Primary rule unchanged: activities flagged by P6 via driving_path_flag='Y'.
+  // P6 only populates this when Schedule > Options > "Calculate longest path"
+  // is enabled. If the XER lacks any flagged activities, fall back to
+  // criticalDrivers (float ≤ 0, not complete) — the closest analog that
+  // works on every schedule. No completion filter on the primary list since
+  // P6's longest path can include completed activities at the start.
+  // ==========================================================================
+  const flaggedLongest = taskArr.filter(t => t.driving_path_flag === 'Y')
+  const longestPathActivities = (flaggedLongest.length > 0 ? flaggedLongest : criticalDrivers)
+    .slice()
     .sort((a, b) => {
       const aStr = a.early_start_date || a.target_start_date || a.act_start_date || ''
       const bStr = b.early_start_date || b.target_start_date || b.act_start_date || ''
       return aStr.localeCompare(bStr)
     })
-  // SUBMITTALS — paired Submit + Review/Approval activities
+
+  // SUBMITTALS — unchanged
   const SUBMIT_RX = /SUBMIT(?:TAL)?/i
   const APPROVAL_RX = /REVIEW|APPROVE|APPROVAL/i
   const submittalsMap = new Map<string, Task>()
@@ -687,13 +523,28 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   const submittals = Array.from(submittalsMap.values()).sort((a, b) => {
     return parseFloat(a.total_float_hr_cnt || '0') - parseFloat(b.total_float_hr_cnt || '0')
   })
-  // Delay days
+
+  // ==========================================================================
+  // DELAY DAYS — Day 7 documentation
+  //
+  // Formula: delayDays = scd_end_date − plan_end_date (calendar days).
+  //   - plan_end_date: P6's planned project finish (PROJECT.plan_end_date)
+  //   - scd_end_date:  P6's currently scheduled finish (PROJECT.scd_end_date)
+  //
+  // CAVEAT: plan_end_date may not equal your CONTRACT end date. P6 sets it
+  // when the project is created or via Project Properties; if a PM updates
+  // P6's plan_end_date during the project, this delay number drifts away
+  // from the true contract delay. For an authoritative "days behind contract"
+  // number, the dashboard uses the manual Original Contract Completion the
+  // PM enters on upload, NOT this delayDays field.
+  // ==========================================================================
   let delayDays = 0
   if (parsed.contractEnd && parsed.projectedEnd) {
     const ce = new Date(parsed.contractEnd.replace(' ', 'T'))
     const pe = new Date(parsed.projectedEnd.replace(' ', 'T'))
     delayDays = Math.round((pe.getTime() - ce.getTime()) / (1000 * 60 * 60 * 24))
   }
+
   // Health score
   let healthScore = 100
   if (delayDays > 0) healthScore -= Math.min(50, delayDays / 3)
@@ -705,7 +556,8 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   if (healthScore < 40) condition = 'Recovery Required'
   else if (healthScore < 60) condition = 'Attention Needed'
   else if (healthScore < 80) condition = 'Monitor Closely'
-  // KEY DATES — detect NTP, Substantial Completion, Final Completion
+
+  // Key dates — unchanged
   function findMilestoneByKeywords(keywords: string[]) {
     return taskArr.find(t => {
       const upper = (t.task_name || '').toUpperCase()
@@ -742,51 +594,12 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   const actualDurationDays = calcCalendarDays(planStart, dataDateStr)
   const remainingDurationDays = calcCalendarDays(dataDateStr, forecastEnd)
   const durationAtCompletion = calcCalendarDays(planStart, forecastEnd)
-  // ==========================================================================
-  // Work % Complete — PM-defined formula (Day 5, v3 — construction only)
-  // ==========================================================================
-  //
-  // Founder rule (REFINED in v3): Physical % complete should reflect the
-  // CONSTRUCTION work in the field — not the milestones, submittals,
-  // procurement items, design activities, or closeout punch list. Those
-  // distort the picture because:
-  //   - Milestones jump from 0% to 100% with no in-between
-  //   - Submittals are admin work, not physical progress
-  //   - Procurement is fabrication/delivery, not site work
-  //   - Design is engineering, separate accounting
-  //   - Closeout (punch, warranty, turnover) happens after substantial
-  //     completion and skews the late-project picture
-  //
-  // For each construction activity, compute "effective % complete":
-  //   - If status_code === 'TK_Complete' OR phys_complete_pct >= 80 → 100
-  //   - Else → use phys_complete_pct as-is
-  // Then average across the CONSTRUCTION subset. That's Work % Complete.
-  //
-  // For DCDGS-like schedules (~1000 activities total) this typically yields
-  // ~350 construction activities. The excluded count is exposed to the
-  // dashboard so the explainer can show "X construction activities (Y
-  // excluded as milestones/submittals/procurement/design/closeout)".
-  //
-  // Exclusion rules (any match = exclude):
-  //
-  //   Milestones        task_type === 'TT_Mile' | 'TT_FinMile' | 'TT_StartMile'
-  //   Submittals        name has SUBMIT, SUBMITTAL, REVIEW, APPROVAL, APPROVE
-  //   Procurement       name/code has PROC, PRO-, FABRICAT, DELIVER, PROCURE,
-  //                     LONG LEAD, LEAD TIME
-  //   Design            name has DESIGN, ENGINEERING, ENG-, DWG, DRAWING
-  //   Closeout          name has CLOSEOUT, CLOSE OUT, PUNCH LIST, TURNOVER,
-  //                     FINAL ACCEPTANCE, COMMISSION, COMMISSIONING, WARRANTY,
-  //                     PCD (project completion document)
+
+  // Work % Complete — unchanged
   const SUBMITTAL_KW = ['SUBMIT', 'SUBMITTAL', 'REVIEW', 'APPROVAL', 'APPROVE']
-  // PROCUREMENT_KW intentionally mirrors LONG_LEAD_KEYWORDS plus additional
-  // procurement-only terms — anything detected as procurement is excluded
-  // from physical % regardless of duration.
   const PROCUREMENT_KW = ['PROC', 'PRO-', 'FABRICAT', 'DELIVER', 'PROCURE', 'LONG LEAD', 'LEAD TIME']
   const DESIGN_KW = ['DESIGN', 'ENGINEERING', 'ENG-', 'DWG', 'DRAWING']
   const CLOSEOUT_KW = ['CLOSEOUT', 'CLOSE OUT', 'PUNCH LIST', 'TURNOVER', 'FINAL ACCEPTANCE', 'COMMISSION', 'COMMISSIONING', 'WARRANTY', 'PCD']
-  // Classify an activity. Returns the exclusion reason or null if it's
-  // a construction activity. Exposed counters help the dashboard show
-  // the PM exactly what was excluded.
   const classifyForWorkPct = (t: Task): 'milestone' | 'submittal' | 'procurement' | 'design' | 'closeout' | null => {
     if (t.task_type === 'TT_Mile' || t.task_type === 'TT_FinMile' || t.task_type === 'TT_StartMile') {
       return 'milestone'
@@ -812,8 +625,6 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   for (const t of taskArr) {
     const exclusion = classifyForWorkPct(t)
     if (exclusion) {
-      // Bump the right exclusion counter so the dashboard can show the
-      // PM exactly how the filter trimmed the activity list.
       if (exclusion === 'milestone') excludedMilestoneCount += 1
       else if (exclusion === 'submittal') excludedSubmittalCount += 1
       else if (exclusion === 'procurement') excludedProcurementCount += 1
@@ -833,7 +644,6 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       inProgressSum += pct
       workInProgressCount += 1
     } else {
-      // pct == 0 and not done — counts as 0 in the average
       workNotStartedCount += 1
     }
   }
@@ -844,41 +654,8 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   const excludedFromWorkPctCount =
     excludedMilestoneCount + excludedSubmittalCount + excludedProcurementCount +
     excludedDesignCount + excludedCloseoutCount
-  // ==========================================================================
-  // RISKS DETECTED — Day 5, v4 (categorized by float severity)
-  // ==========================================================================
-  //
-  // PM-defined: the dashboard's "Risks Detected" tile should show categorized
-  // counts (All, Critical, High, Medium), not a single raw number that feels
-  // arbitrary. Categories reflect operational urgency based on activity float
-  // — the buffer between scheduled completion and the deadline:
-  //
-  //   Critical 🚨 (float < 0):
-  //     Activities with negative float — they're already past the date that
-  //     would still hit the contract end. Every day costs the schedule.
-  //     Take action immediately.
-  //
-  //   High ⚠️ (float = 0):
-  //     Activities sitting exactly on the critical path with no buffer.
-  //     Any slip becomes negative float. Monitor daily.
-  //
-  //   Medium ⚡ (0 < float ≤ 7):
-  //     Near-critical activities with less than a week of buffer. One
-  //     incident (weather, RFI, sub no-show) can push them critical.
-  //     Track them in the lookahead.
-  //
-  // Activities with float > 7 days are NOT counted as risks — they have
-  // healthy buffer.
-  //
-  // Completed activities are excluded — they can't slip anymore.
-  //
-  // OOS violations and no-ties are NOT counted here — they have their own
-  // dedicated pages (Construction Sequence Problems, Lens Logic Check).
-  // Including them in this number would conflate distinct issue types and
-  // inflate the count.
-  //
-  // criticalRisks (legacy field, kept for backward compat with tile subtitle):
-  //   = risksCritical for v4. Maintains old contract for the dashboard.
+
+  // Risks Detected — unchanged
   const floatDaysOf = (t: Task): number => {
     const cal = getCalendar(t)
     return hoursToDays(t.total_float_hr_cnt || '0', cal)
@@ -888,9 +665,6 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   let risksMedium = 0
   for (const t of taskArr) {
     if (t.status_code === 'TK_Complete') continue
-    // Use raw HOURS for the comparison (so we don't lose the negative/zero
-    // distinction when rounding to days). A task with -7 hours float should
-    // count as Critical even though rounded-to-days it might land on 0.
     const floatHr = parseFloat(t.total_float_hr_cnt || '999')
     if (isNaN(floatHr)) continue
     if (floatHr < 0) {
@@ -898,7 +672,6 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     } else if (floatHr === 0) {
       risksHigh += 1
     } else {
-      // Convert to calendar days for the Medium check (1..7 days)
       const fDays = floatDaysOf(t)
       if (fDays >= 1 && fDays <= 7) {
         risksMedium += 1
@@ -906,7 +679,8 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     }
   }
   const risksDetected = risksCritical + risksHigh + risksMedium
-  const criticalRisks = risksCritical  // legacy alias, kept for back-compat
+  const criticalRisks = risksCritical
+
   return {
     totalActivities: taskArr.length,
     complete, inProgress, notStarted, negativeFloat,
@@ -927,7 +701,6 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     finalCompletionDate: finalDate,
     finalCompletionMilestone: finalMilestone?.task_code,
     originalDurationDays, remainingDurationDays, actualDurationDays, durationAtCompletion,
-    // Work % Complete fields (Day 5, v3 — construction-only)
     workCompletePct,
     completedAtThreshold,
     workInProgressCount,
@@ -940,10 +713,8 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     excludedProcurementCount,
     excludedDesignCount,
     excludedCloseoutCount,
-    // Long Lead at Risk fields (v2)
     longLeadTotal,
     longLeadAtRisk,
-    // Risks Detected fields (v4 — categorized by float severity)
     risksDetected,
     criticalRisks,
     risksCritical,
