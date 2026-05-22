@@ -13,6 +13,18 @@ import {
   findDataDateDuplicates,
 } from './versionLabeler'
 
+// v15 — Supabase data layer. Reads on hydrate, writes on createProject /
+// addVersionToProject. IndexedDB stays as a local mirror for offline use
+// and as a safety net if Supabase is unreachable.
+import {
+  loadProjectsFromSupabase,
+  insertProjectToSupabase,
+  addVersionToSupabase,
+  updateProjectContractDatesInSupabase,
+  updateProjectEvmInSupabase,
+  updateProjectStatusInSupabase,
+} from './supabase/db'
+
 // =============================================================================
 // Project status — 5-state model.
 // Active (default), Completed, On Hold, Archived, Deleted.
@@ -457,29 +469,48 @@ async function hydrate(): Promise<void> {
   if (_hydrated) return
   try {
     let projects: Project[] = []
+    let supabaseLoaded = false
+
+    // v15 — Try Supabase FIRST. If signed-in user has cloud data, use it.
+    // This makes the app cross-device: log in anywhere → see your projects.
     try {
-      projects = await idbGetAllProjects()
+      const fromCloud = await loadProjectsFromSupabase()
+      if (fromCloud !== null) {
+        projects = fromCloud
+        supabaseLoaded = true
+        console.log('[ControlLens] Loaded', projects.length, 'project(s) from Supabase')
+      }
     } catch (err) {
-      console.error('[ControlLens] IndexedDB read failed during hydration:', err)
+      console.warn('[ControlLens] Supabase read failed, falling back to IndexedDB:', err)
     }
-    if (projects.length === 0 && typeof localStorage !== 'undefined') {
+
+    // IndexedDB fallback — used when Supabase is offline, user isn't signed
+    // in yet, or returns no rows. Keeps the app usable in all cases.
+    if (!supabaseLoaded) {
       try {
-        const legacy = localStorage.getItem(LEGACY_PROJECTS_KEY)
-        if (legacy) {
-          const parsed = JSON.parse(legacy)
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            console.log('[ControlLens] Migrating', parsed.length, 'project(s) from localStorage to IndexedDB')
-            for (const p of parsed) {
-              try { await idbPutProject(p) } catch (e) {
-                console.error('[ControlLens] Migration: failed to write project', p?.id, e)
-              }
-            }
-            projects = await idbGetAllProjects()
-            try { localStorage.removeItem(LEGACY_PROJECTS_KEY) } catch {}
-          }
-        }
+        projects = await idbGetAllProjects()
       } catch (err) {
-        console.error('[ControlLens] Migration check failed (non-fatal):', err)
+        console.error('[ControlLens] IndexedDB read failed during hydration:', err)
+      }
+      if (projects.length === 0 && typeof localStorage !== 'undefined') {
+        try {
+          const legacy = localStorage.getItem(LEGACY_PROJECTS_KEY)
+          if (legacy) {
+            const parsed = JSON.parse(legacy)
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              console.log('[ControlLens] Migrating', parsed.length, 'project(s) from localStorage to IndexedDB')
+              for (const p of parsed) {
+                try { await idbPutProject(p) } catch (e) {
+                  console.error('[ControlLens] Migration: failed to write project', p?.id, e)
+                }
+              }
+              projects = await idbGetAllProjects()
+              try { localStorage.removeItem(LEGACY_PROJECTS_KEY) } catch {}
+            }
+          }
+        } catch (err) {
+          console.error('[ControlLens] Migration check failed (non-fatal):', err)
+        }
       }
     }
     projects.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
@@ -489,6 +520,10 @@ async function hydrate(): Promise<void> {
     // structured labeling system. Runs once per project on every hydration;
     // it's idempotent (no-ops on fully migrated projects) so it's safe to
     // re-run. Migrated projects get persisted back so we don't migrate again.
+    //
+    // v15 note — migration writes only to IndexedDB (local mirror). Cloud
+    // rows are already migrated via the ALTER TABLE in the schema setup, so
+    // this is a no-op for projects that came from Supabase.
     try {
       const migrated = migrateProjectsToV14(projects)
       if (migrated.changedIds.size > 0) {
@@ -672,6 +707,13 @@ export function createProject(opts: {
   idbPutProject(project).catch(err => {
     console.error('[ControlLens] createProject: IndexedDB persist failed:', err)
   })
+  // v15 — also push to Supabase in background. Fire-and-forget; if cloud
+  // write fails we still have the local copy. User can retry via next push.
+  insertProjectToSupabase(project).then(ok => {
+    if (!ok) console.warn('[ControlLens] createProject: Supabase persist failed (will retry on next session)')
+  }).catch(err => {
+    console.error('[ControlLens] createProject: Supabase persist error:', err)
+  })
   setActiveProjectId(project.id)
   setActiveVersionId(opts.version.id)
   return project
@@ -689,6 +731,12 @@ export function addVersionToProject(projectId: string, version: ScheduleVersion)
   notifyListeners()
   idbPutProject(updated).catch(err => {
     console.error('[ControlLens] addVersionToProject: IndexedDB persist failed:', err)
+  })
+  // v15 — push the new version (with raw XER upload) to Supabase. Background.
+  addVersionToSupabase(projectId, version).then(ok => {
+    if (!ok) console.warn('[ControlLens] addVersion: Supabase persist failed')
+  }).catch(err => {
+    console.error('[ControlLens] addVersion: Supabase persist error:', err)
   })
   setActiveProjectId(projectId)
   setActiveVersionId(version.id)
@@ -715,6 +763,10 @@ export function updateProjectContractDates(
   notifyListeners()
   idbPutProject(updated).catch(err => {
     console.error('[ControlLens] updateProjectContractDates: IndexedDB persist failed:', err)
+  })
+  // v15 — sync to Supabase
+  updateProjectContractDatesInSupabase(projectId, dates).catch(err => {
+    console.error('[ControlLens] updateProjectContractDates: Supabase failed:', err)
   })
   return updated
 }
@@ -744,6 +796,12 @@ export function updateProjectEvm(
   idbPutProject(updated).catch(err => {
     console.error('[ControlLens] updateProjectEvm: IndexedDB persist failed:', err)
   })
+  // v15 — sync EVM data to Supabase (skip when clearing)
+  if (evm) {
+    updateProjectEvmInSupabase(projectId, evm).catch(err => {
+      console.error('[ControlLens] updateProjectEvm: Supabase failed:', err)
+    })
+  }
   return updated
 }
 
@@ -917,6 +975,10 @@ export function setProjectStatus(id: string, status: ProjectStatus) {
   notifyListeners()
   idbPutProject(updated).catch(err => {
     console.error('[ControlLens] setProjectStatus: IndexedDB persist failed:', err)
+  })
+  // v15 — sync status change to Supabase
+  updateProjectStatusInSupabase(id, status).catch(err => {
+    console.error('[ControlLens] setProjectStatus: Supabase failed:', err)
   })
   if ((status === 'Archived' || status === 'Deleted') && getActiveProjectId() === id) {
     const firstAvailable = _projects.find(p =>
