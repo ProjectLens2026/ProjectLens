@@ -10,6 +10,7 @@ import {
   addCalendarDays,
   Project, ScheduleVersion,
 } from '@/lib/projectStore'
+import { countRiskCategories } from '@/lib/riskDetector'
 
 // =============================================================================
 // Executive Dashboard — main /dashboard page.
@@ -350,25 +351,22 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   longLeadTotal = longLeadTotal ?? 0
   longLeadAtRisk = longLeadAtRisk ?? 0
 
-  // Risks Detected — Day 5, v5 (categorized by float severity)
-  // Analyzer computes:
-  //   risksCritical = activities with float < 0 (negative — actively behind)
-  //   risksHigh     = activities with float = 0 (zero buffer)
-  //   risksMedium   = activities with 1..7 days float (near critical)
+  // Risks Detected — Day 5, v9 (CATEGORY count, not activity count)
   //
-  // Legacy versions (analyzed before v4) didn't compute these fields, so
-  // fall back to counting from the criticalDrivers array. The fallback will
-  // only fill risksCritical accurately — High/Medium stay 0 since the
-  // pre-v4 critical-drivers list lumps zero-float and negative-float
-  // together. Re-uploading the XER will give the proper categorized counts.
+  // The dashboard tile previously showed activity-level severity counts
+  // computed from float buckets in the analyzer. Per founder direction,
+  // it now shows how many RISK CATEGORIES (from the Risks page) have
+  // triggered, broken down by severity. Numbers match what the user sees
+  // when they click into /dashboard/risks.
   //
-  // RisksTile renders the 3 categories as separate rows — no aggregate
-  // total displayed (was misleading). Color: red if any critical, amber
-  // if any high.
-  const cdArrCount = Array.isArray(a.criticalDrivers) ? a.criticalDrivers.length : 0
-  const risksCritical: number = numOrUndefAtTop(a.risksCritical) ?? cdArrCount
-  const risksHigh: number = numOrUndefAtTop(a.risksHigh) ?? 0
-  const risksMedium: number = numOrUndefAtTop(a.risksMedium) ?? 0
+  // Categories detected by detectRiskCategories():
+  //   Time Impact / Critical Path / Procurement / Construction Sequence /
+  //   Schedule Quality / Overall Health / Milestones (up to 7)
+  const riskCats = countRiskCategories(a)
+  const risksAll = riskCats.all
+  const risksCritical = riskCats.critical
+  const risksHigh = riskCats.high
+  const risksMedium = riskCats.medium
 
   const attentionAreas: AttentionArea[] = Array.isArray(a.attentionAreas) && a.attentionAreas.length
     ? a.attentionAreas
@@ -522,6 +520,7 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
             valueColor={longLeadAtRisk === 0 ? 'green' : 'red'}
           />
           <RisksTile
+            all={risksAll}
             critical={risksCritical}
             high={risksHigh}
             medium={risksMedium}
@@ -795,14 +794,14 @@ function KPITile({ href, label, value, sub, valueColor }: { href: string; label:
   )
 }
 
-// Risks Detected tile — categorized by float severity. Replaces the single
-// big-number display with three rows (Critical / High / Medium) so the count
-// reads as a triage breakdown, not a misleading aggregate that conflates
-// "5 negative-float activities" with "395 near-critical activities."
+// Risks Detected tile — counts how many risk CATEGORIES triggered (not how
+// many activities). Header shows "All (N)" total. Three rows below break
+// down by severity. Matches what user sees when clicking through to the
+// /dashboard/risks page.
 //
 // Layout matches KPITile dimensions (same outer card, header label) so it
 // sits cleanly alongside the other tiles in the grid row.
-function RisksTile({ critical, high, medium }: { critical: number; high: number; medium: number }) {
+function RisksTile({ all, critical, high, medium }: { all: number; critical: number; high: number; medium: number }) {
   const row = (emoji: string, label: string, count: number, activeColor: string) => (
     <div className="flex items-center justify-between text-[12px] leading-tight">
       <span className="flex items-center gap-1 text-slate-600">
@@ -816,7 +815,12 @@ function RisksTile({ critical, high, medium }: { critical: number; high: number;
   )
   return (
     <Link href="/dashboard/risks" className="bg-white border border-slate-200 rounded-xl p-3 hover:border-slate-300 hover:shadow-sm transition-all">
-      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">Risks Detected</div>
+      <div className="flex items-baseline justify-between mb-1.5">
+        <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Risks Detected</div>
+        <div className={clsx('text-[11px] font-bold tabular-nums', all > 0 ? 'text-slate-900' : 'text-slate-400')}>
+          All ({all})
+        </div>
+      </div>
       <div className="space-y-1">
         {row('🚨', 'Critical', critical, 'text-red-600')}
         {row('⚠️', 'High',     high,     'text-amber-600')}

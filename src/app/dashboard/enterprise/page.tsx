@@ -8,6 +8,7 @@ import {
   getProjectStatus,
   Project, ProjectStatus,
 } from '@/lib/projectStore'
+import { countRiskCategories } from '@/lib/riskDetector'
 // =============================================================================
 // Enterprise Dashboard — portfolio-level view across ALL projects in the workspace.
 //
@@ -447,8 +448,12 @@ function buildRows(projects: Project[]): ProjectRowData[] {
           }
         }
       }
-      const risksDetected = num(a.risksDetected ?? a.risksCount ?? a.risks_count, 0)
-      const criticalRisks = num(a.criticalRisks ?? a.critical_risks, 0)
+      // Risks — Day 5, v9: count CATEGORIES (matches Risks page), not activities.
+      // risksDetected = total categories triggered (e.g., 6 of 7)
+      // criticalRisks = critical-severity categories (e.g., 5 of 6)
+      const riskCats = countRiskCategories(a)
+      const risksDetected = riskCats.all
+      const criticalRisks = riskCats.critical
       const today = new Date()
       const contractPast = contractEnd ? new Date(contractEnd) < today : false
       return {
