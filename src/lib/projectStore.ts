@@ -468,62 +468,66 @@ export function buildLabeledVersion(opts: {
 async function hydrate(): Promise<void> {
   if (_hydrated) return
   try {
-    let projects: Project[] = []
-    let supabaseLoaded = false
+    // v15 — Load from BOTH sources and merge. This ensures:
+    //   - Cross-device users see their cloud data
+    //   - Local-only users (cloud writes failing) still see their work
+    //   - Nothing ever gets lost on refresh
+    // The merge prefers cloud data when a project exists in both (matched
+    // by local id). Local-only projects are kept too — these will get
+    // pushed to cloud on the next createProject() call.
+    let cloudProjects: Project[] = []
+    let localProjects: Project[] = []
 
-    // v15 — Try Supabase FIRST. If signed-in user has cloud data, use it.
-    // This makes the app cross-device: log in anywhere → see your projects.
     try {
       const fromCloud = await loadProjectsFromSupabase()
-      if (fromCloud !== null) {
-        projects = fromCloud
-        supabaseLoaded = true
-        console.log('[ControlLens] Loaded', projects.length, 'project(s) from Supabase')
-      }
+      if (fromCloud) cloudProjects = fromCloud
+      console.log('[ControlLens] Cloud:', cloudProjects.length, 'project(s)')
     } catch (err) {
-      console.warn('[ControlLens] Supabase read failed, falling back to IndexedDB:', err)
+      console.warn('[ControlLens] Supabase read failed:', err)
     }
 
-    // IndexedDB fallback — used when Supabase is offline, user isn't signed
-    // in yet, or returns no rows. Keeps the app usable in all cases.
-    if (!supabaseLoaded) {
+    try {
+      localProjects = await idbGetAllProjects()
+      console.log('[ControlLens] Local:', localProjects.length, 'project(s)')
+    } catch (err) {
+      console.error('[ControlLens] IndexedDB read failed during hydration:', err)
+    }
+
+    // Legacy localStorage migration (only if both other sources are empty)
+    if (cloudProjects.length === 0 && localProjects.length === 0 && typeof localStorage !== 'undefined') {
       try {
-        projects = await idbGetAllProjects()
-      } catch (err) {
-        console.error('[ControlLens] IndexedDB read failed during hydration:', err)
-      }
-      if (projects.length === 0 && typeof localStorage !== 'undefined') {
-        try {
-          const legacy = localStorage.getItem(LEGACY_PROJECTS_KEY)
-          if (legacy) {
-            const parsed = JSON.parse(legacy)
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              console.log('[ControlLens] Migrating', parsed.length, 'project(s) from localStorage to IndexedDB')
-              for (const p of parsed) {
-                try { await idbPutProject(p) } catch (e) {
-                  console.error('[ControlLens] Migration: failed to write project', p?.id, e)
-                }
+        const legacy = localStorage.getItem(LEGACY_PROJECTS_KEY)
+        if (legacy) {
+          const parsed = JSON.parse(legacy)
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            console.log('[ControlLens] Migrating', parsed.length, 'project(s) from localStorage to IndexedDB')
+            for (const p of parsed) {
+              try { await idbPutProject(p) } catch (e) {
+                console.error('[ControlLens] Migration: failed to write project', p?.id, e)
               }
-              projects = await idbGetAllProjects()
-              try { localStorage.removeItem(LEGACY_PROJECTS_KEY) } catch {}
             }
+            localProjects = await idbGetAllProjects()
+            try { localStorage.removeItem(LEGACY_PROJECTS_KEY) } catch {}
           }
-        } catch (err) {
-          console.error('[ControlLens] Migration check failed (non-fatal):', err)
         }
+      } catch (err) {
+        console.error('[ControlLens] Migration check failed (non-fatal):', err)
       }
     }
+
+    // Merge: cloud wins on conflicts (matched by id). Local-only projects
+    // get carried forward; they'll sync to cloud on the next write.
+    const cloudIds = new Set(cloudProjects.map(p => p.id))
+    const localOnly = localProjects.filter(p => !cloudIds.has(p.id))
+    if (localOnly.length > 0) {
+      console.log('[ControlLens]', localOnly.length, 'local-only project(s) (not yet synced to cloud)')
+    }
+    let projects = [...cloudProjects, ...localOnly]
     projects.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
 
     // v14 migration — back-fill projectId, version labels, scheduleType,
     // sequenceNumber, and snapshot for projects/versions that pre-date the
-    // structured labeling system. Runs once per project on every hydration;
-    // it's idempotent (no-ops on fully migrated projects) so it's safe to
-    // re-run. Migrated projects get persisted back so we don't migrate again.
-    //
-    // v15 note — migration writes only to IndexedDB (local mirror). Cloud
-    // rows are already migrated via the ALTER TABLE in the schema setup, so
-    // this is a no-op for projects that came from Supabase.
+    // structured labeling system. Idempotent.
     try {
       const migrated = migrateProjectsToV14(projects)
       if (migrated.changedIds.size > 0) {
