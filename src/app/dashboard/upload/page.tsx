@@ -1,6 +1,24 @@
 'use client'
+// =============================================================================
+// Upload Schedule — Day 6, v14
+//
+// v14 changes (from previous version):
+//   1. Project ID is now MANDATORY for new projects (red asterisk, validation).
+//   2. Schedule Type dropdown (Baseline / Rebaseline / Update) — no default,
+//      PM must pick. Disabled states follow the rules:
+//        - New project (no versions yet) → only Baseline is enabled.
+//        - Existing project with no baseline → only Baseline is enabled
+//          (rare case; baseline migrates first version automatically).
+//        - Existing project with baseline → Rebaseline + Update are enabled;
+//          Baseline is disabled with "delete to replace" tooltip.
+//   3. Auto-generated version label preview shown in gray below the dropdown.
+//   4. Owner/Client/GC placeholders are now generic — no "Azizi" or "USACE".
+//
+// Everything else (XER parsing, contract dates form, save flow) is the same
+// as v13 — we just append the schedule-type / labeling metadata on top.
+// =============================================================================
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   getActiveProjectId, loadProjects,
@@ -9,7 +27,15 @@ import {
   computeRevisedCompletion,
   ScheduleVersion, ContractDates, VersionDates, Project,
 } from '@/lib/projectStore'
-
+import {
+  generateVersionLabel,
+  buildDateSnapshot,
+  validateProjectId,
+  sanitizeProjectId,
+  canUploadType,
+  getNextSequenceNumber,
+  type ScheduleType,
+} from '@/lib/versionLabeler'
 // XER parser — runs in the browser to avoid Vercel's serverless function
 // body limit (which was truncating large XER files like the 620 KB DCDGS
 // file from 1,048 activities down to 557). See runAnalysis() below.
@@ -17,28 +43,19 @@ import { parseXER, analyzeXER } from '@/lib/xerParser'
 
 type Step = 'upload' | 'context' | 'analyzing' | 'done'
 
-// =============================================================================
-// ProjectContext — simplified (2026-05-21).
-// Removed: phase, contractValue, completionDate, procurementIssues,
-// keyConstraints, criticalConcerns. Those textareas slowed the upload flow
-// without paying off in the dashboard. PM enters the actual contract dates
-// instead — those flow into the dashboard and durations.
-// =============================================================================
 interface ProjectContext {
   projectName: string
   owner: string
   gc: string
 }
 
-// Local state for the contract dates form. Uses ISO strings ("YYYY-MM-DD")
-// because that's what HTML <input type="date"> reads and writes natively.
 interface ContractDatesFormState {
-  ntp: string                       // required
-  originalContractCompletion: string  // required
-  timeExtensionDays: number         // default 0
-  revisedContractCompletion: string // pre-filled from formula, editable
-  manualDataDate: string            // optional, XER fills if blank
-  substantialCompletion: string     // NEW (Day 5, v2) — optional, shown alongside XER-detected
+  ntp: string
+  originalContractCompletion: string
+  timeExtensionDays: number
+  revisedContractCompletion: string
+  manualDataDate: string
+  substantialCompletion: string
 }
 
 const EMPTY_CONTRACT_DATES: ContractDatesFormState = {
@@ -50,12 +67,6 @@ const EMPTY_CONTRACT_DATES: ContractDatesFormState = {
   substantialCompletion: '',
 }
 
-// Read a File as text with encoding auto-detection.
-//
-// Primavera P6 exports XER files as UTF-16LE by default. Other tools and
-// some scripts export as UTF-8. We auto-detect by looking at the BOM and,
-// when no BOM is present, by sampling the first 100 byte-pairs for the
-// characteristic UTF-16 "every other byte is zero" pattern.
 async function readXERFileAsText(file: File): Promise<string> {
   const buffer = await file.arrayBuffer()
   const bytes = new Uint8Array(buffer)
@@ -83,12 +94,9 @@ export default function UploadPage() {
   const [dragging, setDragging] = useState(false)
   const [progress, setProgress] = useState(0)
   const [result, setResult] = useState<any>(null)
-
   const [ctx, setCtx] = useState<ProjectContext>({
     projectName: '', owner: '', gc: ''
   })
-
-  // NEW — contract dates state
   const [cd, setCd] = useState<ContractDatesFormState>(EMPTY_CONTRACT_DATES)
   const [dateError, setDateError] = useState<string>('')
 
@@ -97,6 +105,10 @@ export default function UploadPage() {
   const [projectMode, setProjectMode] = useState<'new' | 'existing'>('new')
   const [selectedProjectId, setSelectedProjectId] = useState<string>('')
   const [newProjectId, setNewProjectId] = useState<string>('')
+
+  // v14 — schedule type + validation state
+  const [scheduleType, setScheduleType] = useState<ScheduleType | null>(null)
+  const [projectIdError, setProjectIdError] = useState<string>('')
 
   useEffect(() => {
     refreshProjectsList()
@@ -117,18 +129,8 @@ export default function UploadPage() {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Pre-fill contract dates when an existing project is selected.
-  // NTP and Original Completion come from project.contractDates (sticky).
-  // Time Extension defaults from the most recent version (or 0).
-  // Revised auto-recalculates from those two.
-  // manualDataDate stays empty — fresh each upload (XER will fill it).
-  // -------------------------------------------------------------------------
   useEffect(() => {
-    if (projectMode !== 'existing' || !selectedProjectId) {
-      // Reset to empty when switching to "new project" or no selection
-      return
-    }
+    if (projectMode !== 'existing' || !selectedProjectId) return
     const project = existingProjects.find(p => p.id === selectedProjectId)
     if (!project) return
     const projCD = project.contractDates
@@ -147,20 +149,13 @@ export default function UploadPage() {
       substantialCompletion: substComp,
     })
     setDateError('')
+    // v14 — reset schedule type when project changes, force PM to pick again
+    setScheduleType(null)
   }, [projectMode, selectedProjectId, existingProjects])
 
-  // -------------------------------------------------------------------------
-  // Date-field change handlers.
-  //
-  // When NTP or Original Completion or Time Extension changes, we recompute
-  // the Revised Completion automatically. The PM can THEN override Revised
-  // by editing the field directly — that override stays until they touch
-  // Time Extension or Original Completion again.
-  //
-  // This is a deliberate UX choice — keeps the UI simple at the cost of
-  // losing manual overrides if the user changes inputs upstream. For the
-  // alternative (a sticky override flag), revisit if PM confusion emerges.
-  // -------------------------------------------------------------------------
+  // v14 — reset schedule type when switching between new/existing modes
+  useEffect(() => { setScheduleType(null) }, [projectMode])
+
   function updateOriginal(val: string) {
     setCd(c => ({
       ...c,
@@ -169,7 +164,6 @@ export default function UploadPage() {
     }))
     setDateError('')
   }
-
   function updateTimeExt(valStr: string) {
     const n = parseInt(valStr || '0', 10)
     const days = isNaN(n) ? 0 : n
@@ -178,6 +172,19 @@ export default function UploadPage() {
       timeExtensionDays: days,
       revisedContractCompletion: computeRevisedCompletion(c.originalContractCompletion, days) || '',
     }))
+  }
+
+  // v14 — Project ID input handler with live validation. Sanitizes as user
+  // types (uppercase + hyphens) and validates against the format rules.
+  function updateProjectId(raw: string) {
+    const cleaned = sanitizeProjectId(raw)
+    setNewProjectId(cleaned)
+    if (cleaned.length === 0) {
+      setProjectIdError('')  // hide error while empty (shown only on submit)
+    } else {
+      const err = validateProjectId(cleaned)
+      setProjectIdError(err || '')
+    }
   }
 
   const fileRef = useRef<HTMLInputElement>(null)
@@ -192,7 +199,6 @@ export default function UploadPage() {
       setStep('context')
     }
   }
-
   function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
     if (f) {
@@ -202,12 +208,101 @@ export default function UploadPage() {
     }
   }
 
+  // v14 — derive the dropdown state machine from current project mode +
+  // selection. For new projects only Baseline is enabled (no versions yet).
+  // For existing projects, defer to canUploadType from versionLabeler.
+  const typeStates: Record<ScheduleType, { allowed: boolean; reason?: string }> = useMemo(() => {
+    if (projectMode === 'new') {
+      return {
+        baseline: { allowed: true },
+        rebaseline: { allowed: false, reason: 'New project — first upload must be baseline' },
+        update: { allowed: false, reason: 'New project — first upload must be baseline' },
+      }
+    }
+    const project = existingProjects.find(p => p.id === selectedProjectId)
+    if (!project) {
+      return {
+        baseline: { allowed: false, reason: 'Pick a project first' },
+        rebaseline: { allowed: false, reason: 'Pick a project first' },
+        update: { allowed: false, reason: 'Pick a project first' },
+      }
+    }
+    const labelerVersions = project.versions.map(v => ({
+      id: v.id,
+      scheduleType: v.scheduleType,
+      sequenceNumber: v.sequenceNumber,
+      dataDate: v.dataDate,
+    }))
+    return {
+      baseline: canUploadType(labelerVersions, 'baseline'),
+      rebaseline: canUploadType(labelerVersions, 'rebaseline'),
+      update: canUploadType(labelerVersions, 'update'),
+    }
+  }, [projectMode, selectedProjectId, existingProjects])
+
+  // v14 — compute the version-label PREVIEW the PM will see saved. Uses the
+  // same generator as the actual save path so what they see is what they get.
+  const labelPreview = useMemo<string | null>(() => {
+    if (!scheduleType) return null
+    if (!cd.ntp) return null
+    if (projectMode === 'new') {
+      const pid = newProjectId.trim()
+      if (!pid || validateProjectId(pid)) return null
+      // New project always starts at sequence 0 (baseline). We don't show
+      // rebaseline/update for new projects, but guard anyway.
+      const seq = scheduleType === 'baseline' ? 0 : 1
+      return generateVersionLabel({
+        projectId: pid, ntp: cd.ntp, type: scheduleType, sequenceNumber: seq,
+      })
+    }
+    const project = existingProjects.find(p => p.id === selectedProjectId)
+    if (!project || !project.projectId) return null
+    const labelerVersions = project.versions.map(v => ({
+      id: v.id,
+      scheduleType: v.scheduleType,
+      sequenceNumber: v.sequenceNumber,
+      dataDate: v.dataDate,
+    }))
+    const next = getNextSequenceNumber(labelerVersions, scheduleType)
+    if (next === null) return null
+    return generateVersionLabel({
+      projectId: project.projectId,
+      ntp: project.contractDates?.ntp || cd.ntp,
+      type: scheduleType,
+      sequenceNumber: next,
+    })
+  }, [scheduleType, projectMode, newProjectId, selectedProjectId, existingProjects, cd.ntp])
+
   // -------------------------------------------------------------------------
-  // runAnalysis — validate dates, parse XER client-side, save with manual
-  // contract dates attached to the project + version, then redirect to /lens.
+  // runAnalysis — validate everything, parse XER, save version with the new
+  // labeling metadata attached.
   // -------------------------------------------------------------------------
   async function runAnalysis() {
-    // Validate manual contract dates
+    // v14 — schedule type required
+    if (!scheduleType) {
+      setDateError('Please pick a Schedule Type (Baseline, Rebaseline, or Update) above')
+      return
+    }
+    // v14 — Project ID required for new projects
+    if (projectMode === 'new') {
+      const trimmed = newProjectId.trim()
+      const idErr = validateProjectId(trimmed)
+      if (idErr) {
+        setProjectIdError(idErr)
+        setDateError('')
+        return
+      }
+      // Block creating two projects with the same Project ID
+      const collision = existingProjects.find(
+        p => p.projectId?.toUpperCase() === trimmed.toUpperCase()
+      )
+      if (collision) {
+        setProjectIdError(`Project ID "${trimmed}" is already used by "${collision.name}"`)
+        setDateError('')
+        return
+      }
+    }
+    // Validate contract dates
     if (!cd.ntp) {
       setDateError('NTP / Contract Start Date is required')
       return
@@ -220,7 +315,15 @@ export default function UploadPage() {
       setDateError('Original Contract Completion must be after NTP')
       return
     }
+    // v14 — Project Name required for new projects (matches the locked-once
+    // rule from the spec). Empty falls back to file name if PM somehow gets
+    // past this, but we nudge them to enter one.
+    if (projectMode === 'new' && !ctx.projectName.trim()) {
+      setDateError('Project Name is required')
+      return
+    }
     setDateError('')
+    setProjectIdError('')
 
     setStep('analyzing')
     setProgress(0)
@@ -229,10 +332,7 @@ export default function UploadPage() {
     }, 200)
 
     try {
-      if (!file) {
-        throw new Error('No file selected')
-      }
-
+      if (!file) throw new Error('No file selected')
       const ext = file.name.split('.').pop()?.toLowerCase()
       let analysis: any
       let rawXER: string | undefined
@@ -254,8 +354,6 @@ export default function UploadPage() {
         }
         setProgress(70)
       } else {
-        // Non-XER files — build a fallback analysis. No parsing happens
-        // for these formats yet.
         analysis = {
           fileType: ext?.toUpperCase() || 'UNKNOWN',
           projectName: ctx.projectName || file.name,
@@ -276,7 +374,6 @@ export default function UploadPage() {
         }
       }
 
-      // Send parsed analysis to server for acknowledgement.
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -294,34 +391,22 @@ export default function UploadPage() {
         const errText = await res.text().catch(() => 'Unknown error')
         throw new Error(`Server error: ${errText}`)
       }
-
       const data = await res.json()
       setResult(data)
 
-      // -----------------------------------------------------------------
-      // Save as a project version with the manual contract dates attached.
-      // versionDates carries Time Extension, Revised Completion override
-      // (the value in the form — calc'd or PM-edited), and the optional
-      // manual Data Date. The project's contractDates (NTP + Original) get
-      // updated too if this is an existing project.
-      // -----------------------------------------------------------------
+      // ---------------------------------------------------------------------
+      // Save as a project version with v14 labeling metadata attached.
+      // For NEW projects, we also need to figure out the sequence number
+      // (always 0 for baseline since it's the first version). For EXISTING,
+      // we look up the next sequence number for the chosen schedule type.
+      // ---------------------------------------------------------------------
       try {
         const versionDates: VersionDates = {
           timeExtensionDays: cd.timeExtensionDays || 0,
           revisedContractCompletion: cd.revisedContractCompletion || undefined,
           manualDataDate: cd.manualDataDate || undefined,
         }
-
-        const version: ScheduleVersion = {
-          id: 'ver_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
-          uploadedAt: new Date().toISOString(),
-          dataDate: cd.manualDataDate || data.analysis?.dataDate || undefined,
-          fileName: file?.name || 'schedule.xer',
-          analysis: data.analysis,
-          context: ctx,
-          rawXER,
-          versionDates,
-        }
+        const dataDate = cd.manualDataDate || data.analysis?.dataDate || undefined
 
         const projectContractDates: ContractDates = {
           ntp: cd.ntp,
@@ -329,26 +414,99 @@ export default function UploadPage() {
           substantialCompletion: cd.substantialCompletion || undefined,
         }
 
-        console.log('[ControlLens] Saving version', {
-          projectMode, selectedProjectId, versionId: version.id,
-          contractDates: projectContractDates, versionDates,
-        })
-
         if (projectMode === 'existing' && selectedProjectId) {
-          // Update project-level contract dates (PM may have edited them)
           updateProjectContractDates(selectedProjectId, projectContractDates)
+          // Re-read project after the contractDates update so the labeler
+          // sees the latest data when computing sequence numbers.
+          const updatedProject = loadProjects().find(p => p.id === selectedProjectId)
+          if (!updatedProject || !updatedProject.projectId) {
+            throw new Error('Selected project is missing a Project ID')
+          }
+          const labelerVersions = updatedProject.versions.map(v => ({
+            id: v.id,
+            scheduleType: v.scheduleType,
+            sequenceNumber: v.sequenceNumber,
+            dataDate: v.dataDate,
+          }))
+          const nextSeq = getNextSequenceNumber(labelerVersions, scheduleType)
+          if (nextSeq === null) {
+            throw new Error(`Cannot upload a new ${scheduleType} — sequence is full or blocked`)
+          }
+          const versionLabel = generateVersionLabel({
+            projectId: updatedProject.projectId,
+            ntp: updatedProject.contractDates?.ntp || cd.ntp,
+            type: scheduleType,
+            sequenceNumber: nextSeq,
+          })
+          const snapshot = buildDateSnapshot(updatedProject.contractDates || projectContractDates, dataDate)
+
+          const version: ScheduleVersion = {
+            id: 'ver_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+            uploadedAt: new Date().toISOString(),
+            dataDate,
+            fileName: file?.name || 'schedule.xer',
+            analysis: data.analysis,
+            context: ctx,
+            rawXER,
+            versionDates,
+            scheduleType,
+            sequenceNumber: nextSeq,
+            versionLabel,
+            snapshot,
+          }
+
+          console.log('[ControlLens] Adding labeled version to existing project', {
+            projectId: updatedProject.projectId,
+            versionLabel,
+            scheduleType,
+            sequenceNumber: nextSeq,
+          })
           const updated = addVersionToProject(selectedProjectId, version)
-          console.log('[ControlLens] Added version to existing project', { success: !!updated, totalVersions: updated?.versions.length })
+          console.log('[ControlLens] Add result:', { success: !!updated, totalVersions: updated?.versions.length })
         } else {
-          const projectName = ctx.projectName || data.analysis?.projectName || file?.name?.replace(/\.[a-z]+$/i, '') || 'Untitled Project'
+          // NEW project — schedule type is always baseline (UI enforces it).
+          // Sequence number is 0 for baseline.
+          const pid = newProjectId.trim()
+          const projectName = ctx.projectName.trim()
+            || data.analysis?.projectName
+            || file?.name?.replace(/\.[a-z]+$/i, '')
+            || 'Untitled Project'
+          const versionLabel = generateVersionLabel({
+            projectId: pid,
+            ntp: cd.ntp,
+            type: scheduleType,                          // 'baseline' for new projects
+            sequenceNumber: scheduleType === 'baseline' ? 0 : 1,
+          })
+          const snapshot = buildDateSnapshot(projectContractDates, dataDate)
+
+          const version: ScheduleVersion = {
+            id: 'ver_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+            uploadedAt: new Date().toISOString(),
+            dataDate,
+            fileName: file?.name || 'schedule.xer',
+            analysis: data.analysis,
+            context: ctx,
+            rawXER,
+            versionDates,
+            scheduleType,
+            sequenceNumber: scheduleType === 'baseline' ? 0 : 1,
+            versionLabel,
+            snapshot,
+          }
+
           const newProj = createProject({
             name: projectName,
-            projectId: newProjectId.trim() || undefined,
+            projectId: pid,
             owner: ctx.owner,
             contractDates: projectContractDates,
             version,
           })
-          console.log('[ControlLens] Created new project', { id: newProj.id, name: newProj.name })
+          console.log('[ControlLens] Created new project', {
+            id: newProj.id,
+            name: newProj.name,
+            projectId: newProj.projectId,
+            versionLabel,
+          })
         }
 
         try {
@@ -367,9 +525,6 @@ export default function UploadPage() {
         )
       }
 
-      // Redirect to dashboard so PM sees the manual dates flow through.
-      // Was /dashboard/lens previously — sending to /dashboard now so the
-      // new Contract Timeline section is the first thing they see.
       setTimeout(() => router.push('/dashboard'), 300)
     } catch (err: any) {
       clearInterval(progInterval)
@@ -379,11 +534,48 @@ export default function UploadPage() {
     }
   }
 
-  // Check whether selected project already has saved contract dates —
-  // used to show a small "auto-filled from project" hint on the form.
   const selectedProjectHasContractDates = projectMode === 'existing'
     && selectedProjectId
     && !!(existingProjects.find(p => p.id === selectedProjectId)?.contractDates?.ntp)
+
+  // v14 — render a single schedule-type radio button. Reusable for the
+  // three options in the dropdown row.
+  function renderTypeButton(type: ScheduleType, icon: string, title: string) {
+    const state = typeStates[type]
+    const isSelected = scheduleType === type
+    const isDisabled = !state.allowed
+    return (
+      <button
+        type="button"
+        key={type}
+        onClick={() => {
+          if (!state.allowed) return
+          setScheduleType(type)
+          setDateError('')
+        }}
+        disabled={isDisabled}
+        title={state.reason || ''}
+        className={`text-left p-3 rounded-lg border-2 transition-all
+          ${isSelected ? 'border-blue-500 bg-white shadow-sm' : 'border-slate-200 bg-white/50'}
+          ${isDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:border-blue-300 cursor-pointer'}`}
+      >
+        <div className="flex items-center gap-2 mb-1">
+          <div className={`w-4 h-4 rounded-full border-2 ${isSelected ? 'border-blue-500' : 'border-slate-300'} flex items-center justify-center flex-shrink-0`}>
+            {isSelected && <div className="w-2 h-2 rounded-full bg-blue-500" />}
+          </div>
+          <span className="text-base">{icon}</span>
+          <span className="font-bold text-xs text-slate-900">{title}</span>
+        </div>
+        <div className="text-[10px] text-slate-500 ml-6 leading-tight">
+          {isDisabled ? state.reason : (
+            type === 'baseline' ? 'The approved schedule of record' :
+            type === 'rebaseline' ? 'New approved baseline replacing prior plan' :
+            'Monthly progress update against current baseline'
+          )}
+        </div>
+      </button>
+    )
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -410,12 +602,10 @@ export default function UploadPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">
-
         {step === 'upload' && (
           <div className="max-w-2xl mx-auto">
             <h2 className="text-xl font-extrabold text-slate-900 mb-1">Upload your project schedule</h2>
             <p className="text-slate-500 text-sm mb-6">ControlLens reads Primavera P6 XER files and interprets them like an experienced project controls advisor — including logic checks, long lead detection, and TIA evidence.</p>
-
             <div
               className={`upload-zone ${dragging ? 'dragging' : ''}`}
               onDragOver={e => { e.preventDefault(); setDragging(true) }}
@@ -432,7 +622,6 @@ export default function UploadPage() {
                 <span className="bg-slate-50 text-slate-500 text-xs font-semibold px-3 py-1 rounded-full border border-slate-100">.xml / .mpp / .pdf (limited)</span>
               </div>
             </div>
-
             <div className="mt-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
               <div className="text-xs font-bold text-slate-500 mb-2">WHAT CONTROLLENS WILL ANALYZE</div>
               <div className="space-y-1.5 text-xs text-slate-600">
@@ -454,12 +643,11 @@ export default function UploadPage() {
               <span className="text-2xl">✅</span>
               <div>
                 <div className="font-bold text-green-800 text-sm">File ready: {file?.name}</div>
-                <div className="text-green-600 text-xs mt-0.5">{file ? (file.size / 1024).toFixed(0) + ' KB' : ''} · Set contract dates and project info before analysis</div>
+                <div className="text-green-600 text-xs mt-0.5">{file ? (file.size / 1024).toFixed(0) + ' KB' : ''} · Pick schedule type and project info before analysis</div>
               </div>
             </div>
-
             <h2 className="text-xl font-extrabold text-slate-900 mb-1">Tell us about your project</h2>
-            <p className="text-slate-500 text-sm mb-5">Contract dates feed directly into the Executive Dashboard. On future uploads, these auto-fill — edit only what changed.</p>
+            <p className="text-slate-500 text-sm mb-5">Project ID and Name lock once set. Contract dates feed into the dashboard. On future uploads, fields auto-fill — edit only what changed.</p>
 
             {/* Project assignment */}
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5">
@@ -475,9 +663,8 @@ export default function UploadPage() {
                     </div>
                     <span className="font-bold text-xs text-slate-900">Create new project</span>
                   </div>
-                  <div className="text-[10px] text-slate-500 ml-6">This is a brand new construction project</div>
+                  <div className="text-[10px] text-slate-500 ml-6">First upload starts the project's baseline</div>
                 </button>
-
                 <button
                   type="button"
                   onClick={() => setProjectMode('existing')}
@@ -494,7 +681,6 @@ export default function UploadPage() {
                   </div>
                 </button>
               </div>
-
               {projectMode === 'existing' && (
                 <div>
                   <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">Select Project</label>
@@ -505,49 +691,93 @@ export default function UploadPage() {
                     <option value="">— Choose a project —</option>
                     {existingProjects.map(p => (
                       <option key={p.id} value={p.id}>
-                        {p.name}{p.projectId ? ` (${p.projectId})` : ''} · {p.versions.length} version{p.versions.length > 1 ? 's' : ''}
+                        {p.projectId ? `${p.projectId} · ` : ''}{p.name} · {p.versions.length} version{p.versions.length > 1 ? 's' : ''}
                       </option>
                     ))}
                   </select>
                 </div>
               )}
-
               {projectMode === 'new' && (
                 <div>
-                  <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">Project ID (optional)</label>
+                  <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">
+                    Project ID <span className="text-red-600">*</span>
+                  </label>
                   <input
                     value={newProjectId}
-                    onChange={e => setNewProjectId(e.target.value)}
-                    placeholder="e.g. USACE-CT-2024-001 (P6 Enterprise project ID)"
-                    className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white font-mono"
+                    onChange={e => updateProjectId(e.target.value)}
+                    placeholder="e.g. DCDGS-2024 or PROJ-001"
+                    maxLength={20}
+                    className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none bg-white font-mono uppercase
+                      ${projectIdError ? 'border-red-400 focus:border-red-500' : 'border-blue-200 focus:border-blue-500'}`}
                   />
-                  <div className="text-[10px] text-slate-500 mt-1">Unique identifier for this project (like P6 EPS structure)</div>
+                  {projectIdError ? (
+                    <div className="text-[10px] text-red-600 mt-1 font-semibold">⚠ {projectIdError}</div>
+                  ) : (
+                    <div className="text-[10px] text-slate-500 mt-1">
+                      Letters, numbers, hyphens · 3-20 chars · LOCKED once set
+                    </div>
+                  )}
                 </div>
               )}
             </div>
 
-            {/* Project info — simplified */}
+            {/* v14 — SCHEDULE TYPE picker. No default selection — PM must pick. */}
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-5">
+              <div className="text-xs font-bold text-amber-900 uppercase tracking-wider mb-3">
+                Schedule Type <span className="text-red-600">*</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {renderTypeButton('baseline', '📍', 'Baseline')}
+                {renderTypeButton('rebaseline', '🔄', 'Rebaseline')}
+                {renderTypeButton('update', '📈', 'Update')}
+              </div>
+              {labelPreview ? (
+                <div className="bg-white border border-amber-200 rounded-lg px-3 py-2 flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Will save as:</span>
+                  <code className="text-sm font-mono font-bold text-slate-900 tracking-tight">{labelPreview}</code>
+                </div>
+              ) : (
+                <div className="text-[10px] text-amber-700 italic px-1">
+                  {!scheduleType
+                    ? 'Pick a schedule type to see the auto-generated version label →'
+                    : projectMode === 'new'
+                      ? 'Enter Project ID and NTP date below to see the version label →'
+                      : 'Pick a project above to see the version label →'}
+                </div>
+              )}
+            </div>
+
+            {/* Project info — generic placeholders (Azizi/USACE removed in v14) */}
             <div className="space-y-4 mb-5">
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Project Name</label>
-                <input className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
-                  placeholder="(Will use file name if blank)" value={ctx.projectName} onChange={e => setCtx({...ctx, projectName: e.target.value})} />
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                  Project Name {projectMode === 'new' && <span className="text-red-600">*</span>}
+                </label>
+                <input
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
+                  placeholder={projectMode === 'new' ? 'Full project name (locked once set)' : 'Project name'}
+                  value={ctx.projectName}
+                  onChange={e => setCtx({...ctx, projectName: e.target.value})} />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Owner / Client</label>
                   <input className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
-                    placeholder="e.g. USACE, GSA, Azizi" value={ctx.owner} onChange={e => setCtx({...ctx, owner: e.target.value})} />
+                    placeholder="Client / owner name"
+                    value={ctx.owner}
+                    onChange={e => setCtx({...ctx, owner: e.target.value})} />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">General Contractor</label>
                   <input className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500"
-                    placeholder="GC company name" value={ctx.gc} onChange={e => setCtx({...ctx, gc: e.target.value})} />
+                    placeholder="GC company name"
+                    value={ctx.gc}
+                    onChange={e => setCtx({...ctx, gc: e.target.value})} />
                 </div>
               </div>
             </div>
 
-            {/* CONTRACT DATES — new section */}
+            {/* CONTRACT DATES */}
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5">
               <div className="flex items-center justify-between mb-3">
                 <div className="text-xs font-bold text-blue-900 uppercase tracking-wider">📅 Contract Dates</div>
@@ -557,7 +787,6 @@ export default function UploadPage() {
                   </span>
                 )}
               </div>
-
               <div className="grid grid-cols-2 gap-4 mb-3">
                 <div>
                   <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">
@@ -578,7 +807,6 @@ export default function UploadPage() {
                     className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-4 mb-3">
                 <div>
                   <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">
@@ -603,7 +831,6 @@ export default function UploadPage() {
                   </div>
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-4 mb-3">
                 <div>
                   <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">
@@ -626,7 +853,6 @@ export default function UploadPage() {
                   <div className="text-[10px] text-slate-500 mt-1">Leave blank — the XER's data date will be used.</div>
                 </div>
               </div>
-
               {dateError && (
                 <div className="mt-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 font-semibold">
                   ⚠ {dateError}
@@ -651,14 +877,12 @@ export default function UploadPage() {
             <div className="text-6xl mb-6 animate-pulse">🔍</div>
             <h2 className="text-xl font-extrabold text-slate-900 mb-2">ControlLens is reading your schedule</h2>
             <p className="text-slate-500 text-sm mb-8">Parsing activities, relationships, logic, and critical path...</p>
-
             <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
               <div className="bg-slate-100 rounded-full h-2 overflow-hidden mb-3">
                 <div className="bg-blue-600 h-2 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
               </div>
               <div className="text-xs text-slate-400">{Math.round(progress)}% complete</div>
             </div>
-
             <div className="space-y-2 text-left max-w-md mx-auto">
               {[
                 { label: 'Parsing XER structure...', done: progress > 20 },
