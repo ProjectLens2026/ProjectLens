@@ -2,6 +2,16 @@
 // (header comment unchanged — see prior version for details)
 
 import type { EvmData } from './evm'
+import {
+  type ScheduleType,
+  type DateSnapshot,
+  formatNtpForLabel,
+  generateVersionLabel,
+  getNextSequenceNumber,
+  buildDateSnapshot,
+  autoGenerateProjectId,
+  findDataDateDuplicates,
+} from './versionLabeler'
 
 // =============================================================================
 // Project status — 5-state model.
@@ -64,6 +74,21 @@ export interface ScheduleVersion {
   versionLabel?: string
   rawXER?: string
   versionDates?: VersionDates           // NEW — per-version manual entries
+
+  // NEW (Day 6, v14) — structured version labeling.
+  // scheduleType drives label format: BL-NTP-NN for baseline/rebaseline,
+  // CU-NTP-NN for updates. sequenceNumber is the NN (0 for first baseline,
+  // 01..99 for everything else). versionLabel above is now auto-generated
+  // from {projectId, ntp, scheduleType, sequenceNumber} — never user-edited.
+  scheduleType?: ScheduleType
+  sequenceNumber?: number
+
+  // NEW (Day 6, v14) — date snapshot at upload time.
+  // Frozen copy of NTP / contract end / revised end / data date taken when
+  // this version was saved. Sidebar reads from snapshot when version is
+  // active, so clicking an older version shows the project state from back
+  // then (not whatever contractDates says today).
+  snapshot?: DateSnapshot
 }
 
 export interface Project {
@@ -91,6 +116,11 @@ export interface Project {
 // Re-export EvmData so it appears in projectStore's API surface alongside
 // the other project-level types.
 export type { EvmData, EvmMonth, DistributionMode } from './evm'
+
+// Re-export version labeling types so consumers don't have to import from
+// two modules. ScheduleType is the dropdown enum, DateSnapshot the per-version
+// frozen dates.
+export type { ScheduleType, DateSnapshot } from './versionLabeler'
 
 export interface SaveResult {
   ok: boolean
@@ -198,6 +228,231 @@ async function idbDeleteProject(id: string): Promise<void> {
   })
 }
 
+// =============================================================================
+// v14 migration — back-fill structured version labels on existing projects.
+//
+// Mutates `projects` in place. Returns a Set of project IDs that were
+// modified (so hydrate() can persist only those, not all).
+//
+// Rules applied:
+//   - Project missing projectId → auto-generate from name (DCDGS-001 style)
+//   - For each project, walk versions in CHRONOLOGICAL order (oldest first):
+//       • First version → scheduleType = 'baseline', sequenceNumber = 0
+//       • Subsequent versions → scheduleType = 'update', sequence 1..N
+//   - Each version gets a fresh versionLabel built from {projectId, ntp,
+//     scheduleType, sequenceNumber}
+//   - Each version gets a snapshot built from project.contractDates +
+//     version.dataDate at migration time (best-effort frozen state)
+//
+// Idempotent — versions/projects that already have all the new fields are
+// left alone.
+// =============================================================================
+function migrateProjectsToV14(projects: Project[]): { changedIds: Set<string> } {
+  const changed = new Set<string>()
+  const existingIds = projects.map(p => p.projectId).filter(Boolean) as string[]
+
+  for (const project of projects) {
+    let touched = false
+
+    // Step 1: ensure projectId
+    if (!project.projectId) {
+      const auto = autoGenerateProjectId(project.name || 'PROJECT', existingIds)
+      project.projectId = auto
+      existingIds.push(auto)
+      touched = true
+    }
+
+    // Step 2: ensure each version has scheduleType, sequenceNumber, label, snapshot.
+    // Walk versions chronologically — first becomes baseline-00, rest become updates.
+    if (project.versions && project.versions.length > 0) {
+      const sorted = [...project.versions].sort((a, b) =>
+        new Date(getVersionEffectiveDate(a)).getTime() -
+        new Date(getVersionEffectiveDate(b)).getTime()
+      )
+      let updateCounter = 0
+      let baselineAssigned = false
+      for (const v of sorted) {
+        let vTouched = false
+
+        if (!v.scheduleType) {
+          if (!baselineAssigned) {
+            v.scheduleType = 'baseline'
+            v.sequenceNumber = 0
+            baselineAssigned = true
+          } else {
+            updateCounter += 1
+            v.scheduleType = 'update'
+            v.sequenceNumber = updateCounter
+          }
+          vTouched = true
+        } else if (typeof v.sequenceNumber !== 'number') {
+          // scheduleType set but no sequence — recompute based on type
+          if (v.scheduleType === 'baseline') {
+            v.sequenceNumber = 0
+          } else {
+            updateCounter += 1
+            v.sequenceNumber = updateCounter
+          }
+          vTouched = true
+        } else if (v.scheduleType === 'update') {
+          // Keep track for label sync below
+          if (v.sequenceNumber > updateCounter) updateCounter = v.sequenceNumber
+        }
+
+        // Build / sync the versionLabel from current fields
+        const ntp = project.contractDates?.ntp
+        if (project.projectId && v.scheduleType && typeof v.sequenceNumber === 'number') {
+          const desiredLabel = generateVersionLabel({
+            projectId: project.projectId,
+            ntp: ntp || '',
+            type: v.scheduleType,
+            sequenceNumber: v.sequenceNumber,
+          })
+          if (v.versionLabel !== desiredLabel) {
+            v.versionLabel = desiredLabel
+            vTouched = true
+          }
+        }
+
+        // Build snapshot if missing — uses current project.contractDates as
+        // best-effort historical state (we don't have time-travel data for
+        // pre-v14 versions, so this is the cleanest fallback).
+        if (!v.snapshot) {
+          v.snapshot = buildDateSnapshot(project.contractDates, v.dataDate)
+          vTouched = true
+        }
+
+        if (vTouched) touched = true
+      }
+    }
+
+    if (touched) changed.add(project.id)
+  }
+
+  return { changedIds: changed }
+}
+
+// =============================================================================
+// Public helpers — used by Sidebar and Upload form for the v14 features.
+// =============================================================================
+
+// Returns the IDs of all versions in this project that share a data date
+// with at least one other version — used by Sidebar to render the 🔁 flag.
+export function findDuplicateVersionIds(project: Project | null | undefined): Set<string> {
+  if (!project || !project.versions) return new Set()
+  return findDataDateDuplicates(
+    project.versions.map(v => ({
+      id: v.id,
+      scheduleType: v.scheduleType,
+      sequenceNumber: v.sequenceNumber,
+      dataDate: v.dataDate,
+    }))
+  )
+}
+
+// Returns the snapshot-style dates for a version. If the version has its
+// own snapshot (post-v14), returns that. Otherwise builds one on the fly
+// from project + version data — keeps Sidebar code clean.
+export function getVersionSnapshot(
+  project: Project,
+  version: ScheduleVersion
+): DateSnapshot {
+  if (version.snapshot) return version.snapshot
+  return buildDateSnapshot(project.contractDates, version.dataDate)
+}
+
+// =============================================================================
+// Upload-page helpers — preview the next version label and assign labels at
+// save time. Wrappers around versionLabeler functions that take the full
+// Project type (versionLabeler stays generic so it's testable in isolation).
+// =============================================================================
+
+// Returns the label that WOULD be assigned if a new version of the given
+// schedule type were uploaded right now. Used by the upload form to render
+// the gray preview text under the dropdown. Returns null if the type can't
+// be uploaded right now (sequence full, or wrong state).
+export function previewNextVersionLabel(
+  project: Project | null | undefined,
+  type: ScheduleType,
+): string | null {
+  if (!project || !project.projectId) return null
+  const ntp = project.contractDates?.ntp
+  if (!ntp) return null
+
+  const next = getNextSequenceNumber(
+    project.versions.map(v => ({
+      id: v.id,
+      scheduleType: v.scheduleType,
+      sequenceNumber: v.sequenceNumber,
+      dataDate: v.dataDate,
+    })),
+    type
+  )
+  if (next === null) return null
+
+  return generateVersionLabel({
+    projectId: project.projectId,
+    ntp,
+    type,
+    sequenceNumber: next,
+  })
+}
+
+// Builds a ScheduleVersion with all v14 labeling fields filled in. Used by
+// the upload page to wrap a freshly-parsed XER analysis into a save-ready
+// version object. Caller still needs to call addVersionToProject() or
+// createProject() to actually persist.
+export function buildLabeledVersion(opts: {
+  project: Project
+  scheduleType: ScheduleType
+  fileName: string
+  analysis: any
+  rawXER?: string
+  aiNarrative?: string
+}): ScheduleVersion | null {
+  const { project, scheduleType, fileName, analysis, rawXER, aiNarrative } = opts
+
+  if (!project.projectId) return null
+  const ntp = project.contractDates?.ntp
+  if (!ntp) return null
+
+  const next = getNextSequenceNumber(
+    project.versions.map(v => ({
+      id: v.id,
+      scheduleType: v.scheduleType,
+      sequenceNumber: v.sequenceNumber,
+      dataDate: v.dataDate,
+    })),
+    scheduleType
+  )
+  if (next === null) return null
+
+  const versionLabel = generateVersionLabel({
+    projectId: project.projectId,
+    ntp,
+    type: scheduleType,
+    sequenceNumber: next,
+  })
+
+  const dataDate = analysis?.dataDate
+  const snapshot = buildDateSnapshot(project.contractDates, dataDate)
+
+  return {
+    id: 'ver_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    uploadedAt: new Date().toISOString(),
+    dataDate,
+    fileName,
+    analysis,
+    rawXER,
+    aiNarrative,
+    scheduleType,
+    sequenceNumber: next,
+    versionLabel,
+    snapshot,
+  }
+}
+
+
 async function hydrate(): Promise<void> {
   if (_hydrated) return
   try {
@@ -228,6 +483,29 @@ async function hydrate(): Promise<void> {
       }
     }
     projects.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
+
+    // v14 migration — back-fill projectId, version labels, scheduleType,
+    // sequenceNumber, and snapshot for projects/versions that pre-date the
+    // structured labeling system. Runs once per project on every hydration;
+    // it's idempotent (no-ops on fully migrated projects) so it's safe to
+    // re-run. Migrated projects get persisted back so we don't migrate again.
+    try {
+      const migrated = migrateProjectsToV14(projects)
+      if (migrated.changedIds.size > 0) {
+        console.log('[ControlLens] v14 migration: updated', migrated.changedIds.size, 'project(s)')
+        for (const id of Array.from(migrated.changedIds)) {
+          const p = projects.find(pp => pp.id === id)
+          if (p) {
+            try { await idbPutProject(p) } catch (e) {
+              console.error('[ControlLens] v14 migration write failed for', id, e)
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[ControlLens] v14 migration error (non-fatal):', e)
+    }
+
     _projects = projects
     _hydrated = true
     notifyListeners()

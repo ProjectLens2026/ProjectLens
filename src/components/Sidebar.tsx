@@ -9,6 +9,7 @@ import {
   deleteProject, renameProject, deleteVersion, moveVersionToProject,
   getLatestVersion, migrateLegacyData,
   getProjectStatus, setProjectStatus,
+  findDuplicateVersionIds, getVersionSnapshot,
   Project, ScheduleVersion, ProjectStatus,
 } from '@/lib/projectStore'
 import { createClient } from '@/lib/supabase/client'
@@ -39,6 +40,35 @@ export default function Sidebar({ user }: SidebarProps) {
   const [confirmDeleteVersionId, setConfirmDeleteVersionId] = useState<string | null>(null)
   const [confirmStatusChange, setConfirmStatusChange] = useState<{projectId: string, newStatus: ProjectStatus} | null>(null)
   const [movePickerForVersionId, setMovePickerForVersionId] = useState<string | null>(null)
+
+  // v14 — per-user toggle state for the 4 date rows shown on each project
+  // (NTP, Contract End, Revised End, Data Date). Stored in localStorage so
+  // it persists across sessions and projects. Default = all ON.
+  const [dateToggles, setDateToggles] = useState<{ ntp: boolean; contract: boolean; revised: boolean; dataDate: boolean }>({
+    ntp: true, contract: true, revised: true, dataDate: true,
+  })
+  const [dateTogglesOpenForId, setDateTogglesOpenForId] = useState<string | null>(null)
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('pl_sidebar_date_toggles')
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (parsed && typeof parsed === 'object') {
+          setDateToggles(prev => ({ ...prev, ...parsed }))
+        }
+      }
+    } catch {}
+  }, [])
+
+  function updateDateToggle(key: 'ntp' | 'contract' | 'revised' | 'dataDate') {
+    setDateToggles(prev => {
+      const next = { ...prev, [key]: !prev[key] }
+      try { localStorage.setItem('pl_sidebar_date_toggles', JSON.stringify(next)) } catch {}
+      return next
+    })
+  }
+
   const displayUser = DEMO_MODE ? DEMO_USER : user
   const showTeamMode = !!displayUser?.company
   useEffect(() => {
@@ -201,6 +231,11 @@ export default function Sidebar({ user }: SidebarProps) {
     try {
       return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     } catch { return '' }
+  }
+  // v14 — format a snapshot date row value. Returns '—' if missing.
+  function fmtSnap(d?: string): string {
+    if (!d) return '—'
+    return d.slice(0, 10)  // YYYY-MM-DD as-is, no locale conversion
   }
   // Per-project views — order is what the user sees in the sidebar.
   // v13: Earned Value link added between Schedule Analysis and Risks & Issues.
@@ -368,14 +403,17 @@ export default function Sidebar({ user }: SidebarProps) {
                     onClick={() => openProjectLatest(p.id)}
                     className="flex-1 min-w-0 cursor-pointer"
                   >
+                    {/* v14 — Project ID is now the primary identifier (mono,
+                        prominent at top). Project name moves to a smaller
+                        line below. Both are LOCKED — rename via ⋮ menu only. */}
                     <div className="flex items-center gap-1.5">
                       {condition && (
                         <div className={clsx('w-1.5 h-1.5 rounded-full flex-shrink-0', getConditionDotColor(condition))} title={condition} />
                       )}
                       <span className={clsx(
-                        'text-xs font-medium truncate',
+                        'text-xs font-semibold font-mono truncate tracking-tight',
                         isCompleted ? 'text-white/60' : 'text-white'
-                      )}>{p.name}</span>
+                      )} title={p.projectId || '(no Project ID)'}>{p.projectId || '— no ID —'}</span>
                       {isActiveStatus && (
                         <span className="text-[8px] font-bold px-1.5 py-px rounded-full bg-green-500/25 text-green-300 uppercase tracking-wide flex-shrink-0">Active</span>
                       )}
@@ -386,9 +424,10 @@ export default function Sidebar({ user }: SidebarProps) {
                         <span className="text-[8px] font-bold px-1.5 py-px rounded-full bg-slate-500/30 text-white/60 uppercase tracking-wide flex-shrink-0">✓ Done</span>
                       )}
                     </div>
-                    {p.projectId && (
-                      <div className="text-[9px] font-mono mt-0.5 truncate text-white/40">{p.projectId}</div>
-                    )}
+                    <div className={clsx(
+                      'text-[10px] mt-0.5 truncate leading-tight',
+                      isCompleted ? 'text-white/40' : 'text-white/70'
+                    )} title={p.name}>{p.name}</div>
                   </div>
                   <span className="text-white/40 text-[9px] flex-shrink-0 font-mono">{p.versions.length}</span>
                   <div className="relative flex-shrink-0">
@@ -448,17 +487,102 @@ export default function Sidebar({ user }: SidebarProps) {
                   </div>
                 </div>
               )}
-              {isExpanded && !isEditing && !isConfirmingDelete && !isConfirmingStatusChange && p.versions.length > 0 && (
+              {isExpanded && !isEditing && !isConfirmingDelete && !isConfirmingStatusChange && p.versions.length > 0 && (() => {
+                // v14 — compute snapshot + duplicate set once per project expand.
+                const dupeIds = findDuplicateVersionIds(p)
+                // Find which version's snapshot to show in the dates block:
+                // active version if this project is active, else latest.
+                const visibleVersion = isActive && activeVersion
+                  ? activeVersion
+                  : getLatestVersion(p)
+                const snap = visibleVersion ? getVersionSnapshot(p, visibleVersion) : null
+                const isCustomizingDates = dateTogglesOpenForId === p.id
+                return (
+                <>
+                {/* v14 — toggleable date rows. PM picks which of NTP / Contract /
+                    Revised / Data Date appear in the sidebar. Dates come from
+                    the active version's snapshot (or latest if no active). */}
+                <div className="ml-5 pl-2 border-l border-white/5 mb-1 mt-0.5">
+                  <div className="flex items-center justify-between px-1 py-0.5">
+                    <div className="text-[8px] uppercase tracking-widest text-white/30">
+                      {isActive && activeVersion && activeVersion.versionLabel
+                        ? `Dates · ${activeVersion.versionLabel.split('-').slice(-3).join('-')}`
+                        : 'Dates · latest'}
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setDateTogglesOpenForId(isCustomizingDates ? null : p.id) }}
+                      className="text-white/30 hover:text-white text-[10px] px-1 leading-none"
+                      title="Customize which dates show"
+                    >⚙</button>
+                  </div>
+                  {isCustomizingDates && (
+                    <div className="bg-white/5 rounded-md p-1.5 mb-1 mx-0.5" onClick={e => e.stopPropagation()}>
+                      <div className="text-[8px] uppercase tracking-widest text-white/40 px-1 pb-1">Show date</div>
+                      {([
+                        ['ntp', 'NTP'],
+                        ['contract', 'Contract'],
+                        ['revised', 'Revised'],
+                        ['dataDate', 'Data Date'],
+                      ] as Array<['ntp'|'contract'|'revised'|'dataDate', string]>).map(([key, label]) => (
+                        <label key={key} className="flex items-center gap-2 px-1 py-0.5 text-[10px] text-white/80 cursor-pointer hover:bg-white/5 rounded">
+                          <input
+                            type="checkbox"
+                            checked={dateToggles[key]}
+                            onChange={() => updateDateToggle(key)}
+                            className="w-3 h-3 accent-blue-500 cursor-pointer"
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {snap && (
+                    <div className="px-1 pb-1 text-[10px] leading-snug">
+                      {dateToggles.ntp && (
+                        <div className="flex justify-between text-white/60">
+                          <span className="text-white/35">NTP</span>
+                          <span className="font-mono">{fmtSnap(snap.ntp)}</span>
+                        </div>
+                      )}
+                      {dateToggles.contract && (
+                        <div className="flex justify-between text-white/60">
+                          <span className="text-white/35">Contract</span>
+                          <span className="font-mono">{fmtSnap(snap.contractEnd)}</span>
+                        </div>
+                      )}
+                      {dateToggles.revised && (
+                        <div className="flex justify-between text-white/60">
+                          <span className="text-white/35">Revised</span>
+                          <span className="font-mono">{fmtSnap(snap.revisedEnd)}</span>
+                        </div>
+                      )}
+                      {dateToggles.dataDate && (
+                        <div className="flex justify-between text-white/85">
+                          <span className="text-white/35">Data Date</span>
+                          <span className="font-mono font-semibold text-blue-300">{fmtSnap(snap.dataDate)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <div className="ml-5 pl-2 border-l border-white/5 py-0.5">
                   {[...p.versions]
-                    .sort((a, b) =>
-                      new Date(b.dataDate || b.uploadedAt).getTime() -
-                      new Date(a.dataDate || a.uploadedAt).getTime()
-                    )
+                    .sort((a, b) => {
+                      // v14 — sort newest at top. Prefer dataDate, fall back
+                      // to uploadedAt for versions that don't have one.
+                      const at = new Date(b.dataDate || b.uploadedAt).getTime()
+                      const bt = new Date(a.dataDate || a.uploadedAt).getTime()
+                      return at - bt
+                    })
                     .map(v => {
                       const isActiveVersion = activeVersion?.id === v.id && isActive
                       const isConfirmingVerDelete = confirmDeleteVersionId === v.id
                       const isMovingThisVer = movePickerForVersionId === v.id
+                      // v14 — determine if this version is part of a duplicate
+                      // group (data-date match with at least one other version)
+                      // and whether it's a baseline (BL pill).
+                      const isDuplicate = dupeIds.has(v.id)
+                      const isBaseline = v.scheduleType === 'baseline' || v.scheduleType === 'rebaseline'
                       const isVerActionMenuOpen = openActionMenu === `version:${v.id}`
                       const versionLabel = v.versionLabel || v.fileName || 'unnamed'
                       const dateStr = shortDate(v.dataDate || v.uploadedAt)
@@ -515,8 +639,19 @@ export default function Sidebar({ user }: SidebarProps) {
                         >
                           <span className={clsx('w-3 flex-shrink-0 text-[10px]', isActiveVersion ? 'text-blue-400' : 'text-transparent')}>✓</span>
                           <div className="flex-1 min-w-0">
-                            <div className={clsx('truncate', isActiveVersion ? 'text-white font-semibold' : 'text-white/70')}>
-                              {versionLabel}
+                            <div className="flex items-center gap-1">
+                              <span className={clsx('truncate flex-1 min-w-0 font-mono text-[10px]', isActiveVersion ? 'text-white font-semibold' : isBaseline ? 'text-white/85' : 'text-white/70')}>
+                                {versionLabel}
+                              </span>
+                              {isDuplicate && (
+                                <span className="text-[10px] text-amber-400 flex-shrink-0" title="Same Data Date as another version — possible duplicate">🔁</span>
+                              )}
+                              {isBaseline && (
+                                <span className="text-[8px] font-bold px-1 py-px rounded bg-blue-500/25 text-blue-300 flex-shrink-0 font-sans tracking-wide">BL</span>
+                              )}
+                              {isActiveVersion && (
+                                <span className="text-[8px] font-bold px-1 py-px rounded bg-blue-500/40 text-blue-200 flex-shrink-0 font-sans tracking-wide">NOW</span>
+                              )}
                             </div>
                             {dateStr && (
                               <div className="text-white/30 text-[9px]">{dateStr}</div>
@@ -565,7 +700,9 @@ export default function Sidebar({ user }: SidebarProps) {
                     })
                   }
                 </div>
-              )}
+                </>
+                )
+              })()}
             </div>
           )
         })}
