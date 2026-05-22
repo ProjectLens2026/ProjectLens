@@ -133,7 +133,6 @@ function rowToProject(row: any): Project {
     name: row.name,
     projectId: row.project_code || undefined,
     owner: row.owner_party || undefined,
-    gc: row.contractor || undefined,
     contractValue: row.contract_value || undefined,
     phase: row.phase || undefined,
     status: (row.status as ProjectStatus) || 'Active',
@@ -141,6 +140,7 @@ function rowToProject(row: any): Project {
     evm: row.evm || undefined,
     versions,
     rfis: [],  // Session B will fetch from rfis table
+    changeOrders: [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -194,6 +194,10 @@ export async function insertProjectToSupabase(project: Project): Promise<boolean
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return false
 
+  // Pull GC name from the project's first version context (PM enters it in
+  // the upload form; lives at the version level, not project level).
+  const gcFromContext = project.versions?.[0]?.context?.gc || null
+
   // Insert the project row
   const { error: projErr } = await supabase
     .from('projects')
@@ -204,7 +208,7 @@ export async function insertProjectToSupabase(project: Project): Promise<boolean
       name: project.name,
       created_by: user.id,
       owner_party: project.owner || null,
-      contractor: project.gc || null,
+      contractor: gcFromContext,
       contract_value: project.contractValue || null,
       phase: project.phase || null,
       status: project.status || 'Active',
