@@ -258,6 +258,65 @@ export function fmtPct(p: number): string {
   return p.toFixed(2) + '%'
 }
 
+// Short dollar format for chart axis labels — keeps ticks compact even at
+// large budgets. $1,234,567 → "$1.2M"; $87,500 → "$88K"; $0 → "$0".
+export function fmtDollarsShort(n: number): string {
+  if (!isFinite(n)) return '—'
+  const abs = Math.abs(n)
+  const sign = n < 0 ? '−' : ''
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`
+  if (abs >= 1_000) return `${sign}$${Math.round(abs / 1_000)}K`
+  return `${sign}$${Math.round(abs)}`
+}
+
+// Per-month cumulative dollar series — used by the S-curve chart and the
+// monthly table's running total. Returns one row per month with running
+// totals AND whether the month is past, current, or future relative to
+// the data-date cutoff.
+//
+// hasAnyActualCost is true if ANY actualCost was entered — the chart uses
+// it to decide whether to render the AC cumulative line at all.
+export interface CumulativeRow {
+  isoMonth: string
+  label: string
+  plannedCum: number   // running total of PV
+  earnedCum: number    // running total of EV
+  actualCum: number    // running total of AC (0 if none entered)
+  isPast: boolean      // <= cutoff
+  isCurrent: boolean   // == cutoff
+}
+export function buildCumulativeArray(
+  months: EvmMonth[],
+  totalBudget: number,
+  cutoffIso?: string,
+): { rows: CumulativeRow[]; hasAnyActualCost: boolean; maxValue: number } {
+  let pSum = 0, eSum = 0, aSum = 0
+  let anyAc = false
+  let maxValue = 0
+  const rows: CumulativeRow[] = []
+  for (const m of months) {
+    pSum += monthPlanned(m.plannedPct, totalBudget)
+    eSum += monthEarned(m.earnedPct, totalBudget)
+    if (m.actualCost && m.actualCost > 0) {
+      aSum += m.actualCost
+      anyAc = true
+    }
+    if (pSum > maxValue) maxValue = pSum
+    if (eSum > maxValue) maxValue = eSum
+    if (aSum > maxValue) maxValue = aSum
+    rows.push({
+      isoMonth: m.isoMonth,
+      label: m.label,
+      plannedCum: pSum,
+      earnedCum: eSum,
+      actualCum: aSum,
+      isPast: cutoffIso ? m.isoMonth <= cutoffIso : false,
+      isCurrent: cutoffIso ? m.isoMonth === cutoffIso : false,
+    })
+  }
+  return { rows, hasAnyActualCost: anyAc, maxValue }
+}
+
 // =============================================================================
 // Migration — handle v10 (earnedDollars/actualDollars dollar schema) and v11
 // (retainagePct schema) to the current v12 model.
