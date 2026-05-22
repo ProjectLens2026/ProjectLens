@@ -705,7 +705,7 @@ export default function UploadPage() {
                   <input
                     value={newProjectId}
                     onChange={e => updateProjectId(e.target.value)}
-                    placeholder="e.g. DCDGS-2024 or PROJ-001"
+                    placeholder="e.g. CONTRACT-001 or PROJ-2024"
                     maxLength={20}
                     className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none bg-white font-mono uppercase
                       ${projectIdError ? 'border-red-400 focus:border-red-500' : 'border-blue-200 focus:border-blue-500'}`}
