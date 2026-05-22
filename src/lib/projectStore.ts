@@ -1,6 +1,8 @@
 // Project storage layer — IndexedDB-backed.
 // (header comment unchanged — see prior version for details)
 
+import type { EvmData } from './evm'
+
 // =============================================================================
 // Project status — 5-state model.
 // Active (default), Completed, On Hold, Archived, Deleted.
@@ -78,8 +80,17 @@ export interface Project {
   versions: ScheduleVersion[]
   rfis: any[]
   changeOrders: any[]
-  contractDates?: ContractDates         // NEW — project-level manual dates
+  contractDates?: ContractDates         // Manual contract dates (NTP, Original Comp, Substantial)
+  // EVM data — Day 5, v10. Project-level (sticky across versions). PM enters
+  // total budget once; monthly grid auto-spreads using chosen distribution.
+  // Per-month earned and actual dollars are PM-entered as work progresses.
+  // See src/lib/evm.ts for the EvmData type definition.
+  evm?: EvmData
 }
+
+// Re-export EvmData so it appears in projectStore's API surface alongside
+// the other project-level types.
+export type { EvmData, EvmMonth, DistributionMode } from './evm'
 
 export interface SaveResult {
   ok: boolean
@@ -426,6 +437,34 @@ export function updateProjectContractDates(
   notifyListeners()
   idbPutProject(updated).catch(err => {
     console.error('[ControlLens] updateProjectContractDates: IndexedDB persist failed:', err)
+  })
+  return updated
+}
+
+// =============================================================================
+// updateProjectEvm — Day 5, v10.
+// Replace the project's EVM data (total budget, distribution, monthly grid).
+// Called from the Project Production tab on every edit. Bumps updatedAt
+// and persists to IndexedDB.
+//
+// Pass `undefined` to clear the EVM block entirely (e.g. PM wants to start
+// over from scratch).
+// =============================================================================
+export function updateProjectEvm(
+  projectId: string,
+  evm: EvmData | undefined
+): Project | null {
+  const idx = _projects.findIndex(p => p.id === projectId)
+  if (idx === -1) return null
+  const updated: Project = {
+    ..._projects[idx],
+    evm,
+    updatedAt: new Date().toISOString(),
+  }
+  _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
+  notifyListeners()
+  idbPutProject(updated).catch(err => {
+    console.error('[ControlLens] updateProjectEvm: IndexedDB persist failed:', err)
   })
   return updated
 }
