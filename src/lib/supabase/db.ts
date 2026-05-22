@@ -35,8 +35,44 @@ import type { ScheduleType } from '../versionLabeler'
 const BUCKET = 'schedule-artifacts'
 
 // =============================================================================
-// Auth + org bootstrap
+// ID translation — local store uses 'proj_xxx' / 'ver_xxx' strings, Supabase
+// uses UUIDs. Maintain a translation map in localStorage so the same local
+// project always maps to the same cloud UUID across reloads.
 // =============================================================================
+
+function getLocalIdMap(): Record<string, string> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = localStorage.getItem('pl_id_map')
+    return raw ? JSON.parse(raw) : {}
+  } catch { return {} }
+}
+
+function setLocalIdMap(map: Record<string, string>) {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem('pl_id_map', JSON.stringify(map)) } catch {}
+}
+
+// Return a stable UUID for the given local id. Creates one the first time
+// it's seen and persists the mapping. If the input already looks like a
+// UUID, returns it unchanged.
+function toUuid(localId: string): string {
+  // UUID regex (any version, dashed form)
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(localId)) {
+    return localId
+  }
+  const map = getLocalIdMap()
+  if (map[localId]) return map[localId]
+  // crypto.randomUUID is available in all modern browsers
+  const newUuid: string = typeof crypto !== 'undefined' && (crypto as any).randomUUID
+    ? (crypto as any).randomUUID()
+    : `${Math.random().toString(16).slice(2, 10)}-${Math.random().toString(16).slice(2, 6)}-4${Math.random().toString(16).slice(2, 5)}-${(8 + Math.floor(Math.random() * 4)).toString(16)}${Math.random().toString(16).slice(2, 5)}-${Math.random().toString(16).slice(2, 14)}`
+  map[localId] = newUuid
+  setLocalIdMap(map)
+  return newUuid
+}
+
+
 
 // Returns the current user's primary organization ID, creating one if they
 // don't have one yet. Called once on app load (via projectStore.hydrate).
@@ -122,6 +158,21 @@ export async function loadProjectsFromSupabase(): Promise<Project[] | null> {
   return rows.map(rowToProject)
 }
 
+function getLocalIdForUuid(cloudUuid: string, prefix: 'proj' | 'ver'): string {
+  // Reverse lookup in the id map. If we have a local→cloud entry whose
+  // value matches this UUID, return the local key. Otherwise create a
+  // fresh local id and store the mapping (so subsequent loads are stable).
+  const map = getLocalIdMap()
+  for (const [localId, mappedUuid] of Object.entries(map)) {
+    if (mappedUuid === cloudUuid) return localId
+  }
+  // First time seeing this cloud row — mint a local id and persist mapping
+  const localId = `${prefix}_${cloudUuid.replace(/-/g, '').slice(0, 12)}`
+  map[localId] = cloudUuid
+  setLocalIdMap(map)
+  return localId
+}
+
 function rowToProject(row: any): Project {
   const versions: ScheduleVersion[] = (row.schedule_versions || []).map(rowToVersion)
   versions.sort((a, b) =>
@@ -129,7 +180,7 @@ function rowToProject(row: any): Project {
     new Date(a.dataDate || a.uploadedAt).getTime()
   )
   return {
-    id: row.id,
+    id: getLocalIdForUuid(row.id, 'proj'),
     name: row.name,
     projectId: row.project_code || undefined,
     owner: row.owner_party || undefined,
@@ -165,7 +216,7 @@ function rowToVersion(row: any): ScheduleVersion {
     fileType: 'Primavera P6 XER',
   }
   return {
-    id: row.id,
+    id: getLocalIdForUuid(row.id, 'ver'),
     uploadedAt: row.uploaded_at,
     dataDate: row.data_date || undefined,
     fileName: row.file_name || '',
@@ -198,11 +249,14 @@ export async function insertProjectToSupabase(project: Project): Promise<boolean
   // the upload form; lives at the version level, not project level).
   const gcFromContext = project.versions?.[0]?.context?.gc || null
 
+  // Convert local 'proj_xxx' id to a stable UUID for Postgres
+  const cloudProjectId = toUuid(project.id)
+
   // Insert the project row
   const { error: projErr } = await supabase
     .from('projects')
     .insert({
-      id: project.id,
+      id: cloudProjectId,
       org_id: orgId,
       project_code: project.projectId || null,
       name: project.name,
@@ -220,11 +274,11 @@ export async function insertProjectToSupabase(project: Project): Promise<boolean
     console.error('[db.insertProject] project row failed:', projErr.message)
     return false
   }
-  console.log('[db] inserted project', project.id, project.projectId)
+  console.log('[db] inserted project', cloudProjectId, project.projectId)
 
-  // Insert each version
+  // Insert each version (uses the cloud UUID for project_id linkage)
   for (const v of project.versions) {
-    const ok = await insertVersionToSupabase(project.id, v, orgId, user.id)
+    const ok = await insertVersionToSupabase(cloudProjectId, v, orgId, user.id)
     if (!ok) return false
   }
   return true
@@ -243,7 +297,9 @@ export async function addVersionToSupabase(
   if (!orgId) return false
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return false
-  return insertVersionToSupabase(projectId, version, orgId, user.id)
+  // Translate the local project id to its cloud UUID
+  const cloudProjectId = toUuid(projectId)
+  return insertVersionToSupabase(cloudProjectId, version, orgId, user.id)
 }
 
 // Internal — handles the actual version insert + raw XER upload
@@ -254,11 +310,12 @@ async function insertVersionToSupabase(
   userId: string,
 ): Promise<boolean> {
   const supabase = createClient()
+  const cloudVersionId = toUuid(version.id)
 
   // 1. Upload raw XER to storage if present
   let rawXerPath: string | null = null
   if (version.rawXER && version.rawXER.length > 0) {
-    rawXerPath = `${orgId}/${projectId}/${version.id}.xer`
+    rawXerPath = `${orgId}/${projectId}/${cloudVersionId}.xer`
     const blob = new Blob([version.rawXER], { type: 'text/plain' })
     const { error: upErr } = await supabase.storage
       .from(BUCKET)
@@ -284,7 +341,7 @@ async function insertVersionToSupabase(
   const { error: rowErr } = await supabase
     .from('schedule_versions')
     .insert({
-      id: version.id,
+      id: cloudVersionId,
       project_id: projectId,
       org_id: orgId,
       uploaded_by: userId,
@@ -316,7 +373,7 @@ async function insertVersionToSupabase(
     console.error('[db.addVersion] row insert failed:', rowErr.message)
     return false
   }
-  console.log('[db] inserted version', version.versionLabel || version.id)
+  console.log('[db] inserted version', version.versionLabel || cloudVersionId)
   return true
 }
 
@@ -332,7 +389,7 @@ export async function updateProjectContractDatesInSupabase(
   const { error } = await supabase
     .from('projects')
     .update({ contract_dates: dates, updated_at: new Date().toISOString() })
-    .eq('id', projectId)
+    .eq('id', toUuid(projectId))
   if (error) {
     console.error('[db.updateContractDates] failed:', error.message)
     return false
@@ -348,7 +405,7 @@ export async function updateProjectEvmInSupabase(
   const { error } = await supabase
     .from('projects')
     .update({ evm, updated_at: new Date().toISOString() })
-    .eq('id', projectId)
+    .eq('id', toUuid(projectId))
   if (error) {
     console.error('[db.updateEvm] failed:', error.message)
     return false
@@ -368,7 +425,7 @@ export async function updateProjectStatusInSupabase(
   const { error } = await supabase
     .from('projects')
     .update({ status, updated_at: new Date().toISOString() })
-    .eq('id', projectId)
+    .eq('id', toUuid(projectId))
   if (error) {
     console.error('[db.updateStatus] failed:', error.message)
     return false
