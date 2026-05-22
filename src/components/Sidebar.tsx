@@ -41,6 +41,54 @@ export default function Sidebar({ user }: SidebarProps) {
   const [confirmStatusChange, setConfirmStatusChange] = useState<{projectId: string, newStatus: ProjectStatus} | null>(null)
   const [movePickerForVersionId, setMovePickerForVersionId] = useState<string | null>(null)
 
+  // v14 — resizable sidebar. Default ~300px (was 256px / w-64 — too narrow
+  // once version labels like DCDGS-CU-20240315-12 became standard). PM can
+  // drag the right edge to anywhere between 240 and 520px. Width persists
+  // in localStorage per user.
+  const [sidebarWidth, setSidebarWidth] = useState<number>(300)
+  const [isDragging, setIsDragging] = useState(false)
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('pl_sidebar_width')
+      if (saved) {
+        const n = parseInt(saved, 10)
+        if (!isNaN(n) && n >= 240 && n <= 520) setSidebarWidth(n)
+      }
+    } catch {}
+  }, [])
+
+  // Drag handlers — attached to window during a drag so we keep tracking
+  // even when the cursor exits the small handle div.
+  useEffect(() => {
+    if (!isDragging) return
+    function onMove(e: MouseEvent) {
+      const w = Math.max(240, Math.min(520, e.clientX))
+      setSidebarWidth(w)
+    }
+    function onUp() {
+      setIsDragging(false)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    // Lock the cursor + prevent text selection while dragging
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [isDragging])
+
+  // Persist width when drag ends (separate effect so it fires after the
+  // setIsDragging(false) state update). Skip when dragging in progress.
+  useEffect(() => {
+    if (isDragging) return
+    try { localStorage.setItem('pl_sidebar_width', String(sidebarWidth)) } catch {}
+  }, [sidebarWidth, isDragging])
+
   // v14 — per-user toggle state for the 4 date rows shown on each project
   // (NTP, Contract End, Revised End, Data Date). Stored in localStorage so
   // it persists across sessions and projects. Default = all ON.
@@ -258,7 +306,10 @@ export default function Sidebar({ user }: SidebarProps) {
   const isDeletedActive = pathname.startsWith('/dashboard/deleted')
   const isSettingsActive = pathname.startsWith('/dashboard/settings')
   return (
-    <aside className="w-64 flex-shrink-0 flex flex-col h-full no-print" style={{ background: '#0d1b2e' }}>
+    <aside
+      className="flex-shrink-0 flex flex-col h-full no-print relative"
+      style={{ background: '#0d1b2e', width: `${sidebarWidth}px` }}
+    >
       <div className="px-4 py-4 border-b border-white/10 flex-shrink-0">
         <Link href="/dashboard" className="flex items-center gap-2.5">
           <div className="flex-shrink-0">
@@ -806,6 +857,16 @@ export default function Sidebar({ user }: SidebarProps) {
           <span>Sign Out</span>
         </button>
       </div>
+
+      {/* v14 — resize handle on the right edge. Sits over the border, narrow
+          enough to not block content. Hover/drag state lights up blue. */}
+      <div
+        onMouseDown={(e) => { e.preventDefault(); setIsDragging(true) }}
+        className={`absolute top-0 right-0 h-full w-1.5 cursor-col-resize transition-colors ${
+          isDragging ? 'bg-blue-500/60' : 'hover:bg-blue-500/40'
+        }`}
+        title="Drag to resize sidebar"
+      />
     </aside>
   )
 }
