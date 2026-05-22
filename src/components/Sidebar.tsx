@@ -1,5 +1,4 @@
 'use client'
-
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
@@ -13,11 +12,9 @@ import {
   Project, ScheduleVersion, ProjectStatus,
 } from '@/lib/projectStore'
 import { createClient } from '@/lib/supabase/client'
-
 interface SidebarProps {
   user?: { name: string; role: string; initials: string; company: string }
 }
-
 const DEMO_MODE = true
 const DEMO_USER = {
   name: 'Mike Anderson',
@@ -25,9 +22,7 @@ const DEMO_USER = {
   initials: 'MA',
   company: 'Nobel Project Control Services, LLC',
 }
-
 const STATUS_OPTIONS: ProjectStatus[] = ['Active', 'Completed', 'On Hold', 'Archived']
-
 export default function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
@@ -44,38 +39,32 @@ export default function Sidebar({ user }: SidebarProps) {
   const [confirmDeleteVersionId, setConfirmDeleteVersionId] = useState<string | null>(null)
   const [confirmStatusChange, setConfirmStatusChange] = useState<{projectId: string, newStatus: ProjectStatus} | null>(null)
   const [movePickerForVersionId, setMovePickerForVersionId] = useState<string | null>(null)
-
   const displayUser = DEMO_MODE ? DEMO_USER : user
   const showTeamMode = !!displayUser?.company
-
   useEffect(() => {
     migrateLegacyData()
     refresh()
     const interval = setInterval(refresh, 1000)
     return () => clearInterval(interval)
   }, [pathname])
-
   useEffect(() => {
     if (activeProject && !expandedProjectIds.has(activeProject.id)) {
       setExpandedProjectIds(prev => new Set([...Array.from(prev), activeProject.id]))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProject?.id])
-
   useEffect(() => {
     if (!openActionMenu) return
     function handleClick() { setOpenActionMenu(null) }
     document.addEventListener('click', handleClick)
     return () => document.removeEventListener('click', handleClick)
   }, [openActionMenu])
-
   function refresh() {
     const p = getActiveProject()
     setActiveProject(p)
     setActiveVersion(p ? getActiveVersion(p) : null)
     setProjects(loadProjects())
   }
-
   async function handleSignOut() {
     const supabase = createClient()
     await supabase.auth.signOut()
@@ -84,20 +73,17 @@ export default function Sidebar({ user }: SidebarProps) {
     })
     router.push('/login')
   }
-
   function maybeNavigateToDashboard() {
     if (!pathname.startsWith('/dashboard') || pathname === '/dashboard/projects') {
       router.push('/dashboard')
     }
   }
-
   function selectVersion(projectId: string, versionId: string) {
     setActiveProjectId(projectId)
     setActiveVersionId(versionId)
     refresh()
     maybeNavigateToDashboard()
   }
-
   function openProjectLatest(projectId: string) {
     const project = projects.find(p => p.id === projectId)
     if (!project) return
@@ -107,7 +93,6 @@ export default function Sidebar({ user }: SidebarProps) {
     refresh()
     maybeNavigateToDashboard()
   }
-
   function toggleExpand(projectId: string, e?: React.MouseEvent) {
     if (e) e.stopPropagation()
     setExpandedProjectIds(prev => {
@@ -117,14 +102,12 @@ export default function Sidebar({ user }: SidebarProps) {
       return next
     })
   }
-
   function startRename(project: Project) {
     setEditingProjectId(project.id)
     setEditName(project.name)
     setEditProjectIdField(project.projectId || '')
     setOpenActionMenu(null)
   }
-
   function saveRename() {
     if (editingProjectId && editName.trim()) {
       renameProject(editingProjectId, editName.trim(), editProjectIdField.trim() || undefined)
@@ -132,25 +115,21 @@ export default function Sidebar({ user }: SidebarProps) {
     }
     setEditingProjectId(null)
   }
-
   function handleDeleteProject(id: string) {
     deleteProject(id)
     refresh()
     setConfirmDeleteProjectId(null)
   }
-
   function handleDeleteVersion(projectId: string, versionId: string) {
     deleteVersion(projectId, versionId)
     refresh()
     setConfirmDeleteVersionId(null)
   }
-
   function handleMoveVersion(fromProjectId: string, versionId: string, toProjectId: string) {
     moveVersionToProject(fromProjectId, versionId, toProjectId)
     setMovePickerForVersionId(null)
     refresh()
   }
-
   function handleSetStatus(projectId: string, status: ProjectStatus) {
     if (status === 'Active') {
       setProjectStatus(projectId, status)
@@ -161,14 +140,12 @@ export default function Sidebar({ user }: SidebarProps) {
     setConfirmStatusChange({ projectId, newStatus: status })
     setOpenActionMenu(null)
   }
-
   function applyStatusChange() {
     if (!confirmStatusChange) return
     setProjectStatus(confirmStatusChange.projectId, confirmStatusChange.newStatus)
     setConfirmStatusChange(null)
     refresh()
   }
-
   function statusChangeMessage(status: ProjectStatus): { headline: string; body: string; confirmBg: string } {
     if (status === 'Completed') return {
       headline: 'Mark as Completed?',
@@ -187,13 +164,11 @@ export default function Sidebar({ user }: SidebarProps) {
     }
     return { headline: 'Change status?', body: '', confirmBg: 'bg-blue-600 hover:bg-blue-700' }
   }
-
   const archivedCount = projects.filter(p => {
     const s = getProjectStatus(p)
     return s === 'Archived' || s === 'Completed'
   }).length
   const deletedCount = projects.filter(p => getProjectStatus(p) === 'Deleted').length
-
   const filteredProjects = (() => {
     const q = searchQuery.trim().toLowerCase()
     let pool = projects.filter(p => {
@@ -210,12 +185,10 @@ export default function Sidebar({ user }: SidebarProps) {
       )
     })
   })()
-
   const isProjectExpanded = (projectId: string) => {
     if (searchQuery.trim()) return true
     return expandedProjectIds.has(projectId)
   }
-
   function getConditionDotColor(condition?: string): string {
     if (condition === 'Recovery Required') return 'bg-red-400'
     if (condition === 'Attention Needed') return 'bg-amber-400'
@@ -223,17 +196,19 @@ export default function Sidebar({ user }: SidebarProps) {
     if (condition === 'Stable') return 'bg-green-400'
     return 'bg-slate-500'
   }
-
   function shortDate(d?: string) {
     if (!d) return ''
     try {
       return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     } catch { return '' }
   }
-
+  // Per-project views — order is what the user sees in the sidebar.
+  // v13: Earned Value link added between Schedule Analysis and Risks & Issues.
+  // Page lives at /dashboard/evm (standalone, not a tab inside Lens).
   const views = activeProject ? [
     { href: '/dashboard', icon: '⊞', label: 'Overview' },
     { href: '/dashboard/lens', icon: '🔍', label: 'Schedule Analysis' },
+    { href: '/dashboard/evm', icon: '💰', label: 'Earned Value' },
     { href: '/dashboard/risks', icon: '⚠', label: 'Risks & Issues' },
     { href: '/dashboard/procurement', icon: '🚚', label: 'Procurement' },
     { href: '/dashboard/rfis', icon: '❓', label: 'RFIs', badge: activeProject.rfis.length > 0 ? String(activeProject.rfis.length) : null },
@@ -243,15 +218,12 @@ export default function Sidebar({ user }: SidebarProps) {
     { href: '/dashboard/trend', icon: '📈', label: 'Trend Analysis' },
     { href: '/dashboard/tia', icon: '📑', label: 'TIA Comparison' },
   ] : []
-
   const isEnterpriseActive = pathname.startsWith('/dashboard/enterprise')
   const isArchiveActive = pathname.startsWith('/dashboard/archive')
   const isDeletedActive = pathname.startsWith('/dashboard/deleted')
   const isSettingsActive = pathname.startsWith('/dashboard/settings')
-
   return (
     <aside className="w-64 flex-shrink-0 flex flex-col h-full no-print" style={{ background: '#0d1b2e' }}>
-
       <div className="px-4 py-4 border-b border-white/10 flex-shrink-0">
         <Link href="/dashboard" className="flex items-center gap-2.5">
           <div className="flex-shrink-0">
@@ -270,14 +242,12 @@ export default function Sidebar({ user }: SidebarProps) {
           </div>
         </Link>
       </div>
-
       {showTeamMode && (
         <div className="px-4 py-2.5 border-b border-white/5 flex-shrink-0">
           <div className="text-white/30 text-[9px] uppercase tracking-widest mb-0.5">Workspace</div>
           <div className="text-white text-xs font-semibold leading-tight">{displayUser!.company}</div>
         </div>
       )}
-
       {displayUser && (
         <div className="px-4 py-2.5 border-b border-white/5 flex-shrink-0 flex items-center gap-2.5">
           <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
@@ -289,7 +259,6 @@ export default function Sidebar({ user }: SidebarProps) {
           </div>
         </div>
       )}
-
       <div className="px-3 py-2 border-b border-white/5 flex-shrink-0 relative">
         <input
           value={searchQuery}
@@ -299,24 +268,20 @@ export default function Sidebar({ user }: SidebarProps) {
         />
         <span className="absolute left-5 top-1/2 -translate-y-1/2 text-white/40 text-[11px] pointer-events-none">🔍</span>
       </div>
-
       <div className="flex-1 overflow-y-auto px-2 py-1.5">
         {projects.length === 0 && (
           <div className="text-center py-4 text-white/40 text-xs">No projects yet</div>
         )}
-
         {searchQuery && filteredProjects.length === 0 && (
           <div className="text-center py-4 text-white/40 text-xs">
             No matches for "{searchQuery}"
           </div>
         )}
-
         {searchQuery && filteredProjects.length > 0 && (
           <div className="px-2 pt-1 pb-2 text-[9px] text-white/40 uppercase tracking-widest">
             {filteredProjects.length} match{filteredProjects.length !== 1 ? 'es' : ''}
           </div>
         )}
-
         {filteredProjects.map(p => {
           const isExpanded = isProjectExpanded(p.id)
           const isActive = activeProject?.id === p.id
@@ -330,7 +295,6 @@ export default function Sidebar({ user }: SidebarProps) {
           const isCompleted = status === 'Completed'
           const isOnHold = status === 'On Hold'
           const isActiveStatus = status === 'Active'
-
           return (
             <div key={p.id} className="mb-0.5">
               {isEditing ? (
@@ -484,7 +448,6 @@ export default function Sidebar({ user }: SidebarProps) {
                   </div>
                 </div>
               )}
-
               {isExpanded && !isEditing && !isConfirmingDelete && !isConfirmingStatusChange && p.versions.length > 0 && (
                 <div className="ml-5 pl-2 border-l border-white/5 py-0.5">
                   {[...p.versions]
@@ -499,7 +462,6 @@ export default function Sidebar({ user }: SidebarProps) {
                       const isVerActionMenuOpen = openActionMenu === `version:${v.id}`
                       const versionLabel = v.versionLabel || v.fileName || 'unnamed'
                       const dateStr = shortDate(v.dataDate || v.uploadedAt)
-
                       if (isConfirmingVerDelete) {
                         return (
                           <div key={v.id} className="bg-red-500/15 border border-red-500/40 rounded-md p-1.5 my-0.5">
@@ -514,7 +476,6 @@ export default function Sidebar({ user }: SidebarProps) {
                           </div>
                         )
                       }
-
                       if (isMovingThisVer) {
                         const otherProjects = projects.filter(op => op.id !== p.id && getProjectStatus(op) !== 'Deleted')
                         return (
@@ -541,7 +502,6 @@ export default function Sidebar({ user }: SidebarProps) {
                           </div>
                         )
                       }
-
                       return (
                         <div
                           key={v.id}
@@ -609,7 +569,6 @@ export default function Sidebar({ user }: SidebarProps) {
             </div>
           )
         })}
-
         {!searchQuery && (
           <Link href="/dashboard/upload"
             className="flex items-center gap-1.5 px-2 py-2 mt-2 text-blue-400 hover:text-blue-300 hover:bg-white/5 rounded-md text-xs font-medium"
@@ -618,7 +577,6 @@ export default function Sidebar({ user }: SidebarProps) {
           </Link>
         )}
       </div>
-
       {activeProject && (
         <div className="border-t border-white/10 px-2 py-2 flex-shrink-0">
           <div className="text-white/30 text-[9px] uppercase tracking-widest px-2 py-1 truncate" title={activeProject.name}>
@@ -646,13 +604,11 @@ export default function Sidebar({ user }: SidebarProps) {
           </div>
         </div>
       )}
-
       {/* WORKSPACE NAV — Enterprise / Archive / Deleted / Settings */}
       <div className="border-t border-white/10 px-2 py-2 flex-shrink-0">
         <div className="text-white/30 text-[9px] uppercase tracking-widest px-2 py-1">
           Workspace
         </div>
-
         {/* NEW: Enterprise Dashboard link */}
         <Link href="/dashboard/enterprise"
           className={clsx(
@@ -664,7 +620,6 @@ export default function Sidebar({ user }: SidebarProps) {
           <span className="text-sm w-4 text-center">📊</span>
           <span className="flex-1">Enterprise Dashboard</span>
         </Link>
-
         <Link href="/dashboard/archive"
           className={clsx(
             'flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2',
@@ -706,7 +661,6 @@ export default function Sidebar({ user }: SidebarProps) {
           <span className="flex-1">Settings</span>
         </Link>
       </div>
-
       <div className="px-3 py-2.5 border-t border-white/10 flex-shrink-0">
         <button
           onClick={handleSignOut}
