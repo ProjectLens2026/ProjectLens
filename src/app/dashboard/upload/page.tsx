@@ -382,24 +382,17 @@ export default function UploadPage() {
         }
       }
 
-      const res = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          analysis,
-          context: ctx,
-          fileName: file.name,
-        }),
-      })
-
+      // v15 — Skip the /api/analyze server round-trip.
+      //
+      // Previously we POSTed the parsed analysis to /api/analyze just for
+      // acknowledgement. With 50MB XER files producing 5-10MB analysis JSON,
+      // that POST hit Vercel's serverless function body limit (4.5MB), causing
+      // FUNCTION_PAYLOAD_TOO_LARGE errors. The analysis is fully computed in
+      // the browser, so the server round-trip wasn't doing useful work — we
+      // just use the local analysis directly now.
       clearInterval(progInterval)
       setProgress(100)
-
-      if (!res.ok) {
-        const errText = await res.text().catch(() => 'Unknown error')
-        throw new Error(`Server error: ${errText}`)
-      }
-      const data = await res.json()
+      const data = { analysis }
       setResult(data)
 
       // ---------------------------------------------------------------------
