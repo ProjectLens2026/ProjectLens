@@ -1,7 +1,16 @@
 'use client'
-
 import { useState, useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
+
+// =============================================================================
+// HelpWidget — floating "Ask ControlLens" chat bubble.
+//
+// Day 8 changes:
+//   - Reads localStorage key `pl_show_chatbot` (default: true). When set to
+//     'false' (set from the Profile page toggle), the widget renders nothing.
+//   - Listens for the `pl_show_chatbot_changed` window event so the toggle
+//     hides/shows the widget instantly, without a page reload.
+// =============================================================================
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -10,6 +19,7 @@ interface ChatMessage {
 }
 
 const STORAGE_KEY = 'pl_help_chat_history'
+const SHOW_KEY = 'pl_show_chatbot'
 
 const SUGGESTED_QUESTIONS = [
   'How do I run a TIA?',
@@ -19,14 +29,37 @@ const SUGGESTED_QUESTIONS = [
   'How does ControlLens detect fragnets?',
 ]
 
+function readShowFlag(): boolean {
+  try {
+    const v = localStorage.getItem(SHOW_KEY)
+    if (v === null) return true // default: visible
+    return v !== 'false'
+  } catch {
+    return true
+  }
+}
+
 export default function HelpWidget() {
   const pathname = usePathname()
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [showChatbot, setShowChatbot] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Initialize show flag + listen for profile-page toggle changes
+  useEffect(() => {
+    setShowChatbot(readShowFlag())
+    function onChange() { setShowChatbot(readShowFlag()) }
+    window.addEventListener('pl_show_chatbot_changed', onChange)
+    window.addEventListener('storage', onChange) // also catch other-tab changes
+    return () => {
+      window.removeEventListener('pl_show_chatbot_changed', onChange)
+      window.removeEventListener('storage', onChange)
+    }
+  }, [])
 
   // Load chat history on mount
   useEffect(() => {
@@ -41,9 +74,7 @@ export default function HelpWidget() {
 
   // Save chat history on change
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(messages))
-    } catch {}
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(messages)) } catch {}
   }, [messages])
 
   // Auto-scroll to bottom when new messages arrive
@@ -69,6 +100,9 @@ export default function HelpWidget() {
     if (pathname.includes('/dashboard/tia')) return 'TIA Comparison'
     if (pathname.includes('/dashboard/trend')) return 'Trend Analysis'
     if (pathname.includes('/dashboard/upload')) return 'Upload New Version'
+    if (pathname.includes('/dashboard/report')) return 'Complete Report'
+    if (pathname.includes('/dashboard/profile')) return 'User Profile'
+    if (pathname.includes('/dashboard/help')) return 'Help'
     if (pathname.includes('/dashboard/projects')) return 'Projects'
     if (pathname.includes('/dashboard')) return 'Dashboard'
     return 'ControlLens'
@@ -76,18 +110,15 @@ export default function HelpWidget() {
 
   async function sendMessage(text: string) {
     if (!text.trim() || isLoading) return
-
     const userMessage: ChatMessage = {
       role: 'user',
       content: text.trim(),
       timestamp: Date.now(),
     }
-
     const newMessages = [...messages, userMessage]
     setMessages(newMessages)
     setInput('')
     setIsLoading(true)
-
     try {
       const res = await fetch('/api/help', {
         method: 'POST',
@@ -97,12 +128,10 @@ export default function HelpWidget() {
           currentPage: getCurrentPageContext(),
         }),
       })
-
       if (!res.ok) {
         const errData = await res.json().catch(() => ({ error: 'Unknown server error' }))
         throw new Error(errData.error || `HTTP ${res.status}`)
       }
-
       const data = await res.json()
       const assistantMessage: ChatMessage = {
         role: 'assistant',
@@ -122,17 +151,13 @@ export default function HelpWidget() {
     }
   }
 
-  function handleSend() {
-    sendMessage(input)
-  }
-
+  function handleSend() { sendMessage(input) }
   function handleKeyPress(e: React.KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
     }
   }
-
   function clearChat() {
     if (confirm('Clear this conversation?')) {
       setMessages([])
@@ -140,8 +165,10 @@ export default function HelpWidget() {
     }
   }
 
-  // Don't render on login page or landing page
+  // Hide on landing/login pages
   if (pathname === '/' || pathname === '/login') return null
+  // Hide if user toggled it off in Profile
+  if (!showChatbot) return null
 
   return (
     <>
@@ -157,12 +184,10 @@ export default function HelpWidget() {
           <span className="text-sm font-bold pr-1">Ask ControlLens</span>
         </button>
       )}
-
       {/* Chat panel */}
       {isOpen && (
         <div className="fixed bottom-6 right-6 z-40 bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col print:hidden"
              style={{ width: '380px', height: '560px', maxHeight: 'calc(100vh - 48px)' }}>
-          {/* Header */}
           <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 py-3 rounded-t-2xl flex items-center justify-between flex-shrink-0">
             <div>
               <div className="font-bold text-sm">Ask ControlLens</div>
@@ -187,8 +212,6 @@ export default function HelpWidget() {
               </button>
             </div>
           </div>
-
-          {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
             {messages.length === 0 ? (
               <div className="text-center py-6">
@@ -221,7 +244,6 @@ export default function HelpWidget() {
                 </div>
               ))
             )}
-
             {isLoading && (
               <div className="flex justify-start">
                 <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-sm px-4 py-2.5 text-sm text-slate-500">
@@ -233,11 +255,8 @@ export default function HelpWidget() {
                 </div>
               </div>
             )}
-
             <div ref={messagesEndRef} />
           </div>
-
-          {/* Input */}
           <div className="border-t border-slate-200 p-3 bg-white rounded-b-2xl flex-shrink-0">
             <div className="flex gap-2">
               <input

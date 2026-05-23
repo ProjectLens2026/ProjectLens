@@ -360,6 +360,8 @@ export default function Sidebar({ user }: SidebarProps) {
   const isArchiveActive = pathname.startsWith('/dashboard/archive')
   const isDeletedActive = pathname.startsWith('/dashboard/deleted')
   const isSettingsActive = pathname.startsWith('/dashboard/settings')
+  const isProfileActive = pathname.startsWith('/dashboard/profile')
+  const isHelpActive = pathname.startsWith('/dashboard/help')
   return (
     <aside
       className="flex-shrink-0 flex flex-col h-full no-print relative"
@@ -906,6 +908,26 @@ export default function Sidebar({ user }: SidebarProps) {
               {deletedCount}
             </span>
           )}
+        </Link>
+        <Link href="/dashboard/profile"
+          className={clsx(
+            'flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2',
+            isProfileActive
+              ? 'bg-blue-600/20 text-white border-blue-500'
+              : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
+          )}>
+          <span className="text-sm w-4 text-center">👤</span>
+          <span className="flex-1">My Profile</span>
+        </Link>
+        <Link href="/dashboard/help"
+          className={clsx(
+            'flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2',
+            isHelpActive
+              ? 'bg-blue-600/20 text-white border-blue-500'
+              : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
+          )}>
+          <span className="text-sm w-4 text-center">❔</span>
+          <span className="flex-1">Help & Contact</span>
         </Link>
         <Link href="/dashboard/settings"
           className={clsx(
