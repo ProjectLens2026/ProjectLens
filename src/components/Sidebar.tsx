@@ -344,6 +344,7 @@ export default function Sidebar({ user }: SidebarProps) {
   // Page lives at /dashboard/evm (standalone, not a tab inside Lens).
   const views = activeProject ? [
     { href: '/dashboard', icon: '⊞', label: 'Overview' },
+    { href: '/dashboard/report', icon: '📄', label: 'Complete Report' },
     { href: '/dashboard/lens', icon: '🔍', label: 'Schedule Analysis' },
     { href: '/dashboard/evm', icon: '💰', label: 'Earned Value' },
     { href: '/dashboard/risks', icon: '⚠', label: 'Risks & Issues' },
