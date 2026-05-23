@@ -26,6 +26,7 @@ import {
   addCalendarDays,
   Project, ScheduleVersion,
 } from '@/lib/projectStore'
+import { evmCumulative, fmtDollars, fmtRatio as fmtEvmRatio } from '@/lib/evm'
 
 export default function ReportPage() {
   const [project, setProject] = useState<Project | null>(null)
@@ -452,22 +453,58 @@ function ReportContent({ project, version }: { project: Project; version: Schedu
           )}
 
           {/* ============================================ EVM ============================================ */}
-          {evm && (
-            <section className="print-page-break px-10 py-10">
-              <SectionHeading num="10" title="Earned Value Management" />
-              <div className="grid grid-cols-4 gap-3 mb-4">
-                <Stat label="BAC" value={fmtMoney(evm.bac, evm.currency)} />
-                <Stat label="PV" value={fmtMoney(evm.pv, evm.currency)} />
-                <Stat label="EV" value={fmtMoney(evm.ev, evm.currency)} />
-                <Stat label="AC" value={fmtMoney(evm.ac, evm.currency)} />
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <Stat label="CPI" value={fmtRatio(evm.cpi)} accent={evm.cpi && evm.cpi < 1 ? 'red' : 'slate'} />
-                <Stat label="SPI" value={fmtRatio(evm.spi)} accent={evm.spi && evm.spi < 1 ? 'red' : 'slate'} />
-                <Stat label="EAC" value={fmtMoney(evm.eac, evm.currency)} />
-              </div>
-            </section>
-          )}
+          {evm && evm.totalBudget > 0 && Array.isArray(evm.months) && evm.months.length > 0 && (() => {
+            const cum = evmCumulative(evm.totalBudget, evm.months, undefined)
+            const currency = evm.currency || 'USD'
+            return (
+              <section className="print-page-break px-10 py-10">
+                <SectionHeading num="10" title="Earned Value Management" />
+                <p className="text-sm text-slate-600 mb-4">
+                  Cumulative values across {evm.months.length} project month{evm.months.length === 1 ? '' : 's'}.
+                  Total budget: {fmtDollars(evm.totalBudget, currency)}. Distribution: {evm.distributionMode}.
+                </p>
+                <SubHeading>Cumulative Values</SubHeading>
+                <div className="grid grid-cols-4 gap-3 mb-5">
+                  <Stat label="Total Budget (BAC)" value={fmtDollars(evm.totalBudget, currency)} />
+                  <Stat label="Planned Value (PV)" value={fmtDollars(cum.pv, currency)} />
+                  <Stat label="Earned Value (EV)" value={fmtDollars(cum.ev, currency)} />
+                  <Stat label="Actual Cost (AC)" value={cum.hasAnyActualCost ? fmtDollars(cum.ac, currency) : '— not tracked'} />
+                </div>
+                <SubHeading>Performance Indices</SubHeading>
+                <div className="grid grid-cols-4 gap-3 mb-5">
+                  <Stat label="SPI (Schedule)" value={fmtEvmRatio(cum.spi)} accent={cum.spi !== null && cum.spi < 1 ? 'red' : 'slate'} />
+                  <Stat label="CPI (Cost)" value={cum.hasAnyActualCost ? fmtEvmRatio(cum.cpi) : '— not tracked'} accent={cum.cpi !== null && cum.cpi < 1 ? 'red' : 'slate'} />
+                  <Stat label="Schedule Variance" value={fmtDollars(cum.sv, currency)} accent={cum.sv < 0 ? 'red' : 'slate'} />
+                  <Stat label="Cost Variance" value={cum.hasAnyActualCost && cum.cv !== null ? fmtDollars(cum.cv, currency) : '— not tracked'} accent={cum.cv !== null && cum.cv < 0 ? 'red' : 'slate'} />
+                </div>
+                <SubHeading>Monthly Breakdown</SubHeading>
+                <table className="w-full">
+                  <thead>
+                    <tr>
+                      <th style={{ width: '15%' }}>Month</th>
+                      <th style={{ width: '13%' }}>Planned %</th>
+                      <th style={{ width: '13%' }}>Earned %</th>
+                      <th style={{ width: '20%' }}>Planned Value</th>
+                      <th style={{ width: '20%' }}>Earned Value</th>
+                      <th style={{ width: '19%' }}>Actual Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {evm.months.map((m: any, i: number) => (
+                      <tr key={i} className="print-avoid-break">
+                        <td>{m.label}</td>
+                        <td>{(m.plannedPct || 0).toFixed(1)}%</td>
+                        <td>{(m.earnedPct || 0).toFixed(1)}%</td>
+                        <td>{fmtDollars((m.plannedPct / 100) * evm.totalBudget, currency)}</td>
+                        <td>{fmtDollars((m.earnedPct / 100) * evm.totalBudget, currency)}</td>
+                        <td>{m.actualCost ? fmtDollars(m.actualCost, currency) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+            )
+          })()}
 
           {/* ============================================ APPENDIX — IN PROGRESS ============================================ */}
           {inProgressList.length > 0 && (
@@ -644,18 +681,6 @@ function shortDate(d?: string): string {
     if (isNaN(dt.getTime())) return '—'
     return dt.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' })
   } catch { return '—' }
-}
-function fmtMoney(v: any, currency?: string): string {
-  if (v === undefined || v === null || v === '') return '—'
-  const n = typeof v === 'number' ? v : parseFloat(v)
-  if (!isFinite(n)) return '—'
-  const sym = currency === 'AED' ? 'AED ' : currency === 'EUR' ? '€' : '$'
-  return `${sym}${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
-}
-function fmtRatio(v: any): string {
-  if (v === undefined || v === null || v === '') return '—'
-  const n = typeof v === 'number' ? v : parseFloat(v)
-  return isFinite(n) ? n.toFixed(2) : '—'
 }
 function trunc(s: string | undefined, max: number): string {
   if (!s) return '—'
