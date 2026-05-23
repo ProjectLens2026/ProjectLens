@@ -23,6 +23,10 @@ import {
   updateProjectContractDatesInSupabase,
   updateProjectEvmInSupabase,
   updateProjectStatusInSupabase,
+  deleteProjectFromSupabase,
+  deleteVersionFromSupabase,
+  renameProjectInSupabase,
+  moveVersionInSupabase,
 } from './supabase/db'
 
 // =============================================================================
@@ -890,6 +894,14 @@ export function permanentlyDeleteProject(id: string) {
   idbDeleteProject(id).catch(err => {
     console.error('[ControlLens] permanentlyDeleteProject: IndexedDB delete failed:', err)
   })
+  // v15 — also remove from Supabase (project row + cascade versions/rfis/co +
+  // best-effort storage cleanup). If this fails, the project will reappear
+  // on next hydrate from cloud — so it's important.
+  deleteProjectFromSupabase(id).then(ok => {
+    if (!ok) console.warn('[ControlLens] permanentlyDeleteProject: Supabase delete failed for', id)
+  }).catch(err => {
+    console.error('[ControlLens] permanentlyDeleteProject: Supabase error:', err)
+  })
   if (getActiveProjectId() === id) {
     const fallback = _projects.find(p => getProjectStatus(p) !== 'Deleted' && getProjectStatus(p) !== 'Archived')
     setActiveProjectId(fallback?.id || null)
@@ -908,6 +920,10 @@ export function deleteVersion(projectId: string, versionId: string) {
   notifyListeners()
   idbPutProject(updated).catch(err => {
     console.error('[ControlLens] deleteVersion: IndexedDB persist failed:', err)
+  })
+  // v15 — remove version row + storage files from Supabase
+  deleteVersionFromSupabase(projectId, versionId).catch(err => {
+    console.error('[ControlLens] deleteVersion: Supabase failed:', err)
   })
   if (getActiveVersionId() === versionId) {
     setActiveVersionId(null)
@@ -942,6 +958,10 @@ export function moveVersionToProject(sourceProjectId: string, versionId: string,
   Promise.all([idbPutProject(newSource), idbPutProject(newTarget)]).catch(err => {
     console.error('[ControlLens] moveVersionToProject: IndexedDB persist failed:', err)
   })
+  // v15 — sync version's new parent to Supabase
+  moveVersionInSupabase(versionId, targetProjectId).catch(err => {
+    console.error('[ControlLens] moveVersionToProject: Supabase failed:', err)
+  })
   if (getActiveVersionId() === versionId) {
     setActiveVersionId(null)
   }
@@ -961,6 +981,10 @@ export function renameProject(id: string, newName: string, projectId?: string) {
   notifyListeners()
   idbPutProject(updated).catch(err => {
     console.error('[ControlLens] renameProject: IndexedDB persist failed:', err)
+  })
+  // v15 — sync rename to Supabase
+  renameProjectInSupabase(id, newName, projectId).catch(err => {
+    console.error('[ControlLens] renameProject: Supabase failed:', err)
   })
 }
 

@@ -503,5 +503,117 @@ export async function updateProjectStatusInSupabase(
     console.error('[db.updateStatus] failed:', error.message)
     return false
   }
+  console.log('[db] updated status', projectId, '→', toDbStatus(status))
+  return true
+}
+
+// =============================================================================
+// WRITE — hard delete project (with cascade + storage cleanup)
+// =============================================================================
+
+export async function deleteProjectFromSupabase(projectId: string): Promise<boolean> {
+  const supabase = createClient()
+  const orgId = await ensureUserHasOrg()
+  if (!orgId) return false
+  const cloudId = toUuid(projectId)
+
+  // Best-effort: remove all storage files under this project's folder so
+  // we don't orphan raw XER + analysis JSON blobs in the bucket.
+  try {
+    const folder = `${orgId}/${cloudId}/`
+    const { data: files } = await supabase.storage.from(BUCKET).list(folder, { limit: 1000 })
+    if (files && files.length > 0) {
+      const paths = files.map(f => folder + f.name)
+      await supabase.storage.from(BUCKET).remove(paths)
+      console.log('[db] removed', paths.length, 'storage file(s) for project', cloudId)
+    }
+  } catch (e) {
+    console.warn('[db.deleteProject] storage cleanup skipped:', e)
+  }
+
+  // Delete the project row. Foreign key cascade on schedule_versions / rfis
+  // /change_orders should drop those automatically.
+  const { error } = await supabase.from('projects').delete().eq('id', cloudId)
+  if (error) {
+    console.error('[db.deleteProject] failed:', error.message)
+    return false
+  }
+  console.log('[db] permanently deleted project', cloudId)
+  return true
+}
+
+// =============================================================================
+// WRITE — delete a single version (with its storage files)
+// =============================================================================
+
+export async function deleteVersionFromSupabase(
+  projectIdLocal: string,
+  versionIdLocal: string,
+): Promise<boolean> {
+  const supabase = createClient()
+  const orgId = await ensureUserHasOrg()
+  if (!orgId) return false
+  const cloudProjectId = toUuid(projectIdLocal)
+  const cloudVersionId = toUuid(versionIdLocal)
+
+  // Best-effort cleanup of storage files for this version
+  try {
+    const paths = [
+      `${orgId}/${cloudProjectId}/${cloudVersionId}.xer`,
+      `${orgId}/${cloudProjectId}/${cloudVersionId}.analysis.json`,
+    ]
+    await supabase.storage.from(BUCKET).remove(paths)
+  } catch (e) {
+    console.warn('[db.deleteVersion] storage cleanup skipped:', e)
+  }
+
+  const { error } = await supabase.from('schedule_versions').delete().eq('id', cloudVersionId)
+  if (error) {
+    console.error('[db.deleteVersion] failed:', error.message)
+    return false
+  }
+  console.log('[db] deleted version', cloudVersionId)
+  return true
+}
+
+// =============================================================================
+// WRITE — rename project + update project_code
+// =============================================================================
+
+export async function renameProjectInSupabase(
+  projectId: string,
+  newName: string,
+  newProjectCode?: string,
+): Promise<boolean> {
+  const supabase = createClient()
+  const update: any = { name: newName, updated_at: new Date().toISOString() }
+  if (newProjectCode !== undefined) update.project_code = newProjectCode
+  const { error } = await supabase.from('projects').update(update).eq('id', toUuid(projectId))
+  if (error) {
+    console.error('[db.rename] failed:', error.message)
+    return false
+  }
+  console.log('[db] renamed project', projectId, '→', newName)
+  return true
+}
+
+// =============================================================================
+// WRITE — move version to a different project
+// =============================================================================
+
+export async function moveVersionInSupabase(
+  versionIdLocal: string,
+  newProjectIdLocal: string,
+): Promise<boolean> {
+  const supabase = createClient()
+  const { error } = await supabase
+    .from('schedule_versions')
+    .update({ project_id: toUuid(newProjectIdLocal) })
+    .eq('id', toUuid(versionIdLocal))
+  if (error) {
+    console.error('[db.moveVersion] failed:', error.message)
+    return false
+  }
+  console.log('[db] moved version', versionIdLocal, '→ project', newProjectIdLocal)
   return true
 }
