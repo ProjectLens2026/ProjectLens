@@ -203,12 +203,20 @@ export function usePermissions(): Permissions {
             assignPM: ownerOrAdmin,
             uploadSchedule: ownerOrAdminOrPM,
             editContractDates: ownerOrAdminOrPM,
-            softDeleteProject: ownerOrAdminOrPM,
-            restoreProject: ownerOrAdminOrPM,
-            archiveProject: ownerOrAdminOrPM,
+            // Tightened Day 9: only Owner/Admin can delete projects (soft or
+            // hard). PMs are operational — they work on projects but cannot
+            // remove them. The whole project is too big to risk.
+            softDeleteProject: ownerOrAdmin,
+            restoreProject: ownerOrAdmin,
+            archiveProject: ownerOrAdmin,
             hardDeleteProject: ownerOrAdmin,
+            // Versions: PMs CAN delete individual versions (mistakes happen
+            // during uploads). The UI already blocks deleting the last version
+            // (project.versions.length > 1), so PMs can never empty a project.
             deleteVersion: ownerOrAdminOrPM,
             renameProject: ownerOrAdminOrPM,
+            // PMs can invite Viewers to projects they have access to (matches
+            // Phase 3D Team modal behavior).
             inviteToProject: ownerOrAdminOrPM,
           },
         })

@@ -637,13 +637,19 @@ export default function Sidebar({ user }: SidebarProps) {
                           )
                         })}
                         <div className="my-1 border-t border-white/8" />
-                        <button
-                          onClick={() => {
-                            setConfirmDeleteProjectId(p.id)
-                            setOpenActionMenu(null)
-                          }}
-                          className="w-full text-left px-3 py-1.5 text-[11px] text-red-400 hover:bg-white/10 flex items-center gap-2"
-                        ><span>🗑️</span> Delete</button>
+                        {perms.can.softDeleteProject ? (
+                          <button
+                            onClick={() => {
+                              setConfirmDeleteProjectId(p.id)
+                              setOpenActionMenu(null)
+                            }}
+                            className="w-full text-left px-3 py-1.5 text-[11px] text-red-400 hover:bg-white/10 flex items-center gap-2"
+                          ><span>🗑️</span> Delete</button>
+                        ) : (
+                          <div className="px-3 py-1.5 text-[10px] text-white/40 italic">
+                            🔒 Delete is Admin-only
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -836,7 +842,7 @@ export default function Sidebar({ user }: SidebarProps) {
                                 onClick={e => e.stopPropagation()}
                                 className="absolute right-0 top-6 z-30 bg-slate-800 border border-white/10 rounded-md shadow-xl py-1 min-w-[140px]"
                               >
-                                {projects.filter(op => op.id !== p.id && getProjectStatus(op) !== 'Deleted').length > 0 && (
+                                {perms.can.hardDeleteProject && projects.filter(op => op.id !== p.id && getProjectStatus(op) !== 'Deleted').length > 0 && (
                                   <button
                                     onClick={() => {
                                       setMovePickerForVersionId(v.id)
@@ -845,7 +851,7 @@ export default function Sidebar({ user }: SidebarProps) {
                                     className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-white/10"
                                   >⇄ Move to…</button>
                                 )}
-                                {p.versions.length > 1 && (
+                                {perms.can.deleteVersion && p.versions.length > 1 && (
                                   <button
                                     onClick={() => {
                                       setConfirmDeleteVersionId(v.id)
@@ -853,6 +859,11 @@ export default function Sidebar({ user }: SidebarProps) {
                                     }}
                                     className="w-full text-left px-3 py-1.5 text-[11px] text-red-400 hover:bg-white/10"
                                   >🗑️ Delete</button>
+                                )}
+                                {!perms.can.deleteVersion && (
+                                  <div className="px-3 py-1.5 text-[10px] text-white/40 italic">
+                                    🔒 Viewer only — cannot delete
+                                  </div>
                                 )}
                               </div>
                             )}
