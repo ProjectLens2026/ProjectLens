@@ -13,16 +13,18 @@ import {
   Project, ScheduleVersion, ProjectStatus,
 } from '@/lib/projectStore'
 import { createClient } from '@/lib/supabase/client'
+import { usePermissions, roleLabel, roleBadgeColor } from '@/lib/usePermissions'
 interface SidebarProps {
   user?: { name: string; role: string; initials: string; company: string }
 }
-const DEMO_MODE = true
-const DEMO_USER = {
-  name: 'Mike Anderson',
-  role: 'Admin',
-  initials: 'MA',
-  company: 'ControlLens',
-}
+
+// =============================================================================
+// As of Day 9 (Phase 3A), the sidebar reads the actual signed-in user from
+// Supabase via usePermissions(). The DEMO_MODE / DEMO_USER (Mike Anderson)
+// scaffolding is gone. The `user` prop is still accepted for backward
+// compatibility but is ignored when a real signed-in user is available.
+// =============================================================================
+
 const STATUS_OPTIONS: ProjectStatus[] = ['Active', 'Completed', 'On Hold', 'Archived']
 export default function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname()
@@ -171,7 +173,21 @@ export default function Sidebar({ user }: SidebarProps) {
     })
   }
 
-  const displayUser = DEMO_MODE ? DEMO_USER : user
+  // Real signed-in user from Supabase (Day 9). Falls back to the prop if
+  // provided by a parent (legacy) and there's no auth yet.
+  const perms = usePermissions()
+  const displayUser = perms.user
+    ? {
+        name: perms.user.displayName,
+        role: roleLabel(perms.user.orgRole),
+        initials: perms.user.initials,
+        company: perms.user.company || perms.user.orgName || '',
+        email: perms.user.email,
+        roleKey: perms.user.orgRole,
+      }
+    : user
+      ? { ...user, email: '', roleKey: null as any }
+      : null
   const showTeamMode = !!displayUser?.company
   useEffect(() => {
     migrateLegacyData()
@@ -360,8 +376,6 @@ export default function Sidebar({ user }: SidebarProps) {
   const isArchiveActive = pathname.startsWith('/dashboard/archive')
   const isDeletedActive = pathname.startsWith('/dashboard/deleted')
   const isSettingsActive = pathname.startsWith('/dashboard/settings')
-  const isProfileActive = pathname.startsWith('/dashboard/profile')
-  const isHelpActive = pathname.startsWith('/dashboard/help')
   return (
     <aside
       className="flex-shrink-0 flex flex-col h-full no-print relative"
@@ -392,13 +406,27 @@ export default function Sidebar({ user }: SidebarProps) {
         </div>
       )}
       {displayUser && (
-        <div className="px-4 py-2.5 border-b border-white/5 flex-shrink-0 flex items-center gap-2.5">
+        <div className="px-4 py-2.5 border-b border-white/5 flex-shrink-0 flex items-center gap-2.5" title={(displayUser as any).email || ''}>
           <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
             {displayUser.initials}
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-white text-xs font-semibold truncate">{displayUser.name}</div>
-            <div className="text-white/40 text-[10px] truncate">{displayUser.role}</div>
+            <div className="flex items-center gap-1.5">
+              {(displayUser as any).roleKey ? (
+                <span className={clsx(
+                  'text-[8px] font-bold px-1.5 py-px rounded-full uppercase tracking-wide flex-shrink-0',
+                  roleBadgeColor((displayUser as any).roleKey)
+                )}>
+                  {displayUser.role}
+                </span>
+              ) : (
+                <span className="text-white/40 text-[10px] truncate">{displayUser.role}</span>
+              )}
+              {(displayUser as any).email && (
+                <span className="text-white/40 text-[10px] truncate flex-1 min-w-0">{(displayUser as any).email}</span>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -908,26 +936,6 @@ export default function Sidebar({ user }: SidebarProps) {
               {deletedCount}
             </span>
           )}
-        </Link>
-        <Link href="/dashboard/profile"
-          className={clsx(
-            'flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2',
-            isProfileActive
-              ? 'bg-blue-600/20 text-white border-blue-500'
-              : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
-          )}>
-          <span className="text-sm w-4 text-center">👤</span>
-          <span className="flex-1">My Profile</span>
-        </Link>
-        <Link href="/dashboard/help"
-          className={clsx(
-            'flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2',
-            isHelpActive
-              ? 'bg-blue-600/20 text-white border-blue-500'
-              : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
-          )}>
-          <span className="text-sm w-4 text-center">❔</span>
-          <span className="flex-1">Help & Contact</span>
         </Link>
         <Link href="/dashboard/settings"
           className={clsx(
