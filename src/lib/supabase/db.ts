@@ -631,3 +631,297 @@ export async function moveVersionInSupabase(
   console.log('[db] moved version', versionIdLocal, '→ project', newProjectIdLocal)
   return true
 }
+
+// =============================================================================
+// Phase 3C — Members + Invitations helpers
+// =============================================================================
+
+export interface OrgMember {
+  user_id: string
+  email: string
+  name: string
+  role: string
+  joined_at: string
+  is_self: boolean
+}
+
+export interface Invitation {
+  id: string
+  email: string
+  role: string
+  token: string
+  expires_at: string
+  created_at: string
+  invited_by_email: string
+}
+
+/**
+ * loadOrgMembers — list everyone in the user's primary org. Used by the
+ * Settings → Members tab.
+ */
+export async function loadOrgMembers(): Promise<OrgMember[]> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+
+  const orgId = await ensureUserHasOrg()
+  if (!orgId) return []
+
+  const { data: members, error } = await supabase
+    .from('organization_members')
+    .select('user_id, role, joined_at')
+    .eq('org_id', orgId)
+    .order('joined_at', { ascending: true })
+
+  if (error || !members) {
+    console.error('[db.loadOrgMembers] failed:', error?.message)
+    return []
+  }
+
+  // Fetch profile data for each member
+  const ids = members.map(m => m.user_id)
+  const { data: profiles } = await supabase
+    .from('profiles')
+    .select('id, email, name')
+    .in('id', ids)
+
+  const profileMap = new Map<string, { email: string; name: string }>()
+  for (const p of (profiles || [])) {
+    profileMap.set(p.id, { email: p.email || '', name: p.name || '' })
+  }
+
+  return members.map(m => {
+    const profile = profileMap.get(m.user_id) || { email: '', name: '' }
+    return {
+      user_id: m.user_id,
+      email: profile.email,
+      name: profile.name || profile.email.split('@')[0] || 'Unknown',
+      role: m.role,
+      joined_at: m.joined_at,
+      is_self: m.user_id === user.id,
+    }
+  })
+}
+
+/**
+ * loadPendingInvitations — invitations that haven't been accepted or revoked,
+ * and haven't expired yet. Shown in Settings → Invitations.
+ */
+export async function loadPendingInvitations(): Promise<Invitation[]> {
+  const supabase = createClient()
+  const orgId = await ensureUserHasOrg()
+  if (!orgId) return []
+
+  const { data: invitations, error } = await supabase
+    .from('invitations')
+    .select('id, email, role, token, expires_at, created_at, invited_by')
+    .eq('org_id', orgId)
+    .is('accepted_at', null)
+    .is('revoked_at', null)
+    .gt('expires_at', new Date().toISOString())
+    .order('created_at', { ascending: false })
+
+  if (error || !invitations) {
+    console.error('[db.loadPendingInvitations] failed:', error?.message)
+    return []
+  }
+
+  // Map inviter user_id → email
+  const inviterIds = Array.from(new Set(invitations.map(i => i.invited_by).filter(Boolean)))
+  const { data: inviters } = inviterIds.length > 0
+    ? await supabase.from('profiles').select('id, email').in('id', inviterIds)
+    : { data: [] }
+  const inviterMap = new Map<string, string>()
+  for (const i of (inviters || [])) inviterMap.set(i.id, i.email || '')
+
+  return invitations.map(i => ({
+    id: i.id,
+    email: i.email,
+    role: i.role,
+    token: i.token,
+    expires_at: i.expires_at,
+    created_at: i.created_at,
+    invited_by_email: inviterMap.get(i.invited_by) || '',
+  }))
+}
+
+/**
+ * createInvitation — admin generates a fresh invitation. Returns the
+ * acceptance URL (https://app.control-lens.com/auth/accept-invite?token=...)
+ * which the admin pastes into an email/Slack/WhatsApp to the recipient.
+ *
+ * Default expiry: 7 days.
+ */
+export async function createInvitation(opts: {
+  email: string
+  role: string
+}): Promise<{ ok: boolean; token?: string; acceptUrl?: string; error?: string }> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { ok: false, error: 'Not signed in' }
+
+  const orgId = await ensureUserHasOrg()
+  if (!orgId) return { ok: false, error: 'No active org' }
+
+  const normalizedEmail = opts.email.trim().toLowerCase()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    return { ok: false, error: 'Invalid email address' }
+  }
+
+  // Generate a 36-char UUID token
+  const token = typeof crypto !== 'undefined' && (crypto as any).randomUUID
+    ? (crypto as any).randomUUID()
+    : Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
+
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+
+  const { error } = await supabase
+    .from('invitations')
+    .insert({
+      org_id: orgId,
+      email: normalizedEmail,
+      role: opts.role,
+      token,
+      invited_by: user.id,
+      expires_at: expiresAt,
+    })
+
+  if (error) {
+    console.error('[db.createInvitation] failed:', error)
+    return { ok: false, error: error.message }
+  }
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.control-lens.com'
+  return {
+    ok: true,
+    token,
+    acceptUrl: `${origin}/auth/accept-invite?token=${encodeURIComponent(token)}`,
+  }
+}
+
+/**
+ * revokeInvitation — admin cancels a pending invitation by marking it revoked.
+ */
+export async function revokeInvitation(invitationId: string): Promise<boolean> {
+  const supabase = createClient()
+  const { error } = await supabase
+    .from('invitations')
+    .update({ revoked_at: new Date().toISOString() })
+    .eq('id', invitationId)
+  if (error) {
+    console.error('[db.revokeInvitation] failed:', error.message)
+    return false
+  }
+  return true
+}
+
+/**
+ * lookupInvitationByToken — used by /auth/accept-invite to validate a token
+ * BEFORE the user signs up. This must work without authentication, so the
+ * RLS policy on invitations must allow anonymous SELECT (filtered by token
+ * means it's a no-op lookup if the token is invalid).
+ */
+export interface InvitationLookup {
+  id: string
+  email: string
+  role: string
+  org_id: string
+  org_name: string
+}
+
+export async function lookupInvitationByToken(token: string): Promise<InvitationLookup | null> {
+  const supabase = createClient()
+
+  const { data: inv, error } = await supabase
+    .from('invitations')
+    .select('id, email, role, org_id')
+    .eq('token', token)
+    .is('accepted_at', null)
+    .is('revoked_at', null)
+    .gt('expires_at', new Date().toISOString())
+    .maybeSingle()
+
+  if (error || !inv) {
+    if (error) console.error('[db.lookupInvitation] failed:', error.message)
+    return null
+  }
+
+  // Get org name
+  const { data: org } = await supabase
+    .from('organizations')
+    .select('name')
+    .eq('id', inv.org_id)
+    .maybeSingle()
+
+  return {
+    id: inv.id,
+    email: inv.email,
+    role: inv.role,
+    org_id: inv.org_id,
+    org_name: org?.name || 'Unknown Organization',
+  }
+}
+
+/**
+ * acceptInvitation — called from the accept-invite page after the user has
+ * been signed up. Creates the profile row + organization_members row, then
+ * marks the invitation accepted.
+ */
+export async function acceptInvitation(opts: {
+  invitationId: string
+  orgId: string
+  role: string
+  userId: string
+  email: string
+  fullName: string
+}): Promise<{ ok: boolean; error?: string }> {
+  const supabase = createClient()
+
+  // 1. Create profile (upsert in case it already exists from auto-trigger)
+  const { error: profileErr } = await supabase
+    .from('profiles')
+    .upsert({
+      id: opts.userId,
+      email: opts.email,
+      name: opts.fullName,
+    }, { onConflict: 'id' })
+
+  if (profileErr) {
+    console.error('[db.acceptInvitation] profile insert failed:', profileErr)
+    return { ok: false, error: `Profile failed: ${profileErr.message}` }
+  }
+
+  // 2. Join the org
+  const { error: memberErr } = await supabase
+    .from('organization_members')
+    .insert({
+      org_id: opts.orgId,
+      user_id: opts.userId,
+      role: opts.role,
+      invited_by: null,
+    })
+
+  if (memberErr) {
+    // If they're already a member, that's fine
+    if (memberErr.code !== '23505') { // 23505 = unique constraint violation
+      console.error('[db.acceptInvitation] org_member insert failed:', memberErr)
+      return { ok: false, error: `Org join failed: ${memberErr.message}` }
+    }
+  }
+
+  // 3. Mark invitation as accepted
+  const { error: updateErr } = await supabase
+    .from('invitations')
+    .update({
+      accepted_at: new Date().toISOString(),
+      accepted_by: opts.userId,
+    })
+    .eq('id', opts.invitationId)
+
+  if (updateErr) {
+    console.error('[db.acceptInvitation] mark accepted failed:', updateErr)
+    // Don't fail — the join succeeded, this is just metadata
+  }
+
+  return { ok: true }
+}
