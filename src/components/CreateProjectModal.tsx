@@ -78,7 +78,7 @@ export default function CreateProjectModal({
     setError('')
   }
 
-  function handleCreate() {
+  async function handleCreate() {
     setError('')
 
     const trimmedName = name.trim()
@@ -114,18 +114,30 @@ export default function CreateProjectModal({
           }
         : undefined
 
-      createEmptyProject({
+      const result = await createEmptyProject({
         name: trimmedName,
         projectId: strictId,
         owner: owner.trim() || undefined,
         contractDates,
       })
 
-      onClose()
+      if (!result.cloudOk) {
+        // Cloud write failed — show error in modal, stay open so user knows
+        // it didn't save to Supabase. The local copy still exists, but
+        // other devices won't see it.
+        setError(
+          'Project created locally but failed to save to the cloud. ' +
+          (result.error || 'See browser console for details.') +
+          ' Reload the page to see if it appears.'
+        )
+        setSubmitting(false)
+        return
+      }
 
+      // Both local + cloud succeeded
+      onClose()
       if (redirectTo === 'upload') router.push('/dashboard/upload')
       else if (redirectTo === 'dashboard') router.push('/dashboard')
-      // 'none' = stay where we are
     } catch (e: any) {
       setError(e?.message || 'Failed to create project.')
       setSubmitting(false)

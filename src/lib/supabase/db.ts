@@ -322,7 +322,21 @@ export async function insertProjectToSupabase(project: Project): Promise<boolean
     })
 
   if (projErr) {
-    console.error('[db.insertProject] project row failed:', projErr.message)
+    console.error('[db.insertProject] project row failed:', {
+      message: projErr.message,
+      code: (projErr as any).code,
+      details: (projErr as any).details,
+      hint: (projErr as any).hint,
+      full: projErr,
+      attempted: {
+        id: cloudProjectId,
+        org_id: orgId,
+        project_code: project.projectId,
+        name: project.name,
+        status: toDbStatus(project.status),
+        contract_dates: project.contractDates,
+      },
+    })
     return false
   }
   console.log('[db] inserted project', cloudProjectId, project.projectId)

@@ -738,13 +738,16 @@ export function createProject(opts: {
 //
 // The project appears in sidebars with an "Awaiting baseline" pill until the
 // first version is uploaded.
+//
+// Returns a Promise<{ project, cloudOk, error? }> so the caller (modal) can
+// SHOW the user an error if the cloud sync failed. No more silent failures.
 // =============================================================================
-export function createEmptyProject(opts: {
+export async function createEmptyProject(opts: {
   name: string
   projectId: string
   owner?: string
   contractDates?: ContractDates
-}): Project {
+}): Promise<{ project: Project; cloudOk: boolean; error?: string }> {
   const project: Project = {
     id: 'proj_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     projectId: opts.projectId,
@@ -758,24 +761,31 @@ export function createEmptyProject(opts: {
     rfis: [],
     changeOrders: [],
   }
+  console.log('[ControlLens] createEmptyProject: creating', project.id, project.projectId, project.name)
   _projects = [project, ..._projects]
   notifyListeners()
+  // Persist to IndexedDB synchronously (fire+forget — local always works)
   idbPutProject(project).catch(err => {
     console.error('[ControlLens] createEmptyProject: IndexedDB persist failed:', err)
   })
-  // Push to Supabase so other org members (assigned PMs) see it too. The
-  // insertProjectToSupabase function tolerates project.versions being empty —
-  // it'll just skip the version insert loop.
-  insertProjectToSupabase(project).then(ok => {
-    if (!ok) console.warn('[ControlLens] createEmptyProject: Supabase persist failed (will retry next session)')
-  }).catch(err => {
-    console.error('[ControlLens] createEmptyProject: Supabase persist error:', err)
-  })
+  // Await Supabase write so we know if it failed.
+  let cloudOk = false
+  let errorMsg: string | undefined
+  try {
+    cloudOk = await insertProjectToSupabase(project)
+    if (!cloudOk) {
+      errorMsg = 'Supabase insert returned false. Check the browser console for the underlying [db.insertProject] error.'
+      console.error('[ControlLens] createEmptyProject: Supabase write returned false for', project.id)
+    } else {
+      console.log('[ControlLens] createEmptyProject: Supabase write succeeded for', project.id)
+    }
+  } catch (e: any) {
+    errorMsg = e?.message || String(e)
+    console.error('[ControlLens] createEmptyProject: Supabase write threw:', e)
+  }
   setActiveProjectId(project.id)
-  // No active version yet (shell has none). The upload page will pre-fill
-  // the Name + Project ID + dates and let the PM upload the baseline.
   setActiveVersionId(null)
-  return project
+  return { project, cloudOk, error: errorMsg }
 }
 
 export function addVersionToProject(projectId: string, version: ScheduleVersion): Project | null {
