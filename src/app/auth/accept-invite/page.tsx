@@ -25,7 +25,7 @@
 // instead of signing up, then join the org.
 // =============================================================================
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
@@ -36,7 +36,21 @@ import {
 
 type ViewState = 'loading' | 'invalid' | 'form' | 'submitting' | 'check_email' | 'success'
 
+// Next.js requires useSearchParams() to be inside a Suspense boundary for
+// pages that opt into static generation (which is default for app router).
 export default function AcceptInvitePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
+        <div className="text-sm text-white/70">Loading...</div>
+      </div>
+    }>
+      <AcceptInviteInner />
+    </Suspense>
+  )
+}
+
+function AcceptInviteInner() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const token = searchParams.get('token') || ''
