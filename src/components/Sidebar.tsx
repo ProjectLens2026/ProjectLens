@@ -278,21 +278,42 @@ export default function Sidebar({ user }: SidebarProps) {
     setEditingProjectId(null)
   }
   function handleDeleteProject(id: string) {
+    if (!perms.can.softDeleteProject) {
+      console.warn('[Sidebar] handleDeleteProject blocked — no softDeleteProject permission')
+      setConfirmDeleteProjectId(null)
+      return
+    }
     deleteProject(id)
     refresh()
     setConfirmDeleteProjectId(null)
   }
   function handleDeleteVersion(projectId: string, versionId: string) {
+    if (!perms.can.deleteVersion) {
+      console.warn('[Sidebar] handleDeleteVersion blocked — no deleteVersion permission')
+      setConfirmDeleteVersionId(null)
+      return
+    }
     deleteVersion(projectId, versionId)
     refresh()
     setConfirmDeleteVersionId(null)
   }
   function handleMoveVersion(fromProjectId: string, versionId: string, toProjectId: string) {
+    if (!perms.can.hardDeleteProject) {
+      console.warn('[Sidebar] handleMoveVersion blocked — no hardDeleteProject permission')
+      setMovePickerForVersionId(null)
+      return
+    }
     moveVersionToProject(fromProjectId, versionId, toProjectId)
     setMovePickerForVersionId(null)
     refresh()
   }
   function handleSetStatus(projectId: string, status: ProjectStatus) {
+    // Phase 3D — defense in depth: block if no permission, even if UI was bypassed
+    if (!perms.can.archiveProject) {
+      console.warn('[Sidebar] handleSetStatus blocked — no archiveProject permission')
+      setOpenActionMenu(null)
+      return
+    }
     if (status === 'Active') {
       setProjectStatus(projectId, status)
       setOpenActionMenu(null)
@@ -605,50 +626,62 @@ export default function Sidebar({ user }: SidebarProps) {
                         onClick={e => e.stopPropagation()}
                         className="absolute right-0 top-7 z-30 bg-slate-800 border border-white/10 rounded-md shadow-xl py-1 min-w-[155px]"
                       >
-                        <button
-                          onClick={() => startRename(p)}
-                          className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-white/10 flex items-center gap-2"
-                        ><span>✏️</span> Rename</button>
+                        {perms.can.renameProject && (
+                          <button
+                            onClick={() => startRename(p)}
+                            className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-white/10 flex items-center gap-2"
+                          ><span>✏️</span> Rename</button>
+                        )}
                         <button
                           onClick={() => { setTeamModalForProject(p); setOpenActionMenu(null) }}
                           className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-white/10 flex items-center gap-2"
                         ><span>👥</span> Team</button>
-                        <div className="my-1 border-t border-white/8" />
-                        <div className="px-3 py-1 text-[8px] font-bold text-white/40 uppercase tracking-widest">Status</div>
-                        {STATUS_OPTIONS.map(s => {
-                          const isCurrent = status === s
-                          return (
+                        {perms.can.archiveProject && (
+                          <>
+                            <div className="my-1 border-t border-white/8" />
+                            <div className="px-3 py-1 text-[8px] font-bold text-white/40 uppercase tracking-widest">Status</div>
+                            {STATUS_OPTIONS.map(s => {
+                              const isCurrent = status === s
+                              return (
+                                <button
+                                  key={s}
+                                  onClick={() => handleSetStatus(p.id, s)}
+                                  className={clsx(
+                                    'w-full text-left px-3 py-1.5 text-[11px] hover:bg-white/10 flex items-center gap-2',
+                                    isCurrent ? 'text-white' : 'text-white/70'
+                                  )}
+                                >
+                                  <span className={clsx(
+                                    'w-3 h-3 rounded-full border-2 flex-shrink-0 flex items-center justify-center',
+                                    isCurrent ? 'border-blue-500' : 'border-white/30'
+                                  )}>
+                                    {isCurrent && <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />}
+                                  </span>
+                                  {s}
+                                </button>
+                              )
+                            })}
+                          </>
+                        )}
+                        {perms.can.softDeleteProject && (
+                          <>
+                            <div className="my-1 border-t border-white/8" />
                             <button
-                              key={s}
-                              onClick={() => handleSetStatus(p.id, s)}
-                              className={clsx(
-                                'w-full text-left px-3 py-1.5 text-[11px] hover:bg-white/10 flex items-center gap-2',
-                                isCurrent ? 'text-white' : 'text-white/70'
-                              )}
-                            >
-                              <span className={clsx(
-                                'w-3 h-3 rounded-full border-2 flex-shrink-0 flex items-center justify-center',
-                                isCurrent ? 'border-blue-500' : 'border-white/30'
-                              )}>
-                                {isCurrent && <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />}
-                              </span>
-                              {s}
-                            </button>
-                          )
-                        })}
-                        <div className="my-1 border-t border-white/8" />
-                        {perms.can.softDeleteProject ? (
-                          <button
-                            onClick={() => {
-                              setConfirmDeleteProjectId(p.id)
-                              setOpenActionMenu(null)
-                            }}
-                            className="w-full text-left px-3 py-1.5 text-[11px] text-red-400 hover:bg-white/10 flex items-center gap-2"
-                          ><span>🗑️</span> Delete</button>
-                        ) : (
-                          <div className="px-3 py-1.5 text-[10px] text-white/40 italic">
-                            🔒 Delete is Admin-only
-                          </div>
+                              onClick={() => {
+                                setConfirmDeleteProjectId(p.id)
+                                setOpenActionMenu(null)
+                              }}
+                              className="w-full text-left px-3 py-1.5 text-[11px] text-red-400 hover:bg-white/10 flex items-center gap-2"
+                            ><span>🗑️</span> Delete</button>
+                          </>
+                        )}
+                        {!perms.can.archiveProject && !perms.can.softDeleteProject && (
+                          <>
+                            <div className="my-1 border-t border-white/8" />
+                            <div className="px-3 py-1.5 text-[10px] text-white/40 italic">
+                              🔒 Status & delete are Admin-only
+                            </div>
+                          </>
                         )}
                       </div>
                     )}
