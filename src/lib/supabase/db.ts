@@ -925,3 +925,368 @@ export async function acceptInvitation(opts: {
 
   return { ok: true }
 }
+
+// =============================================================================
+// Phase 3D — Role management + Project sharing
+// =============================================================================
+
+/**
+ * updateOrgMemberRole — Owner/Admin can change any member's role within
+ * the org. Refuses to demote the last Owner (keeps at least one).
+ */
+export async function updateOrgMemberRole(opts: {
+  userId: string
+  newRole: 'owner' | 'admin' | 'pm' | 'viewer'
+}): Promise<{ ok: boolean; error?: string }> {
+  const supabase = createClient()
+  const orgId = await ensureUserHasOrg()
+  if (!orgId) return { ok: false, error: 'No active org' }
+
+  // Safety: if demoting an Owner, ensure another Owner exists
+  const { data: currentMember } = await supabase
+    .from('organization_members')
+    .select('role')
+    .eq('org_id', orgId)
+    .eq('user_id', opts.userId)
+    .maybeSingle()
+
+  if (currentMember?.role === 'owner' && opts.newRole !== 'owner') {
+    const { count: ownerCount } = await supabase
+      .from('organization_members')
+      .select('user_id', { count: 'exact', head: true })
+      .eq('org_id', orgId)
+      .eq('role', 'owner')
+    if (!ownerCount || ownerCount <= 1) {
+      return { ok: false, error: 'Cannot demote the only Owner. Promote another member to Owner first.' }
+    }
+  }
+
+  const { error } = await supabase
+    .from('organization_members')
+    .update({ role: opts.newRole })
+    .eq('org_id', orgId)
+    .eq('user_id', opts.userId)
+
+  if (error) {
+    console.error('[db.updateOrgMemberRole] failed:', error)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
+}
+
+/**
+ * removeOrgMember — Owner/Admin removes a user from the org entirely.
+ * The user keeps their auth account but loses access to all org projects.
+ */
+export async function removeOrgMember(userId: string): Promise<{ ok: boolean; error?: string }> {
+  const supabase = createClient()
+  const orgId = await ensureUserHasOrg()
+  if (!orgId) return { ok: false, error: 'No active org' }
+
+  // Check: don't allow removing the last Owner
+  const { data: targetMember } = await supabase
+    .from('organization_members')
+    .select('role')
+    .eq('org_id', orgId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (targetMember?.role === 'owner') {
+    const { count } = await supabase
+      .from('organization_members')
+      .select('user_id', { count: 'exact', head: true })
+      .eq('org_id', orgId)
+      .eq('role', 'owner')
+    if (!count || count <= 1) {
+      return { ok: false, error: 'Cannot remove the only Owner. Promote another member first.' }
+    }
+  }
+
+  // Remove from project_access first (cascade-style)
+  await supabase
+    .from('project_access')
+    .delete()
+    .eq('user_id', userId)
+
+  const { error } = await supabase
+    .from('organization_members')
+    .delete()
+    .eq('org_id', orgId)
+    .eq('user_id', userId)
+
+  if (error) {
+    console.error('[db.removeOrgMember] failed:', error)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
+}
+
+// =============================================================================
+// Project Team management — project_access table
+// =============================================================================
+
+export interface ProjectTeamMember {
+  user_id: string
+  email: string
+  name: string
+  // 'org_owner' / 'org_admin' = implicit access via role
+  // 'pm' / 'viewer' = explicit project_access row
+  source: 'org_owner' | 'org_admin' | 'creator' | 'project_pm' | 'project_viewer'
+  access_level: 'edit' | 'view'
+  is_self: boolean
+  is_removable: boolean  // can be removed from THIS project?
+  granted_by: string | null
+}
+
+/**
+ * loadProjectTeam — list everyone who can see/edit a given project.
+ *
+ * Combines:
+ *   - All Owners + Admins of the org (implicit access)
+ *   - Project creator (implicit access)
+ *   - Anyone with an explicit project_access row
+ *
+ * `is_removable` is computed based on the caller's permissions:
+ *   - Owners/Admins of org: can remove any explicit project_access member
+ *   - PMs: can remove project_access members they granted (granted_by = self)
+ */
+export async function loadProjectTeam(opts: {
+  projectId: string  // local proj_xxx id
+}): Promise<ProjectTeamMember[]> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+
+  const orgId = await ensureUserHasOrg()
+  if (!orgId) return []
+
+  // Convert local id to cloud UUID
+  const cloudProjectId = toUuid(opts.projectId)
+
+  // Caller's role in this org (to compute is_removable)
+  const { data: callerMembership } = await supabase
+    .from('organization_members')
+    .select('role')
+    .eq('org_id', orgId)
+    .eq('user_id', user.id)
+    .maybeSingle()
+  const callerRole = (callerMembership?.role || 'viewer') as 'owner' | 'admin' | 'pm' | 'viewer'
+  const callerIsAdminOrOwner = callerRole === 'owner' || callerRole === 'admin'
+
+  // 1. Get all owner/admin members of the org (implicit project access)
+  const { data: orgMembers } = await supabase
+    .from('organization_members')
+    .select('user_id, role')
+    .eq('org_id', orgId)
+    .in('role', ['owner', 'admin'])
+
+  // 2. Get project creator
+  const { data: project } = await supabase
+    .from('projects')
+    .select('created_by')
+    .eq('id', cloudProjectId)
+    .maybeSingle()
+
+  // 3. Get explicit project_access rows
+  const { data: accessRows } = await supabase
+    .from('project_access')
+    .select('user_id, access_level, granted_by')
+    .eq('project_id', cloudProjectId)
+
+  // Collect all unique user IDs
+  const userIds = new Set<string>()
+  for (const m of (orgMembers || [])) userIds.add(m.user_id)
+  if (project?.created_by) userIds.add(project.created_by)
+  for (const a of (accessRows || [])) userIds.add(a.user_id)
+
+  if (userIds.size === 0) return []
+
+  // 4. Fetch profile data for all
+  const { data: profiles } = await supabase
+    .from('profiles')
+    .select('id, email, name')
+    .in('id', Array.from(userIds))
+
+  const profileMap = new Map<string, { email: string; name: string }>()
+  for (const p of (profiles || [])) {
+    profileMap.set(p.id, { email: p.email || '', name: p.name || '' })
+  }
+
+  // 5. Build the team list — owners/admins first, then creator, then explicit
+  const members: ProjectTeamMember[] = []
+  const seenUserIds = new Set<string>()
+
+  // Org owners + admins
+  for (const m of (orgMembers || [])) {
+    if (seenUserIds.has(m.user_id)) continue
+    seenUserIds.add(m.user_id)
+    const profile = profileMap.get(m.user_id) || { email: '', name: '' }
+    members.push({
+      user_id: m.user_id,
+      email: profile.email,
+      name: profile.name || profile.email.split('@')[0] || 'Unknown',
+      source: m.role === 'owner' ? 'org_owner' : 'org_admin',
+      access_level: 'edit',
+      is_self: m.user_id === user.id,
+      is_removable: false,  // org-level access can't be removed per-project
+      granted_by: null,
+    })
+  }
+
+  // Project creator (if not already shown)
+  if (project?.created_by && !seenUserIds.has(project.created_by)) {
+    seenUserIds.add(project.created_by)
+    const profile = profileMap.get(project.created_by) || { email: '', name: '' }
+    members.push({
+      user_id: project.created_by,
+      email: profile.email,
+      name: profile.name || profile.email.split('@')[0] || 'Unknown',
+      source: 'creator',
+      access_level: 'edit',
+      is_self: project.created_by === user.id,
+      is_removable: false,
+      granted_by: null,
+    })
+  }
+
+  // Explicit access rows
+  for (const a of (accessRows || [])) {
+    if (seenUserIds.has(a.user_id)) continue
+    seenUserIds.add(a.user_id)
+    const profile = profileMap.get(a.user_id) || { email: '', name: '' }
+    const isPMAccess = a.access_level === 'edit'
+    members.push({
+      user_id: a.user_id,
+      email: profile.email,
+      name: profile.name || profile.email.split('@')[0] || 'Unknown',
+      source: isPMAccess ? 'project_pm' : 'project_viewer',
+      access_level: a.access_level as 'edit' | 'view',
+      is_self: a.user_id === user.id,
+      // Removable if: caller is Admin/Owner, OR caller granted this access
+      is_removable: callerIsAdminOrOwner || (a.granted_by === user.id),
+      granted_by: a.granted_by,
+    })
+  }
+
+  return members
+}
+
+/**
+ * loadOrgMembersNotOnProject — for the "+ Add Member" dropdown.
+ * Returns org members who can be added to a specific project, filtered by
+ * what the caller is allowed to add (PMs can only add Viewers, etc).
+ */
+export interface AssignableMember {
+  user_id: string
+  email: string
+  name: string
+  org_role: string
+}
+
+export async function loadOrgMembersNotOnProject(projectId: string): Promise<AssignableMember[]> {
+  const supabase = createClient()
+  const orgId = await ensureUserHasOrg()
+  if (!orgId) return []
+
+  const cloudProjectId = toUuid(projectId)
+
+  // Get current project members (skip these)
+  const { data: existing } = await supabase
+    .from('project_access')
+    .select('user_id')
+    .eq('project_id', cloudProjectId)
+  const existingIds = new Set((existing || []).map(e => e.user_id))
+
+  // Get project creator and org owners/admins (they have implicit access)
+  const { data: project } = await supabase
+    .from('projects')
+    .select('created_by')
+    .eq('id', cloudProjectId)
+    .maybeSingle()
+  if (project?.created_by) existingIds.add(project.created_by)
+
+  const { data: orgMembers } = await supabase
+    .from('organization_members')
+    .select('user_id, role')
+    .eq('org_id', orgId)
+
+  // Owners/admins already have access, skip them
+  const result: AssignableMember[] = []
+  for (const m of (orgMembers || [])) {
+    if (m.role === 'owner' || m.role === 'admin') continue
+    if (existingIds.has(m.user_id)) continue
+    // PMs and Viewers in org can be added
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id, email, name')
+      .eq('id', m.user_id)
+      .maybeSingle()
+    if (!profile) continue
+    result.push({
+      user_id: profile.id,
+      email: profile.email || '',
+      name: profile.name || profile.email?.split('@')[0] || 'Unknown',
+      org_role: m.role,
+    })
+  }
+  return result.sort((a, b) => a.email.localeCompare(b.email))
+}
+
+/**
+ * addProjectMember — grant a user access to a project.
+ *   access_level = 'edit' (PM)  or  'view' (Viewer)
+ *
+ * Server-side RLS enforces who can call this:
+ *   - Owners/Admins: any access_level
+ *   - PMs: only 'view' access_level (Viewers), only on projects they have edit access to
+ */
+export async function addProjectMember(opts: {
+  projectId: string
+  userId: string
+  accessLevel: 'edit' | 'view'
+}): Promise<{ ok: boolean; error?: string }> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { ok: false, error: 'Not signed in' }
+
+  const cloudProjectId = toUuid(opts.projectId)
+
+  const { error } = await supabase
+    .from('project_access')
+    .insert({
+      project_id: cloudProjectId,
+      user_id: opts.userId,
+      access_level: opts.accessLevel,
+      granted_by: user.id,
+    })
+
+  if (error) {
+    console.error('[db.addProjectMember] failed:', error)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
+}
+
+/**
+ * removeProjectMember — revoke a user's access to a project.
+ * RLS enforces who can remove whom.
+ */
+export async function removeProjectMember(opts: {
+  projectId: string
+  userId: string
+}): Promise<{ ok: boolean; error?: string }> {
+  const supabase = createClient()
+  const cloudProjectId = toUuid(opts.projectId)
+
+  const { error } = await supabase
+    .from('project_access')
+    .delete()
+    .eq('project_id', cloudProjectId)
+    .eq('user_id', opts.userId)
+
+  if (error) {
+    console.error('[db.removeProjectMember] failed:', error)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
+}

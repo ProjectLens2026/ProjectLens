@@ -30,6 +30,7 @@ import { usePermissions, roleLabel, roleBadgeColor } from '@/lib/usePermissions'
 import {
   loadOrgMembers, loadPendingInvitations,
   createInvitation, revokeInvitation,
+  updateOrgMemberRole, removeOrgMember,
   OrgMember, Invitation,
 } from '@/lib/supabase/db'
 
@@ -138,14 +139,50 @@ function WorkspaceTab({ perms }: { perms: ReturnType<typeof usePermissions> }) {
 function MembersTab({ perms }: { perms: ReturnType<typeof usePermissions> }) {
   const [members, setMembers] = useState<OrgMember[]>([])
   const [loading, setLoading] = useState(true)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [pendingRole, setPendingRole] = useState<string>('')
+  const [saving, setSaving] = useState(false)
 
-  useEffect(() => {
-    if (perms.loading) return
+  function refresh() {
+    setLoading(true)
     loadOrgMembers().then(list => {
       setMembers(list)
       setLoading(false)
     })
+  }
+
+  useEffect(() => {
+    if (perms.loading) return
+    refresh()
   }, [perms.loading])
+
+  async function handleSaveRole(userId: string) {
+    setSaving(true)
+    const result = await updateOrgMemberRole({ userId, newRole: pendingRole as any })
+    setSaving(false)
+    if (!result.ok) {
+      alert('Failed to update role: ' + (result.error || 'unknown'))
+      return
+    }
+    setEditingId(null)
+    refresh()
+  }
+
+  async function handleRemove(member: OrgMember) {
+    const ok = confirm(
+      `Remove ${member.name || member.email} from the workspace?\n\n` +
+      `They will lose access to all org projects. This does NOT delete their account — they can be re-invited later.`
+    )
+    if (!ok) return
+    const result = await removeOrgMember(member.user_id)
+    if (!result.ok) {
+      alert('Failed to remove: ' + (result.error || 'unknown'))
+      return
+    }
+    refresh()
+  }
+
+  const canEdit = perms.can.manageWorkspace  // Owner + Admin
 
   return (
     <>
@@ -171,42 +208,106 @@ function MembersTab({ perms }: { perms: ReturnType<typeof usePermissions> }) {
                 <th className="text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider px-4 py-2.5">Member</th>
                 <th className="text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider px-4 py-2.5">Role</th>
                 <th className="text-left text-[10px] font-semibold text-slate-500 uppercase tracking-wider px-4 py-2.5">Joined</th>
+                {canEdit && (
+                  <th className="text-right text-[10px] font-semibold text-slate-500 uppercase tracking-wider px-4 py-2.5">Actions</th>
+                )}
               </tr>
             </thead>
             <tbody>
-              {members.map(m => (
-                <tr key={m.user_id} className="border-b border-slate-100 last:border-0">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0">
-                        {makeInitials(m.name || m.email)}
-                      </div>
-                      <div>
-                        <div className="font-semibold text-slate-900 text-sm">
-                          {m.name || m.email.split('@')[0]}
-                          {m.is_self && <span className="ml-2 text-[10px] text-slate-400 font-normal">(you)</span>}
+              {members.map(m => {
+                const isEditingThis = editingId === m.user_id
+                return (
+                  <tr key={m.user_id} className="border-b border-slate-100 last:border-0">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0">
+                          {makeInitials(m.name || m.email)}
                         </div>
-                        <div className="text-xs text-slate-500">{m.email}</div>
+                        <div>
+                          <div className="font-semibold text-slate-900 text-sm">
+                            {m.name || m.email.split('@')[0]}
+                            {m.is_self && <span className="ml-2 text-[10px] text-slate-400 font-normal">(you)</span>}
+                          </div>
+                          <div className="text-xs text-slate-500">{m.email}</div>
+                        </div>
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={
-                      'text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wide ' +
-                      roleBadgeColor(m.role as any).replace(/30/g, '100').replace(/200/g, '700')
-                    }>
-                      {roleLabel(m.role as any)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-slate-500 text-xs">
-                    {new Date(m.joined_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-4 py-3">
+                      {isEditingThis ? (
+                        <select
+                          value={pendingRole}
+                          onChange={e => setPendingRole(e.target.value)}
+                          className="px-2 py-1 border border-slate-300 rounded text-xs">
+                          <option value="owner">Owner</option>
+                          <option value="admin">Admin</option>
+                          <option value="pm">Project Manager</option>
+                          <option value="viewer">Viewer</option>
+                        </select>
+                      ) : (
+                        <span className={
+                          'text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wide ' +
+                          roleBadgeColor(m.role as any).replace(/30/g, '100').replace(/200/g, '700')
+                        }>
+                          {roleLabel(m.role as any)}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-slate-500 text-xs">
+                      {new Date(m.joined_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </td>
+                    {canEdit && (
+                      <td className="px-4 py-3 text-right">
+                        {isEditingThis ? (
+                          <>
+                            <button
+                              onClick={() => handleSaveRole(m.user_id)}
+                              disabled={saving}
+                              className="text-blue-600 hover:text-blue-700 text-xs font-semibold mr-2">
+                              {saving ? 'Saving...' : 'Save'}
+                            </button>
+                            <button
+                              onClick={() => setEditingId(null)}
+                              disabled={saving}
+                              className="text-slate-500 hover:text-slate-700 text-xs">
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => {
+                                setEditingId(m.user_id)
+                                setPendingRole(m.role)
+                              }}
+                              className="text-blue-600 hover:text-blue-700 text-xs font-semibold">
+                              Edit Role
+                            </button>
+                            {!m.is_self && (
+                              <>
+                                <span className="text-slate-300 mx-1.5">·</span>
+                                <button
+                                  onClick={() => handleRemove(m)}
+                                  className="text-red-600 hover:text-red-700 text-xs font-semibold">
+                                  Remove
+                                </button>
+                              </>
+                            )}
+                          </>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}
       </Card>
+      {canEdit && (
+        <div className="text-[11px] text-slate-500 leading-relaxed">
+          <strong>Note:</strong> Removing someone from the workspace revokes all their access immediately. Their auth account is preserved — you can re-invite them later. The last Owner cannot be removed or demoted.
+        </div>
+      )}
     </>
   )
 }

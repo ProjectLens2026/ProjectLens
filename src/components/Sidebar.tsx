@@ -15,6 +15,7 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions, roleLabel, roleBadgeColor } from '@/lib/usePermissions'
 import CreateProjectModal from '@/components/CreateProjectModal'
+import ProjectTeamModal from '@/components/ProjectTeamModal'
 interface SidebarProps {
   user?: { name: string; role: string; initials: string; company: string }
 }
@@ -45,6 +46,8 @@ export default function Sidebar({ user }: SidebarProps) {
   const [movePickerForVersionId, setMovePickerForVersionId] = useState<string | null>(null)
   // Phase 3B — modal state for "Create New Project" (Owner/Admin only)
   const [createProjectModalOpen, setCreateProjectModalOpen] = useState(false)
+  // Phase 3D — Project Team modal (Owner/Admin/PM)
+  const [teamModalForProject, setTeamModalForProject] = useState<Project | null>(null)
 
   // v14 — resizable sidebar. Default ~300px (was 256px / w-64 — too narrow
   // once version labels like DCDGS-CU-20240315-12 became standard). PM can
@@ -606,6 +609,10 @@ export default function Sidebar({ user }: SidebarProps) {
                           onClick={() => startRename(p)}
                           className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-white/10 flex items-center gap-2"
                         ><span>✏️</span> Rename</button>
+                        <button
+                          onClick={() => { setTeamModalForProject(p); setOpenActionMenu(null) }}
+                          className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-white/10 flex items-center gap-2"
+                        ><span>👥</span> Team</button>
                         <div className="my-1 border-t border-white/8" />
                         <div className="px-3 py-1 text-[8px] font-bold text-white/40 uppercase tracking-widest">Status</div>
                         {STATUS_OPTIONS.map(s => {
@@ -999,6 +1006,17 @@ export default function Sidebar({ user }: SidebarProps) {
         onClose={() => setCreateProjectModalOpen(false)}
         redirectTo="upload"
       />
+
+      {/* Phase 3D — Project Team modal (Owner/Admin/PM manage who has access) */}
+      {teamModalForProject && (
+        <ProjectTeamModal
+          open={!!teamModalForProject}
+          onClose={() => setTeamModalForProject(null)}
+          projectId={teamModalForProject.id}
+          projectName={teamModalForProject.name}
+          projectCode={teamModalForProject.projectId || ''}
+        />
+      )}
     </aside>
   )
 }
