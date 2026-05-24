@@ -393,20 +393,28 @@ export default function Sidebar({ user }: SidebarProps) {
   // Per-project views — order is what the user sees in the sidebar.
   // v13: Earned Value link added between Schedule Analysis and Risks & Issues.
   // Page lives at /dashboard/evm (standalone, not a tab inside Lens).
-  const views = activeProject ? [
-    { href: '/dashboard', icon: '⊞', label: 'Overview' },
-    { href: '/dashboard/report', icon: '📄', label: 'Complete Report' },
-    { href: '/dashboard/lens', icon: '🔍', label: 'Schedule Analysis' },
-    { href: '/dashboard/evm', icon: '💰', label: 'Earned Value' },
-    { href: '/dashboard/risks', icon: '⚠', label: 'Risks & Issues' },
-    { href: '/dashboard/procurement', icon: '🚚', label: 'Procurement' },
-    { href: '/dashboard/rfis', icon: '❓', label: 'RFIs', badge: activeProject.rfis.length > 0 ? String(activeProject.rfis.length) : null },
-    { href: '/dashboard/submittals', icon: '📋', label: 'Submittals' },
-    { href: '/dashboard/changes', icon: '🔄', label: 'Change Orders' },
-    { href: '/dashboard/upload', icon: '⬆', label: 'Upload Version' },
-    { href: '/dashboard/trend', icon: '📈', label: 'Trend Analysis' },
-    { href: '/dashboard/tia', icon: '📑', label: 'TIA Comparison' },
+  //
+  // Phase 3D — Viewer lockdown: EVM, Trend, TIA, and Upload are hidden for
+  // Viewers (read-only role). Lens (Schedule Analysis) stays — it's view-only.
+  const allViews = activeProject ? [
+    { href: '/dashboard', icon: '⊞', label: 'Overview', requires: 'view' as const },
+    { href: '/dashboard/report', icon: '📄', label: 'Complete Report', requires: 'view' as const },
+    { href: '/dashboard/lens', icon: '🔍', label: 'Schedule Analysis', requires: 'view' as const },
+    { href: '/dashboard/evm', icon: '💰', label: 'Earned Value', requires: 'advanced' as const },
+    { href: '/dashboard/risks', icon: '⚠', label: 'Risks & Issues', requires: 'view' as const },
+    { href: '/dashboard/procurement', icon: '🚚', label: 'Procurement', requires: 'view' as const },
+    { href: '/dashboard/rfis', icon: '❓', label: 'RFIs', badge: activeProject.rfis.length > 0 ? String(activeProject.rfis.length) : null, requires: 'view' as const },
+    { href: '/dashboard/submittals', icon: '📋', label: 'Submittals', requires: 'view' as const },
+    { href: '/dashboard/changes', icon: '🔄', label: 'Change Orders', requires: 'view' as const },
+    { href: '/dashboard/upload', icon: '⬆', label: 'Upload Version', requires: 'upload' as const },
+    { href: '/dashboard/trend', icon: '📈', label: 'Trend Analysis', requires: 'advanced' as const },
+    { href: '/dashboard/tia', icon: '📑', label: 'TIA Comparison', requires: 'advanced' as const },
   ] : []
+  const views = allViews.filter(v => {
+    if (v.requires === 'advanced') return perms.can.runAdvancedAnalytics
+    if (v.requires === 'upload') return perms.can.uploadSchedule
+    return true  // 'view' is open to everyone with project access
+  })
   const isEnterpriseActive = pathname.startsWith('/dashboard/enterprise')
   const isArchiveActive = pathname.startsWith('/dashboard/archive')
   const isDeletedActive = pathname.startsWith('/dashboard/deleted')
@@ -609,6 +617,7 @@ export default function Sidebar({ user }: SidebarProps) {
                     )} title={p.name}>{p.name}</div>
                   </div>
                   <span className="text-white/40 text-[9px] flex-shrink-0 font-mono">{p.versions.length}</span>
+                  {perms.can.openProjectActions && (
                   <div className="relative flex-shrink-0">
                     <button
                       onClick={(e) => {
@@ -632,10 +641,12 @@ export default function Sidebar({ user }: SidebarProps) {
                             className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-white/10 flex items-center gap-2"
                           ><span>✏️</span> Rename</button>
                         )}
-                        <button
-                          onClick={() => { setTeamModalForProject(p); setOpenActionMenu(null) }}
-                          className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-white/10 flex items-center gap-2"
-                        ><span>👥</span> Team</button>
+                        {perms.can.viewTeamModal && (
+                          <button
+                            onClick={() => { setTeamModalForProject(p); setOpenActionMenu(null) }}
+                            className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-white/10 flex items-center gap-2"
+                          ><span>👥</span> Team</button>
+                        )}
                         {perms.can.archiveProject && (
                           <>
                             <div className="my-1 border-t border-white/8" />
@@ -686,6 +697,7 @@ export default function Sidebar({ user }: SidebarProps) {
                       </div>
                     )}
                   </div>
+                  )}
                 </div>
               )}
               {isExpanded && !isEditing && !isConfirmingDelete && !isConfirmingStatusChange && p.versions.length > 0 && (() => {
@@ -858,6 +870,7 @@ export default function Sidebar({ user }: SidebarProps) {
                               <div className="text-white/30 text-[9px]">{dateStr}</div>
                             )}
                           </div>
+                          {perms.can.openProjectActions && (
                           <div className="relative flex-shrink-0">
                             <button
                               onClick={(e) => {
@@ -901,6 +914,7 @@ export default function Sidebar({ user }: SidebarProps) {
                               </div>
                             )}
                           </div>
+                          )}
                         </div>
                       )
                     })

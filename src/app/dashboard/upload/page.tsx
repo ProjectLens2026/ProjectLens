@@ -20,6 +20,8 @@
 
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { usePermissions } from '@/lib/usePermissions'
 import {
   getActiveProjectId, loadProjects,
   createProject, addVersionToProject,
@@ -90,6 +92,7 @@ async function readXERFileAsText(file: File): Promise<string> {
 
 export default function UploadPage() {
   const router = useRouter()
+  const perms = usePermissions()
   const [step, setStep] = useState<Step>('upload')
   const [file, setFile] = useState<File | null>(null)
   const [dragging, setDragging] = useState(false)
@@ -575,6 +578,26 @@ export default function UploadPage() {
           )}
         </div>
       </button>
+    )
+  }
+
+  // Phase 3D — Viewer lockdown. Block this page entirely for Viewers (and
+  // anyone without uploadSchedule permission). Placed AFTER all hooks have
+  // been called to avoid React hook ordering violations.
+  if (!perms.loading && !perms.can.uploadSchedule) {
+    return (
+      <div className="flex flex-col h-full bg-slate-50 items-center justify-center p-6">
+        <div className="max-w-md bg-white border border-slate-200 rounded-xl shadow-sm p-8 text-center">
+          <div className="text-4xl mb-3">🔒</div>
+          <div className="text-lg font-bold text-slate-900 mb-2">Access denied</div>
+          <div className="text-sm text-slate-600 mb-6 leading-relaxed">
+            Uploading schedule versions requires <strong>Project Manager</strong>, <strong>Admin</strong>, or <strong>Owner</strong> role. As a Viewer you have read-only access — ask your admin if you need to upload schedules.
+          </div>
+          <Link href="/dashboard" className="inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-5 py-2.5 rounded-lg">
+            Back to Dashboard
+          </Link>
+        </div>
+      </div>
     )
   }
 

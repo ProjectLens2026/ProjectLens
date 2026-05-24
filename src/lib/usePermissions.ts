@@ -69,13 +69,22 @@ export interface Permissions {
     assignPM: boolean            // owner + admin
     uploadSchedule: boolean      // owner + admin + pm (not viewer)
     editContractDates: boolean   // owner + admin + pm
-    softDeleteProject: boolean   // owner + admin + pm
-    restoreProject: boolean      // owner + admin + pm
-    archiveProject: boolean      // owner + admin + pm
-    hardDeleteProject: boolean   // owner + admin (NOT pm)
+    softDeleteProject: boolean   // owner + admin
+    restoreProject: boolean      // owner + admin
+    archiveProject: boolean      // owner + admin
+    hardDeleteProject: boolean   // owner + admin
     deleteVersion: boolean       // owner + admin + pm
     renameProject: boolean       // owner + admin + pm
     inviteToProject: boolean     // owner + admin + pm (PMs invite to THEIR project)
+    // Viewer-restricted features (anything that mutates data OR runs heavy
+    // analysis like Trend / TIA). Viewers can READ Overview, Reports, EVM,
+    // Lens (Schedule Analysis), Risks, Procurement, Change Orders, Submittals,
+    // and view existing RFIs — but not initiate anything.
+    runAdvancedAnalytics: boolean // owner + admin + pm (NOT viewer) — Trend, TIA
+    createRFI: boolean            // owner + admin + pm
+    editRFI: boolean              // owner + admin + pm
+    viewTeamModal: boolean        // owner + admin + pm (NOT viewer)
+    openProjectActions: boolean   // owner + admin + pm (the ⋮ menu)
   }
 }
 
@@ -104,6 +113,11 @@ const EMPTY_PERMS: Permissions = {
     deleteVersion: false,
     renameProject: false,
     inviteToProject: false,
+    runAdvancedAnalytics: false,
+    createRFI: false,
+    editRFI: false,
+    viewTeamModal: false,
+    openProjectActions: false,
   },
 }
 
@@ -205,19 +219,24 @@ export function usePermissions(): Permissions {
             editContractDates: ownerOrAdminOrPM,
             // Tightened Day 9: only Owner/Admin can delete projects (soft or
             // hard). PMs are operational — they work on projects but cannot
-            // remove them. The whole project is too big to risk.
+            // remove them.
             softDeleteProject: ownerOrAdmin,
             restoreProject: ownerOrAdmin,
             archiveProject: ownerOrAdmin,
             hardDeleteProject: ownerOrAdmin,
-            // Versions: PMs CAN delete individual versions (mistakes happen
-            // during uploads). The UI already blocks deleting the last version
-            // (project.versions.length > 1), so PMs can never empty a project.
+            // PMs CAN delete individual versions (the UI blocks the last one).
             deleteVersion: ownerOrAdminOrPM,
             renameProject: ownerOrAdminOrPM,
-            // PMs can invite Viewers to projects they have access to (matches
-            // Phase 3D Team modal behavior).
             inviteToProject: ownerOrAdminOrPM,
+            // Viewer lockdown — these are denied for Viewers regardless of
+            // project access. Trend / TIA / EVM run heavy comparative analytics
+            // that aren't appropriate for read-only stakeholders; the ⋮ menu
+            // and Team modal expose mutation actions.
+            runAdvancedAnalytics: ownerOrAdminOrPM,
+            createRFI: ownerOrAdminOrPM,
+            editRFI: ownerOrAdminOrPM,
+            viewTeamModal: ownerOrAdminOrPM,
+            openProjectActions: ownerOrAdminOrPM,
           },
         })
       } catch (e) {
