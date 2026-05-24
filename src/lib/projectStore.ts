@@ -727,6 +727,57 @@ export function createProject(opts: {
   return project
 }
 
+// =============================================================================
+// createEmptyProject — Day 9 / Phase 3B.
+//
+// Used by the "Create Project" modal in the sidebar (Owner/Admin only). Creates
+// an empty project shell with no schedule versions yet. The PM then opens the
+// shell from their sidebar and uploads the baseline — matching the DGS
+// contracting-officer workflow where the project record exists before any
+// schedule does.
+//
+// The project appears in sidebars with an "Awaiting baseline" pill until the
+// first version is uploaded.
+// =============================================================================
+export function createEmptyProject(opts: {
+  name: string
+  projectId: string
+  owner?: string
+  contractDates?: ContractDates
+}): Project {
+  const project: Project = {
+    id: 'proj_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    projectId: opts.projectId,
+    name: opts.name,
+    owner: opts.owner,
+    contractDates: opts.contractDates,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    status: 'Active',
+    versions: [],  // empty shell — PM will add the baseline
+    rfis: [],
+    changeOrders: [],
+  }
+  _projects = [project, ..._projects]
+  notifyListeners()
+  idbPutProject(project).catch(err => {
+    console.error('[ControlLens] createEmptyProject: IndexedDB persist failed:', err)
+  })
+  // Push to Supabase so other org members (assigned PMs) see it too. The
+  // insertProjectToSupabase function tolerates project.versions being empty —
+  // it'll just skip the version insert loop.
+  insertProjectToSupabase(project).then(ok => {
+    if (!ok) console.warn('[ControlLens] createEmptyProject: Supabase persist failed (will retry next session)')
+  }).catch(err => {
+    console.error('[ControlLens] createEmptyProject: Supabase persist error:', err)
+  })
+  setActiveProjectId(project.id)
+  // No active version yet (shell has none). The upload page will pre-fill
+  // the Name + Project ID + dates and let the PM upload the baseline.
+  setActiveVersionId(null)
+  return project
+}
+
 export function addVersionToProject(projectId: string, version: ScheduleVersion): Project | null {
   const idx = _projects.findIndex(p => p.id === projectId)
   if (idx === -1) return null

@@ -14,6 +14,7 @@ import {
 } from '@/lib/projectStore'
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions, roleLabel, roleBadgeColor } from '@/lib/usePermissions'
+import CreateProjectModal from '@/components/CreateProjectModal'
 interface SidebarProps {
   user?: { name: string; role: string; initials: string; company: string }
 }
@@ -42,6 +43,8 @@ export default function Sidebar({ user }: SidebarProps) {
   const [confirmDeleteVersionId, setConfirmDeleteVersionId] = useState<string | null>(null)
   const [confirmStatusChange, setConfirmStatusChange] = useState<{projectId: string, newStatus: ProjectStatus} | null>(null)
   const [movePickerForVersionId, setMovePickerForVersionId] = useState<string | null>(null)
+  // Phase 3B — modal state for "Create New Project" (Owner/Admin only)
+  const [createProjectModalOpen, setCreateProjectModalOpen] = useState(false)
 
   // v14 — resizable sidebar. Default ~300px (was 256px / w-64 — too narrow
   // once version labels like DCDGS-CU-20240315-12 became standard). PM can
@@ -237,9 +240,17 @@ export default function Sidebar({ user }: SidebarProps) {
     if (!project) return
     const latest = getLatestVersion(project)
     setActiveProjectId(projectId)
-    if (latest) setActiveVersionId(latest.id)
-    refresh()
-    maybeNavigateToDashboard()
+    if (latest) {
+      setActiveVersionId(latest.id)
+      refresh()
+      maybeNavigateToDashboard()
+    } else {
+      // Phase 3B — empty shell. No baseline yet. Send to upload page so the
+      // PM can put one in. Dashboard would have nothing to render.
+      setActiveVersionId(null)
+      refresh()
+      router.push('/dashboard/upload')
+    }
   }
   function toggleExpand(projectId: string, e?: React.MouseEvent) {
     if (e) e.stopPropagation()
@@ -466,6 +477,9 @@ export default function Sidebar({ user }: SidebarProps) {
           const isCompleted = status === 'Completed'
           const isOnHold = status === 'On Hold'
           const isActiveStatus = status === 'Active'
+          // Phase 3B — project shell with no uploaded baseline yet. Created by
+          // an Admin via the Create Project modal. PM uploads baseline next.
+          const isAwaitingBaseline = p.versions.length === 0
           return (
             <div key={p.id} className="mb-0.5">
               {isEditing ? (
@@ -550,7 +564,12 @@ export default function Sidebar({ user }: SidebarProps) {
                         'text-sm font-semibold font-mono truncate tracking-tight',
                         isCompleted ? 'text-white/60' : 'text-white'
                       )} title={p.projectId || '(no Project ID)'}>{p.projectId || '— no ID —'}</span>
-                      {isActiveStatus && (
+                      {isAwaitingBaseline && isActiveStatus && (
+                        <span className="text-[8px] font-bold px-1.5 py-px rounded-full bg-amber-500/30 text-amber-300 uppercase tracking-wide flex-shrink-0" title="No baseline uploaded yet — open the project to upload">
+                          Awaiting Baseline
+                        </span>
+                      )}
+                      {!isAwaitingBaseline && isActiveStatus && (
                         <span className="text-[8px] font-bold px-1.5 py-px rounded-full bg-green-500/25 text-green-300 uppercase tracking-wide flex-shrink-0">Active</span>
                       )}
                       {isOnHold && (
@@ -842,12 +861,18 @@ export default function Sidebar({ user }: SidebarProps) {
             </div>
           )
         })}
-        {!searchQuery && (
-          <Link href="/dashboard/upload"
-            className="flex items-center gap-1.5 px-2 py-2 mt-2 text-blue-400 hover:text-blue-300 hover:bg-white/5 rounded-md text-xs font-medium"
+        {!searchQuery && perms.can.createProject && (
+          <button
+            onClick={() => setCreateProjectModalOpen(true)}
+            className="w-full flex items-center gap-1.5 px-2 py-2 mt-2 text-blue-400 hover:text-blue-300 hover:bg-white/5 rounded-md text-xs font-medium text-left"
           >
             <span className="text-base leading-none">+</span> New project
-          </Link>
+          </button>
+        )}
+        {!searchQuery && !perms.can.createProject && perms.user && (
+          <div className="px-2 py-2 mt-2 text-white/30 text-[10px] italic">
+            Only Admins can create new projects
+          </div>
         )}
       </div>
       {activeProject && (
@@ -965,6 +990,14 @@ export default function Sidebar({ user }: SidebarProps) {
           isDragging ? 'bg-blue-500/60' : 'hover:bg-blue-500/40'
         }`}
         title="Drag to resize sidebar"
+      />
+
+      {/* Phase 3B — Create Project modal (visible only to Owner/Admin via the
+          button gate above; modal itself is always mounted but invisible) */}
+      <CreateProjectModal
+        open={createProjectModalOpen}
+        onClose={() => setCreateProjectModalOpen(false)}
+        redirectTo="upload"
       />
     </aside>
   )
