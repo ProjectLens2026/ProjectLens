@@ -47,12 +47,19 @@ export default function ProjectTeamModal({
 
   async function refresh() {
     setLoading(true)
+    // Always try to load available members — even Viewers see who could be
+    // added (it just stays empty for them). This avoids stale-closure bugs
+    // where perms hadn't loaded yet when the modal first opened.
     const [teamList, availableList] = await Promise.all([
       loadProjectTeam({ projectId }),
-      (canManageAsAdmin || canManageAsPM)
-        ? loadOrgMembersNotOnProject(projectId)
-        : Promise.resolve([]),
+      loadOrgMembersNotOnProject(projectId).catch(err => {
+        console.error('[ProjectTeamModal] loadOrgMembersNotOnProject failed:', err)
+        return []
+      }),
     ])
+    console.log('[ProjectTeamModal] refresh:',
+      { teamCount: teamList.length, availableCount: availableList.length,
+        canManageAsAdmin, canManageAsPM, loading: perms.loading })
     setTeam(teamList)
     setAvailable(availableList)
     setLoading(false)
@@ -66,7 +73,7 @@ export default function ProjectTeamModal({
     setError('')
     refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, projectId])
+  }, [open, projectId, perms.loading, perms.isOwner, perms.isAdmin, perms.isPM])
 
   useEffect(() => {
     if (!open) return
