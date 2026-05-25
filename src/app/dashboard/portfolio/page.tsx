@@ -21,6 +21,7 @@ import Link from 'next/link'
 import { usePermissions } from '@/lib/usePermissions'
 import {
   loadPortfolio, loadOrgMembersForPlatformOwner, loadOrgProjectsForPlatformOwner,
+  createCompanyAsPlatformOwner,
   PortfolioOrg, PortfolioMember, PortfolioProject,
 } from '@/lib/supabase/db'
 
@@ -34,6 +35,16 @@ export default function PortfolioPage() {
   const [drillMembers, setDrillMembers] = useState<PortfolioMember[]>([])
   const [drillProjects, setDrillProjects] = useState<PortfolioProject[]>([])
   const [drillLoading, setDrillLoading] = useState(false)
+
+  // Day 10 — Add Company modal state
+  const [showAddCompany, setShowAddCompany] = useState(false)
+  const [newCompanyName, setNewCompanyName] = useState('')
+  const [newOwnerEmail, setNewOwnerEmail] = useState('')
+  const [newOwnerName, setNewOwnerName] = useState('')
+  const [newAccountType, setNewAccountType] = useState<'team' | 'enterprise'>('team')
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState('')
+  const [createSuccess, setCreateSuccess] = useState<{ companyName: string; ownerEmail: string; acceptUrl: string } | null>(null)
 
   useEffect(() => {
     if (perms.loading) return
@@ -88,6 +99,31 @@ export default function PortfolioPage() {
 
   const selectedOrg = orgs.find(o => o.org_id === selectedOrgId) || null
 
+  async function handleCreateCompany() {
+    setCreateError('')
+    if (!newCompanyName.trim()) { setCreateError('Enter a company name'); return }
+    if (!newOwnerEmail.trim()) { setCreateError('Enter an owner email'); return }
+
+    setCreating(true)
+    const result = await createCompanyAsPlatformOwner({
+      companyName: newCompanyName.trim(),
+      ownerEmail: newOwnerEmail.trim(),
+      ownerName: newOwnerName.trim() || undefined,
+      accountType: newAccountType,
+    })
+    setCreating(false)
+
+    if (!result.ok) {
+      setCreateError(result.error || 'Failed to create company')
+      return
+    }
+    setCreateSuccess({
+      companyName: newCompanyName.trim(),
+      ownerEmail: newOwnerEmail.trim(),
+      acceptUrl: result.acceptUrl || '',
+    })
+  }
+
   return (
     <div className="flex flex-col h-full bg-slate-50">
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center flex-shrink-0">
@@ -95,7 +131,7 @@ export default function PortfolioPage() {
           <span className="font-bold text-slate-900 text-base">🌐 Platform Portfolio</span>
           <span className="text-slate-400 text-sm ml-2">· Cross-org view (ControlLens staff only)</span>
         </div>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
           <input
             type="text"
             placeholder="Search company name or admin email..."
@@ -103,6 +139,11 @@ export default function PortfolioPage() {
             onChange={e => setSearch(e.target.value)}
             className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs w-72 focus:outline-none focus:border-blue-500"
           />
+          <button
+            onClick={() => { setShowAddCompany(true); setCreateError(''); setCreateSuccess(null) }}
+            className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+            <span className="text-base leading-none">+</span> Add Company
+          </button>
         </div>
       </div>
 
@@ -286,6 +327,150 @@ export default function PortfolioPage() {
           </div>
         </div>
       </div>
+
+      {/* ============================================================
+          Add Company modal — Day 10
+          Platform Owner creates a new customer org + invitation in one
+          shot. The owner-to-be gets a link; clicking it lands them
+          directly in their new company org as Owner.
+          ============================================================ */}
+      {showAddCompany && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={() => setShowAddCompany(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div>
+                <div className="font-bold text-slate-900 text-base">Add Customer Company</div>
+                <div className="text-[11px] text-slate-500 mt-0.5">Creates a new org + invitation for the owner-to-be</div>
+              </div>
+              <button onClick={() => setShowAddCompany(false)}
+                className="text-slate-400 hover:text-slate-700 text-2xl leading-none">×</button>
+            </div>
+
+            <div className="p-5">
+              {createSuccess ? (
+                <div className="space-y-3">
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                    <div className="text-sm font-bold text-emerald-900 mb-1">✓ {createSuccess.companyName} created</div>
+                    <div className="text-xs text-emerald-800 leading-relaxed">
+                      Send this invitation link to <strong>{createSuccess.ownerEmail}</strong>. When they click it and sign up, they'll land directly in their new {createSuccess.companyName} workspace as Owner.
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 rounded p-3">
+                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Invitation link</div>
+                    <div className="font-mono text-[10px] text-slate-700 break-all">{createSuccess.acceptUrl}</div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        if (navigator.clipboard) {
+                          navigator.clipboard.writeText(createSuccess.acceptUrl).then(() => {
+                            alert('Invitation link copied to clipboard!')
+                          })
+                        } else {
+                          window.prompt('Copy this invitation link:', createSuccess.acceptUrl)
+                        }
+                      }}
+                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 rounded">
+                      📋 Copy Link
+                    </button>
+                    <button
+                      onClick={() => {
+                        setCreateSuccess(null)
+                        setNewCompanyName('')
+                        setNewOwnerEmail('')
+                        setNewOwnerName('')
+                        // Reload portfolio so the new company appears
+                        loadPortfolio().then(setOrgs)
+                      }}
+                      className="flex-1 bg-white border border-slate-300 text-slate-700 text-sm font-bold py-2 rounded hover:bg-slate-50">
+                      Add Another
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowAddCompany(false)
+                      setCreateSuccess(null)
+                      loadPortfolio().then(setOrgs)
+                    }}
+                    className="w-full text-xs text-slate-500 hover:text-slate-800 mt-2">
+                    Done
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Company name</label>
+                    <input
+                      type="text"
+                      value={newCompanyName}
+                      onChange={e => { setNewCompanyName(e.target.value); setCreateError('') }}
+                      placeholder="e.g. Azizi Development"
+                      className="w-full px-3 py-2 border border-slate-200 rounded text-sm focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Owner email</label>
+                    <input
+                      type="email"
+                      value={newOwnerEmail}
+                      onChange={e => { setNewOwnerEmail(e.target.value); setCreateError('') }}
+                      placeholder="e.g. admin@azizi.com"
+                      className="w-full px-3 py-2 border border-slate-200 rounded text-sm focus:outline-none focus:border-blue-500"
+                    />
+                    <div className="text-[10px] text-slate-500 mt-1">The person who will manage this company on ControlLens.</div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Owner name <span className="text-slate-400 normal-case font-normal">· optional</span></label>
+                    <input
+                      type="text"
+                      value={newOwnerName}
+                      onChange={e => setNewOwnerName(e.target.value)}
+                      placeholder="e.g. Karim Hassan"
+                      className="w-full px-3 py-2 border border-slate-200 rounded text-sm focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Account type</label>
+                    <select
+                      value={newAccountType}
+                      onChange={e => setNewAccountType(e.target.value as 'team' | 'enterprise')}
+                      className="w-full px-3 py-2 border border-slate-200 rounded text-sm bg-white focus:outline-none focus:border-blue-500">
+                      <option value="team">Team — paid subscription</option>
+                      <option value="enterprise">Enterprise — custom contract</option>
+                    </select>
+                  </div>
+
+                  {createError && (
+                    <div className="bg-red-50 border border-red-200 text-red-800 text-xs px-3 py-2 rounded font-semibold">
+                      ⚠ {createError}
+                    </div>
+                  )}
+
+                  <div className="bg-blue-50 border border-blue-200 rounded p-3 text-[10px] text-blue-900 leading-relaxed">
+                    <strong>What happens next:</strong> ControlLens creates the org + a 7-day invitation. You copy the link and email it to {newOwnerEmail || 'them'}. When they click it and sign up, they auto-join their new {newCompanyName || 'company'} workspace as Owner.
+                  </div>
+
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={handleCreateCompany}
+                      disabled={creating || !newCompanyName.trim() || !newOwnerEmail.trim()}
+                      className="flex-1 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-300 text-white text-sm font-bold py-2.5 rounded-lg">
+                      {creating ? 'Creating...' : 'Create Company'}
+                    </button>
+                    <button
+                      onClick={() => setShowAddCompany(false)}
+                      disabled={creating}
+                      className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:text-slate-900">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

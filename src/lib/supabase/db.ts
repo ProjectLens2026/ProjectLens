@@ -1628,3 +1628,66 @@ export async function loadOrgProjectsForPlatformOwner(orgId: string): Promise<Po
   }
   return (data || []) as PortfolioProject[]
 }
+
+// =============================================================================
+// Day 10 — Platform Owner: Create new customer company
+// =============================================================================
+
+/**
+ * createCompanyAsPlatformOwner — Platform-owner only function. Creates a new
+ * customer organization + an invitation for the owner-to-be in one shot.
+ *
+ * Server-side check via SECURITY DEFINER SQL function. Client guard here for
+ * UX (no point calling if not platform owner).
+ *
+ * Returns: { ok, orgId, acceptUrl, error }
+ */
+export async function createCompanyAsPlatformOwner(opts: {
+  companyName: string
+  ownerEmail: string
+  ownerName?: string
+  accountType?: 'team' | 'enterprise'
+}): Promise<{ ok: boolean; orgId?: string; acceptUrl?: string; error?: string }> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user?.email) return { ok: false, error: 'Not signed in' }
+
+  const PLATFORM_OWNER_EMAILS = ['support@nobelpm.org', 'support@control-lens.com']
+  if (!PLATFORM_OWNER_EMAILS.includes(user.email.toLowerCase())) {
+    return { ok: false, error: 'Platform owners only' }
+  }
+
+  const companyName = opts.companyName.trim()
+  const ownerEmail = opts.ownerEmail.trim().toLowerCase()
+  const ownerName = (opts.ownerName || '').trim()
+  const accountType = opts.accountType || 'team'
+
+  if (!companyName) return { ok: false, error: 'Company name required' }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail)) {
+    return { ok: false, error: 'Invalid owner email' }
+  }
+
+  const { data, error } = await supabase.rpc('platform_create_company', {
+    p_company_name: companyName,
+    p_owner_email: ownerEmail,
+    p_owner_name: ownerName || null,
+    p_account_type: accountType,
+  })
+  if (error) {
+    console.error('[db.createCompanyAsPlatformOwner] failed:', error)
+    return { ok: false, error: error.message }
+  }
+
+  // RPC returns { org_id, token, expires_at }
+  const result = Array.isArray(data) ? data[0] : data
+  if (!result?.org_id || !result?.token) {
+    return { ok: false, error: 'Unexpected response from server' }
+  }
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.control-lens.com'
+  return {
+    ok: true,
+    orgId: result.org_id,
+    acceptUrl: `${origin}/auth/accept-invite?token=${result.token}`,
+  }
+}
