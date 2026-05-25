@@ -25,6 +25,8 @@ import {
   updateProjectStatusInSupabase,
   deleteProjectFromSupabase,
   deleteVersionFromSupabase,
+  softDeleteVersionInSupabase,
+  restoreVersionInSupabase,
   renameProjectInSupabase,
   moveVersionInSupabase,
 } from './supabase/db'
@@ -105,6 +107,13 @@ export interface ScheduleVersion {
   // active, so clicking an older version shows the project state from back
   // then (not whatever contractDates says today).
   snapshot?: DateSnapshot
+
+  // NEW (Day 10) — soft delete. When a version is "deleted" by a PM via the
+  // sidebar, deletedAt is set instead of removing the row. The sidebar
+  // filters out versions with deletedAt set. The Deleted Items page shows
+  // them in a "Versions" tab with Restore + Permanently Delete actions.
+  // Owner/Admin can permanently remove (deletes the row); PMs cannot.
+  deletedAt?: string  // ISO timestamp when soft-deleted; undefined = not deleted
 }
 
 export interface Project {
@@ -969,9 +978,85 @@ export function permanentlyDeleteProject(id: string) {
   }
 }
 
-export function deleteVersion(projectId: string, versionId: string) {
+/**
+ * deleteVersion — SOFT delete (Day 10). Marks the version with deletedAt so
+ * it disappears from the sidebar but stays in the project for restore.
+ * Cloud sync mirrors the deletedAt field; the Supabase row is NOT deleted.
+ *
+ * Owner/Admin can permanently remove via permanentlyDeleteVersion() below.
+ * PMs can soft-delete + restore but cannot permanently delete.
+ *
+ * Refuses if this is the only non-deleted version on the project — UI also
+ * blocks this but we enforce here too (defense in depth).
+ */
+export function deleteVersion(projectId: string, versionId: string): { ok: boolean; error?: string } {
   const idx = _projects.findIndex(p => p.id === projectId)
-  if (idx === -1) return
+  if (idx === -1) return { ok: false, error: 'Project not found' }
+
+  const project = _projects[idx]
+  const activeVersions = project.versions.filter(v => !v.deletedAt)
+  if (activeVersions.length <= 1 && activeVersions.some(v => v.id === versionId)) {
+    return { ok: false, error: 'Cannot delete the only version on this project. Upload a new version first.' }
+  }
+
+  const updated: Project = {
+    ...project,
+    versions: project.versions.map(v =>
+      v.id === versionId ? { ...v, deletedAt: new Date().toISOString() } : v
+    ),
+    updatedAt: new Date().toISOString(),
+  }
+  _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
+  notifyListeners()
+  idbPutProject(updated).catch(err => {
+    console.error('[ControlLens] deleteVersion: IndexedDB persist failed:', err)
+  })
+  // v15 / Day 10 — mark as soft-deleted in Supabase (deletedAt field).
+  // We do NOT delete the row; Owner/Admin can permanently delete later.
+  softDeleteVersionInSupabase(projectId, versionId).catch(err => {
+    console.error('[ControlLens] deleteVersion: Supabase soft-delete failed:', err)
+  })
+  if (getActiveVersionId() === versionId) {
+    setActiveVersionId(null)
+  }
+  return { ok: true }
+}
+
+/**
+ * restoreVersion — Day 10. Clears deletedAt on a version, making it visible
+ * again in the sidebar. Anyone with deleteVersion permission can restore.
+ */
+export function restoreVersion(projectId: string, versionId: string): { ok: boolean; error?: string } {
+  const idx = _projects.findIndex(p => p.id === projectId)
+  if (idx === -1) return { ok: false, error: 'Project not found' }
+
+  const project = _projects[idx]
+  const updated: Project = {
+    ...project,
+    versions: project.versions.map(v =>
+      v.id === versionId ? { ...v, deletedAt: undefined } : v
+    ),
+    updatedAt: new Date().toISOString(),
+  }
+  _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
+  notifyListeners()
+  idbPutProject(updated).catch(err => {
+    console.error('[ControlLens] restoreVersion: IndexedDB persist failed:', err)
+  })
+  restoreVersionInSupabase(projectId, versionId).catch(err => {
+    console.error('[ControlLens] restoreVersion: Supabase failed:', err)
+  })
+  return { ok: true }
+}
+
+/**
+ * permanentlyDeleteVersion — Day 10. Owner/Admin only. Removes the version
+ * row entirely from local + Supabase. No recovery.
+ */
+export function permanentlyDeleteVersion(projectId: string, versionId: string): { ok: boolean; error?: string } {
+  const idx = _projects.findIndex(p => p.id === projectId)
+  if (idx === -1) return { ok: false, error: 'Project not found' }
+
   const updated: Project = {
     ..._projects[idx],
     versions: _projects[idx].versions.filter(v => v.id !== versionId),
@@ -980,15 +1065,15 @@ export function deleteVersion(projectId: string, versionId: string) {
   _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
   notifyListeners()
   idbPutProject(updated).catch(err => {
-    console.error('[ControlLens] deleteVersion: IndexedDB persist failed:', err)
+    console.error('[ControlLens] permanentlyDeleteVersion: IndexedDB persist failed:', err)
   })
-  // v15 — remove version row + storage files from Supabase
   deleteVersionFromSupabase(projectId, versionId).catch(err => {
-    console.error('[ControlLens] deleteVersion: Supabase failed:', err)
+    console.error('[ControlLens] permanentlyDeleteVersion: Supabase failed:', err)
   })
   if (getActiveVersionId() === versionId) {
     setActiveVersionId(null)
   }
+  return { ok: true }
 }
 
 export function moveVersionToProject(sourceProjectId: string, versionId: string, targetProjectId: string): boolean {
@@ -1052,12 +1137,18 @@ export function renameProject(id: string, newName: string, projectId?: string) {
 export function setProjectStatus(id: string, status: ProjectStatus) {
   const idx = _projects.findIndex(p => p.id === id)
   if (idx === -1) return
+
+  // Day 10 — Completed auto-archives. Construction PMs think of "completed"
+  // as "off my plate, file it away". The Archived status moves it out of the
+  // active sidebar to the Archive page. Owner/Admin can un-archive later.
+  const effectiveStatus: ProjectStatus = status === 'Completed' ? 'Archived' : status
+
   const updated: Project = {
     ..._projects[idx],
-    status,
+    status: effectiveStatus,
     updatedAt: new Date().toISOString(),
   }
-  if (status !== 'Deleted') {
+  if (effectiveStatus !== 'Deleted') {
     updated.deletedAt = undefined
   }
   _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
@@ -1065,11 +1156,10 @@ export function setProjectStatus(id: string, status: ProjectStatus) {
   idbPutProject(updated).catch(err => {
     console.error('[ControlLens] setProjectStatus: IndexedDB persist failed:', err)
   })
-  // v15 — sync status change to Supabase
-  updateProjectStatusInSupabase(id, status).catch(err => {
+  updateProjectStatusInSupabase(id, effectiveStatus).catch(err => {
     console.error('[ControlLens] setProjectStatus: Supabase failed:', err)
   })
-  if ((status === 'Archived' || status === 'Deleted') && getActiveProjectId() === id) {
+  if ((effectiveStatus === 'Archived' || effectiveStatus === 'Deleted') && getActiveProjectId() === id) {
     const firstAvailable = _projects.find(p =>
       p.id !== id &&
       getProjectStatus(p) !== 'Archived' &&

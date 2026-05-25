@@ -73,7 +73,9 @@ export interface Permissions {
     restoreProject: boolean      // owner + admin
     archiveProject: boolean      // owner + admin
     hardDeleteProject: boolean   // owner + admin
-    deleteVersion: boolean       // owner + admin + pm
+    changeProjectStatus: boolean // owner + admin + pm (PM blocked from Archive in UI)
+    deleteVersion: boolean       // owner + admin + pm (soft-delete; trash flow)
+    permanentDeleteVersion: boolean  // owner + admin (PMs can't hard-delete versions)
     renameProject: boolean       // owner + admin + pm
     inviteToProject: boolean     // owner + admin + pm (PMs invite to THEIR project)
     // Viewer-restricted features (anything that mutates data OR runs heavy
@@ -110,7 +112,9 @@ const EMPTY_PERMS: Permissions = {
     restoreProject: false,
     archiveProject: false,
     hardDeleteProject: false,
+    changeProjectStatus: false,
     deleteVersion: false,
+    permanentDeleteVersion: false,
     renameProject: false,
     inviteToProject: false,
     runAdvancedAnalytics: false,
@@ -224,8 +228,15 @@ export function usePermissions(): Permissions {
             restoreProject: ownerOrAdmin,
             archiveProject: ownerOrAdmin,
             hardDeleteProject: ownerOrAdmin,
-            // PMs CAN delete individual versions (the UI blocks the last one).
+            // PMs can change project status (Active/On Hold/Completed) on
+            // assigned projects, but NOT Archive (which is destructive).
+            // UI filters Archive out of the status menu for PMs.
+            changeProjectStatus: ownerOrAdminOrPM,
+            // PMs CAN delete individual versions — but it's SOFT delete now
+            // (goes to Deleted Items trash). Only Owner/Admin can
+            // permanently delete from trash. PMs can restore.
             deleteVersion: ownerOrAdminOrPM,
+            permanentDeleteVersion: ownerOrAdmin,
             renameProject: ownerOrAdminOrPM,
             inviteToProject: ownerOrAdminOrPM,
             // Viewer lockdown — these are denied for Viewers regardless of

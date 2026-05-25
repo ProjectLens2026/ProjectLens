@@ -293,7 +293,14 @@ export default function Sidebar({ user }: SidebarProps) {
       setConfirmDeleteVersionId(null)
       return
     }
-    deleteVersion(projectId, versionId)
+    // Day 10 — deleteVersion now returns { ok, error } since it's soft-delete
+    // with rules (can't delete last version on project).
+    const result = deleteVersion(projectId, versionId)
+    if (!result.ok) {
+      alert(result.error || 'Failed to delete version.')
+      setConfirmDeleteVersionId(null)
+      return
+    }
     refresh()
     setConfirmDeleteVersionId(null)
   }
@@ -309,8 +316,15 @@ export default function Sidebar({ user }: SidebarProps) {
   }
   function handleSetStatus(projectId: string, status: ProjectStatus) {
     // Phase 3D — defense in depth: block if no permission, even if UI was bypassed
-    if (!perms.can.archiveProject) {
-      console.warn('[Sidebar] handleSetStatus blocked — no archiveProject permission')
+    if (!perms.can.changeProjectStatus) {
+      console.warn('[Sidebar] handleSetStatus blocked — no changeProjectStatus permission')
+      setOpenActionMenu(null)
+      return
+    }
+    // PMs can't directly pick "Archived" — UI filters it out, but block at
+    // function level too (defense in depth).
+    if (status === 'Archived' && !perms.can.archiveProject) {
+      console.warn('[Sidebar] handleSetStatus blocked — PMs cannot Archive directly')
       setOpenActionMenu(null)
       return
     }
@@ -511,7 +525,7 @@ export default function Sidebar({ user }: SidebarProps) {
           const isActiveStatus = status === 'Active'
           // Phase 3B — project shell with no uploaded baseline yet. Created by
           // an Admin via the Create Project modal. PM uploads baseline next.
-          const isAwaitingBaseline = p.versions.length === 0
+          const isAwaitingBaseline = p.versions.filter(v => !v.deletedAt).length === 0
           return (
             <div key={p.id} className="mb-0.5">
               {isEditing ? (
@@ -616,7 +630,7 @@ export default function Sidebar({ user }: SidebarProps) {
                       isCompleted ? 'text-white/40' : 'text-white/70'
                     )} title={p.name}>{p.name}</div>
                   </div>
-                  <span className="text-white/40 text-[9px] flex-shrink-0 font-mono">{p.versions.length}</span>
+                  <span className="text-white/40 text-[9px] flex-shrink-0 font-mono">{p.versions.filter(v => !v.deletedAt).length}</span>
                   {perms.can.openProjectActions && (
                   <div className="relative flex-shrink-0">
                     <button
@@ -647,31 +661,42 @@ export default function Sidebar({ user }: SidebarProps) {
                             className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-white/10 flex items-center gap-2"
                           ><span>👥</span> Team</button>
                         )}
-                        {perms.can.archiveProject && (
+                        {perms.can.changeProjectStatus && (
                           <>
                             <div className="my-1 border-t border-white/8" />
                             <div className="px-3 py-1 text-[8px] font-bold text-white/40 uppercase tracking-widest">Status</div>
-                            {STATUS_OPTIONS.map(s => {
-                              const isCurrent = status === s
-                              return (
-                                <button
-                                  key={s}
-                                  onClick={() => handleSetStatus(p.id, s)}
-                                  className={clsx(
-                                    'w-full text-left px-3 py-1.5 text-[11px] hover:bg-white/10 flex items-center gap-2',
-                                    isCurrent ? 'text-white' : 'text-white/70'
-                                  )}
-                                >
-                                  <span className={clsx(
-                                    'w-3 h-3 rounded-full border-2 flex-shrink-0 flex items-center justify-center',
-                                    isCurrent ? 'border-blue-500' : 'border-white/30'
-                                  )}>
-                                    {isCurrent && <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />}
-                                  </span>
-                                  {s}
-                                </button>
-                              )
-                            })}
+                            {STATUS_OPTIONS
+                              // Day 10 — PMs don't see "Archived" option in
+                              // the status menu. Owner/Admin see all options.
+                              // Marking Completed auto-archives anyway, so
+                              // PMs effectively have the archive path via
+                              // "Completed" without seeing the destructive
+                              // word.
+                              .filter(s => s !== 'Archived' || perms.can.archiveProject)
+                              .map(s => {
+                                const isCurrent = status === s
+                                return (
+                                  <button
+                                    key={s}
+                                    onClick={() => handleSetStatus(p.id, s)}
+                                    className={clsx(
+                                      'w-full text-left px-3 py-1.5 text-[11px] hover:bg-white/10 flex items-center gap-2',
+                                      isCurrent ? 'text-white' : 'text-white/70'
+                                    )}
+                                  >
+                                    <span className={clsx(
+                                      'w-3 h-3 rounded-full border-2 flex-shrink-0 flex items-center justify-center',
+                                      isCurrent ? 'border-blue-500' : 'border-white/30'
+                                    )}>
+                                      {isCurrent && <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />}
+                                    </span>
+                                    {s}
+                                    {s === 'Completed' && (
+                                      <span className="text-[8px] text-white/40 ml-auto">→ archives</span>
+                                    )}
+                                  </button>
+                                )
+                              })}
                           </>
                         )}
                         {perms.can.softDeleteProject && (
@@ -780,6 +805,10 @@ export default function Sidebar({ user }: SidebarProps) {
                 </div>
                 <div className="ml-5 pl-2 border-l border-white/5 py-0.5">
                   {[...p.versions]
+                    // Day 10 — filter out soft-deleted versions. They live
+                    // in the Deleted Items page (Versions tab) until restored
+                    // or permanently deleted by Owner/Admin.
+                    .filter(v => !v.deletedAt)
                     .sort((a, b) => {
                       // v14 — sort newest at top. Prefer dataDate, fall back
                       // to uploadedAt for versions that don't have one.
@@ -897,7 +926,7 @@ export default function Sidebar({ user }: SidebarProps) {
                                     className="w-full text-left px-3 py-1.5 text-[11px] text-white hover:bg-white/10"
                                   >⇄ Move to…</button>
                                 )}
-                                {perms.can.deleteVersion && p.versions.length > 1 && (
+                                {perms.can.deleteVersion && p.versions.filter(v => !v.deletedAt).length > 1 && (
                                   <button
                                     onClick={() => {
                                       setConfirmDeleteVersionId(v.id)

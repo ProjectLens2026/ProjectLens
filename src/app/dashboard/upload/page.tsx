@@ -124,6 +124,17 @@ export default function UploadPage() {
     const all = loadProjects()
     setExistingProjects(all)
     const activeId = getActiveProjectId()
+    // Phase 3D — PMs can NEVER create new projects via upload. Force them
+    // into existing-project mode regardless of what's selected.
+    if (!perms.loading && !perms.can.createProject) {
+      setProjectMode('existing')
+      if (activeId && all.find(p => p.id === activeId)) {
+        setSelectedProjectId(activeId)
+      } else if (all.length > 0) {
+        setSelectedProjectId(all[0].id)
+      }
+      return
+    }
     if (activeId && all.find(p => p.id === activeId)) {
       setSelectedProjectId(activeId)
       setProjectMode('existing')
@@ -676,19 +687,25 @@ export default function UploadPage() {
             {/* Project assignment */}
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5">
               <div className="text-xs font-bold text-blue-900 uppercase tracking-wider mb-3">Assign this schedule to:</div>
-              <div className="grid grid-cols-2 gap-3 mb-3">
-                <button
-                  type="button"
-                  onClick={() => setProjectMode('new')}
-                  className={`text-left p-3 rounded-lg border-2 transition-all ${projectMode === 'new' ? 'border-blue-500 bg-white' : 'border-slate-200 bg-white/50 hover:border-blue-300'}`}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className={`w-4 h-4 rounded-full border-2 ${projectMode === 'new' ? 'border-blue-500' : 'border-slate-300'} flex items-center justify-center`}>
-                      {projectMode === 'new' && <div className="w-2 h-2 rounded-full bg-blue-500" />}
+              <div className={perms.can.createProject ? 'grid grid-cols-2 gap-3 mb-3' : 'mb-3'}>
+                {/* Day 10 — "Create new project" is Owner/Admin only.
+                    PMs upload to existing assigned projects, full stop.
+                    Hiding the button (rather than disabling) makes the UX
+                    cleaner — no temptation, no "why can't I click this?". */}
+                {perms.can.createProject && (
+                  <button
+                    type="button"
+                    onClick={() => setProjectMode('new')}
+                    className={`text-left p-3 rounded-lg border-2 transition-all ${projectMode === 'new' ? 'border-blue-500 bg-white' : 'border-slate-200 bg-white/50 hover:border-blue-300'}`}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className={`w-4 h-4 rounded-full border-2 ${projectMode === 'new' ? 'border-blue-500' : 'border-slate-300'} flex items-center justify-center`}>
+                        {projectMode === 'new' && <div className="w-2 h-2 rounded-full bg-blue-500" />}
+                      </div>
+                      <span className="font-bold text-xs text-slate-900">Create new project</span>
                     </div>
-                    <span className="font-bold text-xs text-slate-900">Create new project</span>
-                  </div>
-                  <div className="text-[10px] text-slate-500 ml-6">First upload starts the project's baseline</div>
-                </button>
+                    <div className="text-[10px] text-slate-500 ml-6">First upload starts the project's baseline</div>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setProjectMode('existing')}
@@ -698,13 +715,22 @@ export default function UploadPage() {
                     <div className={`w-4 h-4 rounded-full border-2 ${projectMode === 'existing' ? 'border-blue-500' : 'border-slate-300'} flex items-center justify-center`}>
                       {projectMode === 'existing' && <div className="w-2 h-2 rounded-full bg-blue-500" />}
                     </div>
-                    <span className="font-bold text-xs text-slate-900">Update existing project</span>
+                    <span className="font-bold text-xs text-slate-900">
+                      {perms.can.createProject ? 'Update existing project' : 'Add version to your project'}
+                    </span>
                   </div>
                   <div className="text-[10px] text-slate-500 ml-6">
-                    {existingProjects.length === 0 ? 'No projects yet' : `Add as new version to one of your ${existingProjects.length} project${existingProjects.length > 1 ? 's' : ''}`}
+                    {existingProjects.length === 0
+                      ? (perms.can.createProject ? 'No projects yet' : 'No projects assigned — ask your admin')
+                      : `Add as new version to one of your ${existingProjects.length} project${existingProjects.length > 1 ? 's' : ''}`}
                   </div>
                 </button>
               </div>
+              {!perms.can.createProject && (
+                <div className="bg-white border border-blue-200 rounded-lg p-2.5 mb-3 text-[11px] text-blue-900">
+                  <strong>🔒 PM access:</strong> You upload versions to projects your Admin has assigned to you. To create a new project, ask an Admin or Owner.
+                </div>
+              )}
               {projectMode === 'existing' && (
                 <div>
                   <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">Select Project</label>

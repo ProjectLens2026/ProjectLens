@@ -1431,3 +1431,49 @@ export async function createProjectInvitation(opts: {
     acceptUrl: `${origin}/auth/accept-invite?token=${token}`,
   }
 }
+
+// =============================================================================
+// Day 10 — Soft delete + restore for schedule versions
+// =============================================================================
+
+/**
+ * softDeleteVersionInSupabase — Day 10. Marks the version's deleted_at
+ * column instead of removing the row. PMs can soft-delete and restore;
+ * only Owner/Admin can permanently delete (uses deleteVersionFromSupabase).
+ */
+export async function softDeleteVersionInSupabase(
+  projectIdLocal: string,
+  versionIdLocal: string,
+): Promise<boolean> {
+  const supabase = createClient()
+  const cloudVersionId = toUuid(versionIdLocal)
+  const { error } = await supabase
+    .from('schedule_versions')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', cloudVersionId)
+  if (error) {
+    console.error('[db.softDeleteVersion] failed:', error.message)
+    return false
+  }
+  return true
+}
+
+/**
+ * restoreVersionInSupabase — Day 10. Clears the deleted_at column.
+ */
+export async function restoreVersionInSupabase(
+  projectIdLocal: string,
+  versionIdLocal: string,
+): Promise<boolean> {
+  const supabase = createClient()
+  const cloudVersionId = toUuid(versionIdLocal)
+  const { error } = await supabase
+    .from('schedule_versions')
+    .update({ deleted_at: null })
+    .eq('id', cloudVersionId)
+  if (error) {
+    console.error('[db.restoreVersion] failed:', error.message)
+    return false
+  }
+  return true
+}
