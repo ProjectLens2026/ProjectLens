@@ -481,10 +481,16 @@ function InvitationsTab({ perms }: { perms: ReturnType<typeof usePermissions> })
               value={role}
               onChange={e => setRole(e.target.value)}
               className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500">
+              {perms.isOwner && <option value="owner">Owner — full control (billing, all roles, all projects)</option>}
               {perms.isOwner && <option value="admin">Admin — full operational access (creates projects, invites PMs)</option>}
               <option value="pm">Project Manager — uploads schedules, manages assigned projects</option>
               <option value="viewer">Viewer — read-only access to projects shared with them</option>
             </select>
+            {perms.isOwner && role === 'owner' && (
+              <div className="mt-1.5 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                ⚠ Owners have full control including billing and can promote/remove other Owners. Only invite people you fully trust.
+              </div>
+            )}
           </div>
 
           {error && (
