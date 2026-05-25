@@ -236,6 +236,7 @@ export default function UploadPage() {
         baseline: { allowed: true },
         rebaseline: { allowed: false, reason: 'New project — first upload must be baseline' },
         update: { allowed: false, reason: 'New project — first upload must be baseline' },
+        fragnet: { allowed: false, reason: 'New project — first upload must be baseline' },
       }
     }
     const project = existingProjects.find(p => p.id === selectedProjectId)
@@ -244,6 +245,7 @@ export default function UploadPage() {
         baseline: { allowed: false, reason: 'Pick a project first' },
         rebaseline: { allowed: false, reason: 'Pick a project first' },
         update: { allowed: false, reason: 'Pick a project first' },
+        fragnet: { allowed: false, reason: 'Pick a project first' },
       }
     }
     const labelerVersions = project.versions.map(v => ({
