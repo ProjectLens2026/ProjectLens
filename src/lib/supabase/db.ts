@@ -1479,49 +1479,6 @@ export async function restoreVersionInSupabase(
 }
 
 // =============================================================================
-// Day 10 — Platform Portfolio (ControlLens staff only)
-// =============================================================================
-
-/**
- * loadPlatformPortfolio — returns a cross-org summary for the Portfolio page.
- *
- * SECURITY: This calls the platform_portfolio() Postgres function which is
- * SECURITY DEFINER and checks the caller's email against the platform owner
- * allowlist BEFORE returning data. Non-platform-owners get an empty array.
- * Whitelist must match the one in usePermissions.ts (single source of truth
- * lives in the DB function).
- *
- * Returns: one row per organization with member counts, project counts, etc.
- */
-export interface PortfolioOrg {
-  org_id: string
-  org_name: string
-  account_type: string
-  created_at: string
-  owner_count: number
-  admin_count: number
-  pm_count: number
-  viewer_count: number
-  total_members: number
-  active_project_count: number
-  archived_project_count: number
-  total_version_count: number
-  primary_owner_email: string | null
-  primary_owner_name: string | null
-  last_activity_at: string | null
-}
-
-export async function loadPlatformPortfolio(): Promise<PortfolioOrg[]> {
-  const supabase = createClient()
-  const { data, error } = await supabase.rpc('platform_portfolio')
-  if (error) {
-    console.error('[db.loadPlatformPortfolio] failed:', error)
-    return []
-  }
-  return (data || []) as PortfolioOrg[]
-}
-
-// =============================================================================
 // Day 10 — Platform Portfolio (Platform Owner only — Jawid + backup)
 // =============================================================================
 
@@ -1690,4 +1647,114 @@ export async function createCompanyAsPlatformOwner(opts: {
     orgId: result.org_id,
     acceptUrl: `${origin}/auth/accept-invite?token=${result.token}`,
   }
+}
+
+// =============================================================================
+// Day 10 — TIA Compare via Supabase Storage
+//
+// PROBLEM: Vercel API routes have a ~4.5MB body size limit. Large XER files
+// (50-100 MB each, 120 MB combined) get a 413 Payload Too Large error before
+// the route even runs. ALSO saved versions don't have raw XER in local
+// IndexedDB — the actual file lives in Supabase Storage.
+//
+// FIX: Upload both files to Storage, generate signed URLs (30-min TTL),
+// send only URLs to the API. API downloads from Storage server-side and
+// processes. Works for files of any size.
+// =============================================================================
+
+const TIA_TEMP_FOLDER = '_tia_temp'
+const SIGNED_URL_TTL_SECONDS = 30 * 60  // 30 minutes — plenty for compare + report
+
+/**
+ * uploadTiaCompareFile — uploads a fresh XER file to a temp location in
+ * Storage and returns a signed URL the API can fetch server-side.
+ * Used for the Quick TIA mode (both files) and the impacted fragnet upload
+ * in Project TIA mode.
+ *
+ * @param file - the File object from the upload input
+ * @param label - 'baseline' or 'fragnet' (used in the path for clarity)
+ * @returns { signedUrl, path } - signedUrl is what /api/compare fetches;
+ *          path is retained so we can clean up afterwards.
+ */
+export async function uploadTiaCompareFile(
+  file: File,
+  label: 'baseline' | 'fragnet',
+): Promise<{ ok: boolean; signedUrl?: string; path?: string; error?: string }> {
+  const supabase = createClient()
+  const orgId = await ensureUserHasOrg()
+  if (!orgId) return { ok: false, error: 'No active org' }
+
+  // Unique path per upload — avoids collisions when comparing multiple times
+  const uniqueId = typeof crypto !== 'undefined' && (crypto as any).randomUUID
+    ? (crypto as any).randomUUID()
+    : Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
+  const path = `${orgId}/${TIA_TEMP_FOLDER}/${uniqueId}_${label}.xer`
+
+  const { error: upErr } = await supabase.storage
+    .from(BUCKET)
+    .upload(path, file, { upsert: true, contentType: 'text/plain' })
+  if (upErr) {
+    console.error('[db.uploadTiaCompareFile] upload failed:', upErr.message)
+    return { ok: false, error: upErr.message }
+  }
+
+  const { data: signed, error: signErr } = await supabase.storage
+    .from(BUCKET)
+    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS)
+  if (signErr || !signed?.signedUrl) {
+    console.error('[db.uploadTiaCompareFile] sign URL failed:', signErr?.message)
+    return { ok: false, error: signErr?.message || 'Failed to sign URL' }
+  }
+
+  console.log('[db] uploaded TIA file to', path, `(${(file.size / 1024 / 1024).toFixed(1)} MB)`)
+  return { ok: true, signedUrl: signed.signedUrl, path }
+}
+
+/**
+ * getSavedVersionXerSignedUrl — for Project TIA mode, fetches a signed URL
+ * for a previously saved version's raw XER from Storage. Lets old saved
+ * versions be reused for TIA without re-uploading.
+ *
+ * Returns null if the version has no raw XER on file (very old version
+ * uploaded before storage was wired up). UI should show "Re-upload" message.
+ */
+export async function getSavedVersionXerSignedUrl(
+  versionIdLocal: string,
+): Promise<{ ok: boolean; signedUrl?: string; error?: string }> {
+  const supabase = createClient()
+  const cloudVersionId = toUuid(versionIdLocal)
+
+  // Look up the version row to find raw_xer_path
+  const { data: versionRow, error: rowErr } = await supabase
+    .from('schedule_versions')
+    .select('raw_xer_path')
+    .eq('id', cloudVersionId)
+    .maybeSingle()
+  if (rowErr) {
+    console.error('[db.getSavedVersionXerSignedUrl] lookup failed:', rowErr.message)
+    return { ok: false, error: rowErr.message }
+  }
+  if (!versionRow?.raw_xer_path) {
+    return { ok: false, error: 'This saved version has no raw XER on file. It was uploaded before storage was enabled. Please re-upload the version to use it for TIA.' }
+  }
+
+  const { data: signed, error: signErr } = await supabase.storage
+    .from(BUCKET)
+    .createSignedUrl(versionRow.raw_xer_path, SIGNED_URL_TTL_SECONDS)
+  if (signErr || !signed?.signedUrl) {
+    console.error('[db.getSavedVersionXerSignedUrl] sign URL failed:', signErr?.message)
+    return { ok: false, error: signErr?.message || 'Failed to sign URL' }
+  }
+  return { ok: true, signedUrl: signed.signedUrl }
+}
+
+/**
+ * cleanupTiaTempFile — best-effort delete of a temp file after compare runs.
+ * Called from the TIA page after the API call returns. Not critical if it
+ * fails (the next session's housekeeping will catch it).
+ */
+export async function cleanupTiaTempFile(path: string): Promise<void> {
+  if (!path) return
+  const supabase = createClient()
+  await supabase.storage.from(BUCKET).remove([path]).catch(() => {})
 }

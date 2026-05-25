@@ -1,14 +1,31 @@
 'use client'
+// =============================================================================
+// TIA Comparison page (Day 10 rewrite for Supabase Storage)
+//
+// Changes from previous version:
+//   - Project TIA mode: pulls baseline raw XER from Supabase Storage via a
+//     signed URL (was: reading from local IndexedDB rawXER which is empty
+//     for older versions). Fixes the "Re-upload required for TIA" warning.
+//   - Both modes: upload XER files to Storage first, then send signed URLs
+//     to /api/compare. Bypasses Vercel's ~4.5MB request body limit. Works
+//     for any size XER file.
+//   - Better progress messages so PMs know what's happening during the
+//     longer upload-then-compare flow.
+// =============================================================================
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import {
   getActiveProject, getLatestVersion, addVersionToProject,
-  Project, ScheduleVersion
+  Project, ScheduleVersion,
 } from '@/lib/projectStore'
+import {
+  uploadTiaCompareFile, getSavedVersionXerSignedUrl, cleanupTiaTempFile,
+} from '@/lib/supabase/db'
 import { usePermissions } from '@/lib/usePermissions'
 
 type Step = 'mode-select' | 'upload' | 'analyzing' | 'review' | 'categorize' | 'generating'
 type TIAMode = 'project' | 'quick'
+
 interface FragnetCategorization {
   category: string
   description: string
@@ -27,6 +44,7 @@ export default function TIAPage() {
   const [comparison, setComparison] = useState<any>(null)
   const [activeTab, setActiveTab] = useState('summary')
   const [progress, setProgress] = useState(0)
+  const [progressLabel, setProgressLabel] = useState('Starting...')
   const [categorizations, setCategorizations] = useState<Record<string, FragnetCategorization>>({})
   const [ctx, setCtx] = useState({
     projectName: '',
@@ -35,6 +53,12 @@ export default function TIAPage() {
     preparedBy: '',
     contractCompletionDate: '',
   })
+
+  // Track Storage paths so we can clean up after compare (best-effort)
+  const tempPathsRef = useRef<string[]>([])
+  // Cache resolved signed URLs so the second call (report gen) reuses them
+  const signedUrlsRef = useRef<{ a?: string; b?: string }>({})
+
   useEffect(() => {
     const p = getActiveProject()
     setActiveProject(p)
@@ -47,9 +71,11 @@ export default function TIAPage() {
       setMode('quick')
     }
   }, [])
+
   const fragnetRef = useRef<HTMLInputElement>(null)
   const fileARef = useRef<HTMLInputElement>(null)
   const fileBRef = useRef<HTMLInputElement>(null)
+
   const categories = [
     { value: 'owner', label: 'Owner-Caused' },
     { value: 'force_majeure', label: 'Force Majeure (weather, pandemic)' },
@@ -58,86 +84,153 @@ export default function TIAPage() {
     { value: 'contractor', label: 'Contractor-Caused' },
     { value: 'excusable', label: 'Excusable / Non-Compensable' },
   ]
+
   function shortDate(d?: string) {
     if (!d) return '—'
     return d.slice(0, 10)
   }
+
+  // ===========================================================================
+  // Resolve signed URLs for both files (downloads baseline from saved version
+  // OR uploads fresh files). Cached in signedUrlsRef so report-gen can reuse.
+  // ===========================================================================
+  async function resolveSignedUrls(): Promise<{ ok: true; aUrl: string; bUrl: string } | { ok: false; error: string }> {
+    if (mode === 'project') {
+      if (!activeProject || !selectedBaselineId || !fragnetFile) {
+        return { ok: false, error: 'Pick a baseline and upload a fragnet XER' }
+      }
+      // Baseline: get from Supabase Storage (no re-upload needed)
+      setProgressLabel('Fetching baseline from storage...')
+      const baselineResult = await getSavedVersionXerSignedUrl(selectedBaselineId)
+      if (!baselineResult.ok || !baselineResult.signedUrl) {
+        return { ok: false, error: baselineResult.error || 'Failed to get baseline URL' }
+      }
+
+      // Fragnet: upload fresh to Storage
+      setProgressLabel('Uploading fragnet to storage...')
+      setProgress(20)
+      const fragnetResult = await uploadTiaCompareFile(fragnetFile, 'fragnet')
+      if (!fragnetResult.ok || !fragnetResult.signedUrl) {
+        return { ok: false, error: fragnetResult.error || 'Failed to upload fragnet' }
+      }
+      if (fragnetResult.path) tempPathsRef.current.push(fragnetResult.path)
+
+      return { ok: true, aUrl: baselineResult.signedUrl, bUrl: fragnetResult.signedUrl }
+    }
+
+    // Quick TIA mode — upload both files fresh
+    if (!fileA || !fileB) {
+      return { ok: false, error: 'Upload both schedules' }
+    }
+    setProgressLabel('Uploading baseline to storage...')
+    setProgress(15)
+    const aResult = await uploadTiaCompareFile(fileA, 'baseline')
+    if (!aResult.ok || !aResult.signedUrl) {
+      return { ok: false, error: aResult.error || 'Failed to upload baseline' }
+    }
+    if (aResult.path) tempPathsRef.current.push(aResult.path)
+
+    setProgressLabel('Uploading impacted schedule to storage...')
+    setProgress(35)
+    const bResult = await uploadTiaCompareFile(fileB, 'fragnet')
+    if (!bResult.ok || !bResult.signedUrl) {
+      return { ok: false, error: bResult.error || 'Failed to upload impacted schedule' }
+    }
+    if (bResult.path) tempPathsRef.current.push(bResult.path)
+
+    return { ok: true, aUrl: aResult.signedUrl, bUrl: bResult.signedUrl }
+  }
+
   async function runComparison() {
     setStep('analyzing')
-    setProgress(0)
-    const prog = setInterval(() => setProgress(p => p < 85 ? p + Math.random() * 8 : p), 400)
+    setProgress(5)
+    setProgressLabel('Preparing files...')
+
     try {
-      const fd = new FormData()
-      if (mode === 'project') {
-        if (!activeProject || !selectedBaselineId || !fragnetFile) {
-          clearInterval(prog)
-          alert('Pick a baseline and upload a fragnet XER')
-          setStep('upload')
-          return
-        }
-        const baseline = activeProject.versions.find(v => v.id === selectedBaselineId)
-        if (!baseline?.rawXER) {
-          clearInterval(prog)
-          alert('Saved baseline does not have raw XER data. Please re-upload the baseline version OR use Quick TIA mode.')
-          setStep('upload')
-          return
-        }
-        const baselineBlob = new Blob([baseline.rawXER], { type: 'text/plain' })
-        const baselineFile = new File([baselineBlob], baseline.fileName, { type: 'text/plain' })
-        fd.append('fileA', baselineFile)
-        fd.append('fileB', fragnetFile)
-      } else {
-        if (!fileA || !fileB) {
-          clearInterval(prog)
-          alert('Upload both schedules')
-          setStep('upload')
-          return
-        }
-        fd.append('fileA', fileA)
-        fd.append('fileB', fileB)
+      // Step 1: Get signed URLs (uploads if needed, fetches from saved if not)
+      const urls = await resolveSignedUrls()
+      if (!urls.ok) {
+        alert(urls.error)
+        setStep('upload')
+        return
       }
+      signedUrlsRef.current = { a: urls.aUrl, b: urls.bUrl }
+      setProgress(55)
+      setProgressLabel('Comparing schedules (this can take 30-60 seconds for large files)...')
+
+      // Step 2: Call API with URLs (tiny payload, no 413)
+      const fd = new FormData()
+      fd.append('fileAUrl', urls.aUrl)
+      fd.append('fileBUrl', urls.bUrl)
       fd.append('mode', 'compare')
+
       const res = await fetch('/api/compare', { method: 'POST', body: fd })
-      clearInterval(prog)
-      setProgress(100)
-      if (!res.ok) throw new Error('Comparison failed')
+      if (!res.ok) {
+        let errMsg = `Comparison failed (HTTP ${res.status})`
+        try {
+          const errBody = await res.json()
+          if (errBody.error) errMsg = errBody.error
+        } catch {}
+        throw new Error(errMsg)
+      }
+
+      setProgress(95)
+      setProgressLabel('Loading results...')
       const data = await res.json()
       setComparison(data.comparison)
+
       const initialCats: Record<string, FragnetCategorization> = {}
       for (const frag of data.comparison.fragnetActivities || []) {
         initialCats[frag.task_id] = { category: 'owner', description: '' }
       }
       setCategorizations(initialCats)
-      setTimeout(() => setStep('review'), 400)
+      setProgress(100)
+      setTimeout(() => setStep('review'), 300)
     } catch (err: any) {
-      clearInterval(prog)
-      alert('Failed: ' + err.message)
+      console.error('[TIA] compare failed:', err)
+      alert('Comparison failed: ' + (err?.message || 'Unknown error'))
       setStep('upload')
     }
   }
+
   async function generateReport() {
     if (!comparison) return
     setStep('generating')
+
     try {
-      const fd = new FormData()
-      if (mode === 'project') {
-        if (!activeProject || !selectedBaselineId || !fragnetFile) return
-        const baseline = activeProject.versions.find(v => v.id === selectedBaselineId)
-        if (!baseline?.rawXER) return
-        const baselineBlob = new Blob([baseline.rawXER], { type: 'text/plain' })
-        const baselineFile = new File([baselineBlob], baseline.fileName, { type: 'text/plain' })
-        fd.append('fileA', baselineFile)
-        fd.append('fileB', fragnetFile)
-      } else {
-        if (!fileA || !fileB) return
-        fd.append('fileA', fileA)
-        fd.append('fileB', fileB)
+      // Reuse the signed URLs from runComparison if still valid (they last 30 min)
+      let aUrl = signedUrlsRef.current.a
+      let bUrl = signedUrlsRef.current.b
+
+      // If we don't have them (shouldn't happen but defensive), get fresh ones
+      if (!aUrl || !bUrl) {
+        const urls = await resolveSignedUrls()
+        if (!urls.ok) {
+          alert(urls.error)
+          setStep('categorize')
+          return
+        }
+        aUrl = urls.aUrl
+        bUrl = urls.bUrl
       }
+
+      const fd = new FormData()
+      fd.append('fileAUrl', aUrl)
+      fd.append('fileBUrl', bUrl)
       fd.append('mode', 'tia')
       fd.append('context', JSON.stringify(ctx))
       fd.append('fragnetCategorizations', JSON.stringify(categorizations))
+
       const res = await fetch('/api/compare', { method: 'POST', body: fd })
-      if (!res.ok) throw new Error('Report generation failed')
+      if (!res.ok) {
+        let errMsg = 'Report generation failed'
+        try {
+          const errBody = await res.json()
+          if (errBody.error) errMsg = errBody.error
+        } catch {}
+        throw new Error(errMsg)
+      }
+
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -147,6 +240,8 @@ export default function TIAPage() {
       a.click()
       a.remove()
       URL.revokeObjectURL(url)
+
+      // Save the fragnet as a new version in project history (Project mode only)
       if (mode === 'project' && activeProject && fragnetFile) {
         try {
           const rawXER = await fragnetFile.text()
@@ -164,15 +259,22 @@ export default function TIAPage() {
           console.warn('Could not save fragnet to project:', e)
         }
       }
+
+      // Best-effort cleanup of temp Storage files
+      for (const path of tempPathsRef.current) {
+        cleanupTiaTempFile(path).catch(() => {})
+      }
+      tempPathsRef.current = []
+
       setStep('review')
     } catch (err: any) {
-      alert('Failed: ' + err.message)
+      console.error('[TIA] report failed:', err)
+      alert('Report generation failed: ' + (err?.message || 'Unknown error'))
       setStep('categorize')
     }
   }
 
-  // Phase 3D — Viewer lockdown. TIA runs heavy comparative analytics and
-  // writes fragnets back to project history — Viewers cannot do either.
+  // Viewer lockdown
   if (!perms.loading && !perms.can.runAdvancedAnalytics) {
     return (
       <div className="flex flex-col h-full bg-slate-50 items-center justify-center p-6">
@@ -200,9 +302,7 @@ export default function TIAPage() {
         <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
           <div className="max-w-4xl mx-auto">
             <h2 className="text-xl font-extrabold text-slate-900 mb-1">How do you want to run this TIA?</h2>
-            <p className="text-slate-500 text-sm mb-6">
-              Pick the mode that matches your situation.
-            </p>
+            <p className="text-slate-500 text-sm mb-6">Pick the mode that matches your situation.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
               <button
                 onClick={() => { setMode('project'); setStep('upload') }}
@@ -249,12 +349,13 @@ export default function TIAPage() {
       </div>
     )
   }
+
   if (step === 'upload') {
     const isProjectMode = mode === 'project'
-    const baselineVersion = activeProject?.versions.find(v => v.id === selectedBaselineId)
     const canRun = isProjectMode
-      ? !!(activeProject && selectedBaselineId && fragnetFile && baselineVersion?.rawXER)
+      ? !!(activeProject && selectedBaselineId && fragnetFile)
       : !!(fileA && fileB)
+
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4">
@@ -278,7 +379,7 @@ export default function TIAPage() {
                   <div className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-2">Step 1 — Un-Impacted Baseline</div>
                   <div className="text-xs text-slate-500 mb-3">
                     Pick the saved version that was current BEFORE the delay event (Method 4 TIA standard).
-                    Defaults to latest version.
+                    Defaults to latest version. Baseline is fetched from secure storage — no re-upload needed.
                   </div>
                   <select
                     value={selectedBaselineId}
@@ -286,20 +387,13 @@ export default function TIAPage() {
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-500">
                     {activeProject?.versions.map((v, i) => {
                       const versionNum = (activeProject?.versions.length || 1) - i
-                      const hasRaw = !!v.rawXER
                       return (
-                        <option key={v.id} value={v.id} disabled={!hasRaw}>
-                          v{versionNum} · {v.fileName} · {shortDate(v.uploadedAt)}{!hasRaw ? ' (re-upload required for TIA)' : ''}
+                        <option key={v.id} value={v.id}>
+                          v{versionNum} · {v.fileName} · {shortDate(v.uploadedAt)}
                         </option>
                       )
                     })}
                   </select>
-                  {baselineVersion && !baselineVersion.rawXER && (
-                    <div className="mt-2 text-[10px] bg-amber-50 border border-amber-200 rounded p-2 text-amber-900">
-                      ⚠️ This version was uploaded before TIA-from-saved was supported. The raw XER text isn't available.
-                      <br />Either re-upload this version to enable Project TIA, or switch to Quick TIA mode.
-                    </div>
-                  )}
                 </div>
                 <div className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-6 mb-4 hover:border-blue-400 transition-colors">
                   <div className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-2">Step 2 — Fragnet XER (Impacted)</div>
@@ -312,7 +406,7 @@ export default function TIAPage() {
                     <div className="text-3xl mb-2">📊</div>
                     {fragnetFile ? (
                       <div className="text-xs bg-green-50 text-green-700 px-3 py-2 rounded-lg font-semibold inline-block">
-                        ✓ {fragnetFile.name}
+                        ✓ {fragnetFile.name} ({(fragnetFile.size / 1024 / 1024).toFixed(1)} MB)
                       </div>
                     ) : (
                       <div className="text-xs text-slate-400">Click to upload fragnet .xer file</div>
@@ -362,7 +456,7 @@ export default function TIAPage() {
                       <div className="text-xs text-slate-500 mb-3">Un-Impacted Current Schedule</div>
                       {fileA ? (
                         <div className="text-xs bg-green-50 text-green-700 px-3 py-2 rounded-lg font-semibold">
-                          ✓ {fileA.name}
+                          ✓ {fileA.name} ({(fileA.size / 1024 / 1024).toFixed(1)} MB)
                         </div>
                       ) : (
                         <div className="text-xs text-slate-400">Click to upload .xer file</div>
@@ -379,7 +473,7 @@ export default function TIAPage() {
                       <div className="text-xs text-slate-500 mb-3">Impacted Current Schedule (with Fragnet)</div>
                       {fileB ? (
                         <div className="text-xs bg-green-50 text-green-700 px-3 py-2 rounded-lg font-semibold">
-                          ✓ {fileB.name}
+                          ✓ {fileB.name} ({(fileB.size / 1024 / 1024).toFixed(1)} MB)
                         </div>
                       ) : (
                         <div className="text-xs text-slate-400">Click to upload .xer file</div>
@@ -416,14 +510,15 @@ export default function TIAPage() {
       </div>
     )
   }
+
   if (step === 'analyzing') {
     return (
       <div className="flex flex-col h-full">
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center max-w-md">
             <div className="text-6xl mb-6 animate-pulse">🔍</div>
-            <h2 className="text-xl font-extrabold text-slate-900 mb-2">Comparing schedules</h2>
-            <p className="text-slate-500 text-sm mb-6">Reading both XER files and analyzing differences...</p>
+            <h2 className="text-xl font-extrabold text-slate-900 mb-2">{progressLabel}</h2>
+            <p className="text-slate-500 text-sm mb-6">Large XER files (50 MB+) may take a minute or two.</p>
             <div className="bg-slate-100 rounded-full h-2 overflow-hidden mb-3">
               <div className="bg-blue-600 h-2 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
             </div>
@@ -433,13 +528,14 @@ export default function TIAPage() {
       </div>
     )
   }
+
   if (step === 'review' && comparison) {
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4">
           <span className="font-bold text-slate-900 text-base">Comparison Results</span>
           <div className="ml-auto flex gap-2">
-            <button onClick={() => { setStep('upload'); setFileA(null); setFileB(null); setComparison(null) }}
+            <button onClick={() => { setStep('upload'); setFileA(null); setFileB(null); setComparison(null); signedUrlsRef.current = {}; tempPathsRef.current = [] }}
               className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400">
               ← Compare Other Files
             </button>
@@ -638,6 +734,7 @@ export default function TIAPage() {
       </div>
     )
   }
+
   if (step === 'categorize') {
     const frags = comparison?.fragnetActivities || []
     return (
@@ -712,6 +809,7 @@ export default function TIAPage() {
       </div>
     )
   }
+
   if (step === 'generating') {
     return (
       <div className="flex flex-col h-full">
@@ -725,5 +823,6 @@ export default function TIAPage() {
       </div>
     )
   }
+
   return null
 }
