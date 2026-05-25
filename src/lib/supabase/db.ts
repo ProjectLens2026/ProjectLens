@@ -1662,7 +1662,7 @@ export async function createCompanyAsPlatformOwner(opts: {
 // processes. Works for files of any size.
 // =============================================================================
 
-const TIA_TEMP_FOLDER = '_tia_temp'
+const TIA_TEMP_FOLDER_PREFIX = '00000000-0000-4000-8000-000000000000'  // reserved UUID for temp files
 const SIGNED_URL_TTL_SECONDS = 30 * 60  // 30 minutes — plenty for compare + report
 
 /**
@@ -1671,8 +1671,13 @@ const SIGNED_URL_TTL_SECONDS = 30 * 60  // 30 minutes — plenty for compare + r
  * Used for the Quick TIA mode (both files) and the impacted fragnet upload
  * in Project TIA mode.
  *
+ * Storage path: {orgId}/{TIA_TEMP_FOLDER_PREFIX}/{label}_{uuid}.xer
+ * The second segment is a UUID (reserved magic value) because Supabase RLS
+ * on the schedule-artifacts bucket expects path segment 2 to be a project
+ * UUID. Using a fixed sentinel UUID for temp files satisfies that constraint.
+ *
  * @param file - the File object from the upload input
- * @param label - 'baseline' or 'fragnet' (used in the path for clarity)
+ * @param label - 'baseline' or 'fragnet' (used in the filename for clarity)
  * @returns { signedUrl, path } - signedUrl is what /api/compare fetches;
  *          path is retained so we can clean up afterwards.
  */
@@ -1684,11 +1689,13 @@ export async function uploadTiaCompareFile(
   const orgId = await ensureUserHasOrg()
   if (!orgId) return { ok: false, error: 'No active org' }
 
-  // Unique path per upload — avoids collisions when comparing multiple times
+  // Unique filename per upload — avoids collisions when comparing multiple times
   const uniqueId = typeof crypto !== 'undefined' && (crypto as any).randomUUID
     ? (crypto as any).randomUUID()
     : Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
-  const path = `${orgId}/${TIA_TEMP_FOLDER}/${uniqueId}_${label}.xer`
+  // Path: orgId / sentinel-uuid / label_uniqueId.xer
+  // Second segment must be a UUID for RLS policy compliance.
+  const path = `${orgId}/${TIA_TEMP_FOLDER_PREFIX}/${label}_${uniqueId}.xer`
 
   const { error: upErr } = await supabase.storage
     .from(BUCKET)
