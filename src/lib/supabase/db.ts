@@ -931,8 +931,15 @@ export async function acceptInvitation(opts: {
 // =============================================================================
 
 /**
- * updateOrgMemberRole — Owner/Admin can change any member's role within
- * the org. Refuses to demote the last Owner (keeps at least one).
+ * updateOrgMemberRole — Owner/Admin can change member roles, but with rank
+ * rules to prevent Admins from touching Owners:
+ *
+ *   Caller = Owner: can change anyone's role (except can't demote last Owner)
+ *   Caller = Admin: can change ONLY PMs and Viewers (cannot touch Owners or
+ *                   other Admins). Cannot promote anyone to Owner.
+ *   Caller = PM/Viewer: cannot change anyone's role
+ *
+ * Refuses to demote the last Owner.
  */
 export async function updateOrgMemberRole(opts: {
   userId: string
@@ -942,15 +949,42 @@ export async function updateOrgMemberRole(opts: {
   const orgId = await ensureUserHasOrg()
   if (!orgId) return { ok: false, error: 'No active org' }
 
-  // Safety: if demoting an Owner, ensure another Owner exists
-  const { data: currentMember } = await supabase
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { ok: false, error: 'Not signed in' }
+
+  // Caller's role in this org
+  const { data: callerMembership } = await supabase
+    .from('organization_members')
+    .select('role')
+    .eq('org_id', orgId)
+    .eq('user_id', user.id)
+    .maybeSingle()
+  const callerRole = callerMembership?.role as 'owner' | 'admin' | 'pm' | 'viewer' | undefined
+  if (!callerRole || (callerRole !== 'owner' && callerRole !== 'admin')) {
+    return { ok: false, error: 'Only Owners and Admins can change member roles.' }
+  }
+
+  // Target's current role
+  const { data: targetMember } = await supabase
     .from('organization_members')
     .select('role')
     .eq('org_id', orgId)
     .eq('user_id', opts.userId)
     .maybeSingle()
+  if (!targetMember) return { ok: false, error: 'Member not found in this org.' }
 
-  if (currentMember?.role === 'owner' && opts.newRole !== 'owner') {
+  // Rank check: Admin cannot touch Owners or other Admins
+  if (callerRole === 'admin') {
+    if (targetMember.role === 'owner' || targetMember.role === 'admin') {
+      return { ok: false, error: 'Admins cannot change the role of Owners or other Admins. Ask an Owner to make this change.' }
+    }
+    if (opts.newRole === 'owner') {
+      return { ok: false, error: 'Only Owners can promote someone to Owner.' }
+    }
+  }
+
+  // Safety: if demoting an Owner, ensure another Owner exists
+  if (targetMember.role === 'owner' && opts.newRole !== 'owner') {
     const { count: ownerCount } = await supabase
       .from('organization_members')
       .select('user_id', { count: 'exact', head: true })
@@ -976,6 +1010,12 @@ export async function updateOrgMemberRole(opts: {
 
 /**
  * removeOrgMember — Owner/Admin removes a user from the org entirely.
+ * Rank rules (matching updateOrgMemberRole):
+ *
+ *   Caller = Owner: can remove anyone (except can't remove last Owner)
+ *   Caller = Admin: can remove ONLY PMs and Viewers (cannot remove Owners
+ *                   or other Admins)
+ *
  * The user keeps their auth account but loses access to all org projects.
  */
 export async function removeOrgMember(userId: string): Promise<{ ok: boolean; error?: string }> {
@@ -983,15 +1023,37 @@ export async function removeOrgMember(userId: string): Promise<{ ok: boolean; er
   const orgId = await ensureUserHasOrg()
   if (!orgId) return { ok: false, error: 'No active org' }
 
-  // Check: don't allow removing the last Owner
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { ok: false, error: 'Not signed in' }
+
+  // Caller's role
+  const { data: callerMembership } = await supabase
+    .from('organization_members')
+    .select('role')
+    .eq('org_id', orgId)
+    .eq('user_id', user.id)
+    .maybeSingle()
+  const callerRole = callerMembership?.role as 'owner' | 'admin' | 'pm' | 'viewer' | undefined
+  if (!callerRole || (callerRole !== 'owner' && callerRole !== 'admin')) {
+    return { ok: false, error: 'Only Owners and Admins can remove members.' }
+  }
+
+  // Target's role
   const { data: targetMember } = await supabase
     .from('organization_members')
     .select('role')
     .eq('org_id', orgId)
     .eq('user_id', userId)
     .maybeSingle()
+  if (!targetMember) return { ok: false, error: 'Member not found in this org.' }
 
-  if (targetMember?.role === 'owner') {
+  // Rank check: Admin cannot remove Owners or other Admins
+  if (callerRole === 'admin' && (targetMember.role === 'owner' || targetMember.role === 'admin')) {
+    return { ok: false, error: 'Admins cannot remove Owners or other Admins. Ask an Owner to make this change.' }
+  }
+
+  // Can't remove the last Owner
+  if (targetMember.role === 'owner') {
     const { count } = await supabase
       .from('organization_members')
       .select('user_id', { count: 'exact', head: true })

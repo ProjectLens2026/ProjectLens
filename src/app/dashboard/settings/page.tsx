@@ -287,7 +287,7 @@ function MembersTab({ perms }: { perms: ReturnType<typeof usePermissions> }) {
                           value={pendingRole}
                           onChange={e => setPendingRole(e.target.value)}
                           className="px-2 py-1 border border-slate-300 rounded text-xs">
-                          <option value="owner">Owner</option>
+                          {perms.isOwner && <option value="owner">Owner</option>}
                           <option value="admin">Admin</option>
                           <option value="pm">Project Manager</option>
                           <option value="viewer">Viewer</option>
@@ -306,43 +306,58 @@ function MembersTab({ perms }: { perms: ReturnType<typeof usePermissions> }) {
                     </td>
                     {canEdit && (
                       <td className="px-4 py-3 text-right">
-                        {isEditingThis ? (
-                          <>
-                            <button
-                              onClick={() => handleSaveRole(m.user_id)}
-                              disabled={saving}
-                              className="text-blue-600 hover:text-blue-700 text-xs font-semibold mr-2">
-                              {saving ? 'Saving...' : 'Save'}
-                            </button>
-                            <button
-                              onClick={() => setEditingId(null)}
-                              disabled={saving}
-                              className="text-slate-500 hover:text-slate-700 text-xs">
-                              Cancel
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              onClick={() => {
-                                setEditingId(m.user_id)
-                                setPendingRole(m.role)
-                              }}
-                              className="text-blue-600 hover:text-blue-700 text-xs font-semibold">
-                              Edit Role
-                            </button>
-                            {!m.is_self && (
-                              <>
-                                <span className="text-slate-300 mx-1.5">·</span>
-                                <button
-                                  onClick={() => handleRemove(m)}
-                                  className="text-red-600 hover:text-red-700 text-xs font-semibold">
-                                  Remove
-                                </button>
-                              </>
-                            )}
-                          </>
-                        )}
+                        {(() => {
+                          // Phase 3D rank check: Admin can only edit/remove
+                          // PMs and Viewers. Owner can edit/remove anyone.
+                          const callerIsOwner = perms.isOwner
+                          const callerIsAdmin = perms.isAdmin && !perms.isOwner
+                          const targetIsHighRank = m.role === 'owner' || m.role === 'admin'
+                          const canActOnThisRow = callerIsOwner || (callerIsAdmin && !targetIsHighRank)
+                          if (!canActOnThisRow) {
+                            return (
+                              <span className="text-slate-300 text-[10px] italic" title="Admins cannot manage Owners or other Admins">
+                                🔒 Owner-only
+                              </span>
+                            )
+                          }
+                          return isEditingThis ? (
+                            <>
+                              <button
+                                onClick={() => handleSaveRole(m.user_id)}
+                                disabled={saving}
+                                className="text-blue-600 hover:text-blue-700 text-xs font-semibold mr-2">
+                                {saving ? 'Saving...' : 'Save'}
+                              </button>
+                              <button
+                                onClick={() => setEditingId(null)}
+                                disabled={saving}
+                                className="text-slate-500 hover:text-slate-700 text-xs">
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setEditingId(m.user_id)
+                                  setPendingRole(m.role)
+                                }}
+                                className="text-blue-600 hover:text-blue-700 text-xs font-semibold">
+                                Edit Role
+                              </button>
+                              {!m.is_self && (
+                                <>
+                                  <span className="text-slate-300 mx-1.5">·</span>
+                                  <button
+                                    onClick={() => handleRemove(m)}
+                                    className="text-red-600 hover:text-red-700 text-xs font-semibold">
+                                    Remove
+                                  </button>
+                                </>
+                              )}
+                            </>
+                          )
+                        })()}
                       </td>
                     )}
                   </tr>
