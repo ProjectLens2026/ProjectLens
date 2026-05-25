@@ -292,7 +292,7 @@ export default function UploadPage() {
       ntp: project.contractDates?.ntp || cd.ntp,
       type: scheduleType,
       sequenceNumber: next,
-      dataDate: cd.dataDate,
+      dataDate: cd.manualDataDate || undefined,
     })
   }, [scheduleType, projectMode, newProjectId, selectedProjectId, existingProjects, cd.ntp])
 
