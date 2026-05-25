@@ -5,6 +5,7 @@ import {
   getActiveProject, getActiveProjectRFIs, addRFIToActiveProject,
   deleteRFIFromActiveProject
 } from '@/lib/projectStore'
+import { usePermissions } from '@/lib/usePermissions'
 
 interface RFIEvaluation {
   rfi_number: string
@@ -32,7 +33,6 @@ interface RFIEvaluation {
   tia_narrative: string
   pm_action_summary: string
 }
-
 interface RFIRecord {
   id: string
   filename: string
@@ -41,6 +41,7 @@ interface RFIRecord {
 }
 
 export default function RFIsPage() {
+  const perms = usePermissions()
   const [rfis, setRfis] = useState<RFIRecord[]>([])
   const [project, setProject] = useState<any>(null)
   const [uploading, setUploading] = useState(false)
@@ -61,38 +62,35 @@ export default function RFIsPage() {
   }
 
   async function analyzeRFI(file: File) {
+    // Defense in depth — block Viewers even if they bypass the UI
+    if (!perms.can.createRFI) {
+      alert('Viewers cannot upload or evaluate RFIs. Read-only access.')
+      return
+    }
     if (!project) {
       alert('Please create or select a project first before uploading RFIs.')
       return
     }
-
     setUploading(true)
     setProgress('Reading RFI document...')
-
     try {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('projectName', project.name)
-
-      setProgress('NobelPM is evaluating schedule impact...')
-
+      setProgress('ControlLens is evaluating schedule impact...')
       const res = await fetch('/api/rfi', { method: 'POST', body: formData })
       if (!res.ok) throw new Error('Analysis failed')
-
       const data = await res.json()
       setProgress('Analysis complete')
-
       const record: RFIRecord = {
         id: 'rfi_' + Date.now().toString(36),
         filename: file.name,
         uploadedAt: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
         evaluation: data.evaluation,
       }
-
       addRFIToActiveProject(record)
       refresh()
       setSelectedRFI(record)
-
     } catch (err: any) {
       alert('Failed to analyze RFI: ' + err.message)
     } finally {
@@ -102,6 +100,7 @@ export default function RFIsPage() {
   }
 
   function onDrop(e: React.DragEvent) {
+    if (!perms.can.createRFI) return
     e.preventDefault()
     setDragOver(false)
     const file = e.dataTransfer.files[0]
@@ -110,6 +109,7 @@ export default function RFIsPage() {
   }
 
   function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!perms.can.createRFI) return
     const file = e.target.files?.[0]
     if (file) analyzeRFI(file)
     e.target.value = ''
@@ -120,13 +120,11 @@ export default function RFIsPage() {
     if (c === 'POTENTIALLY_IMPACTING') return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', badge: 'bg-amber-100 text-amber-800', dot: 'bg-amber-500', icon: '🟡' }
     return { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-700', badge: 'bg-green-100 text-green-800', dot: 'bg-green-500', icon: '🟢' }
   }
-
   function classificationLabel(c: string) {
     if (c === 'SCHEDULE_IMPACTING') return 'Schedule Impacting'
     if (c === 'POTENTIALLY_IMPACTING') return 'Potentially Impacting'
     return 'Informational Only'
   }
-
   function impactTypeLabel(t: string) {
     const labels: Record<string, string> = {
       OWNER_CAUSED: 'Owner-Caused',
@@ -138,7 +136,6 @@ export default function RFIsPage() {
     }
     return labels[t] || t
   }
-
   const scheduleImpacting = rfis.filter(r => r.evaluation.classification === 'SCHEDULE_IMPACTING')
   const potentiallyImpacting = rfis.filter(r => r.evaluation.classification === 'POTENTIALLY_IMPACTING')
   const informational = rfis.filter(r => r.evaluation.classification === 'INFORMATIONAL')
@@ -159,7 +156,7 @@ export default function RFIsPage() {
               <span className="text-3xl">❓</span>
             </div>
             <div className="text-lg font-bold text-slate-700 mb-2">Select a project first</div>
-            <div className="text-sm text-slate-500 mb-6">RFIs are tied to specific projects. Open a project to upload and evaluate its RFIs.</div>
+            <div className="text-sm text-slate-500 mb-6">RFIs are tied to specific projects. Open a project to {perms.can.createRFI ? 'upload and evaluate' : 'view'} its RFIs.</div>
             <Link href="/dashboard/projects"
               className="inline-block bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors">
               Go to Projects →
@@ -170,6 +167,9 @@ export default function RFIsPage() {
     )
   }
 
+  // Viewer flag — controls visibility of upload zone + creation actions
+  const isViewer = !perms.can.createRFI && !perms.loading
+
   return (
     <div className="flex h-full overflow-hidden">
       {/* Left panel - RFI list */}
@@ -177,9 +177,12 @@ export default function RFIsPage() {
         <div className="px-4 py-4 border-b border-slate-200">
           <div className="font-bold text-slate-900 text-sm mb-1">RFI Evaluation</div>
           <div className="text-[10px] text-blue-600 font-semibold mb-1 truncate">{project.name}</div>
-          <div className="text-xs text-slate-500">Upload RFI PDFs for schedule impact analysis</div>
+          <div className="text-xs text-slate-500">
+            {isViewer
+              ? 'Read-only access — view existing RFI evaluations'
+              : 'Upload RFI PDFs for schedule impact analysis'}
+          </div>
         </div>
-
         {/* Summary badges */}
         {rfis.length > 0 && (
           <div className="px-4 py-3 border-b border-slate-100 flex gap-2 flex-wrap">
@@ -188,35 +191,53 @@ export default function RFIsPage() {
             <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-green-100 text-green-700">{informational.length} Info Only</span>
           </div>
         )}
-
-        {/* Upload zone */}
-        <div
-          className={`mx-3 my-3 border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-colors ${dragOver ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50'}`}
-          onDragOver={e => { e.preventDefault(); setDragOver(true) }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={onDrop}
-          onClick={() => fileRef.current?.click()}>
-          <input ref={fileRef} type="file" accept=".pdf" className="hidden" onChange={onPick} />
-          {uploading ? (
-            <div>
-              <div className="text-2xl mb-1 animate-pulse">📄</div>
-              <div className="text-xs text-blue-600 font-semibold">{progress}</div>
+        {/* Upload zone — Phase 3D: hidden for Viewers */}
+        {!isViewer && (
+          <div
+            className={`mx-3 my-3 border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-colors ${dragOver ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50'}`}
+            onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={onDrop}
+            onClick={() => fileRef.current?.click()}>
+            <input ref={fileRef} type="file" accept=".pdf" className="hidden" onChange={onPick} />
+            {uploading ? (
+              <div>
+                <div className="text-2xl mb-1 animate-pulse">📄</div>
+                <div className="text-xs text-blue-600 font-semibold">{progress}</div>
+              </div>
+            ) : (
+              <div>
+                <div className="text-2xl mb-1">📄</div>
+                <div className="text-xs font-semibold text-slate-600">Drop RFI PDF here</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">or click to browse</div>
+              </div>
+            )}
+          </div>
+        )}
+        {/* Viewer notice */}
+        {isViewer && (
+          <div className="mx-3 my-3 bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-900">
+            <div className="flex items-start gap-2">
+              <span className="text-base flex-shrink-0">🔒</span>
+              <div>
+                <div className="font-bold mb-0.5">Viewer access</div>
+                <div className="text-[11px] text-blue-800 leading-relaxed">
+                  You can read existing RFI evaluations but cannot upload new RFIs or modify analysis. Ask a PM or Admin to upload on your behalf.
+                </div>
+              </div>
             </div>
-          ) : (
-            <div>
-              <div className="text-2xl mb-1">📄</div>
-              <div className="text-xs font-semibold text-slate-600">Drop RFI PDF here</div>
-              <div className="text-[10px] text-slate-400 mt-0.5">or click to browse</div>
-            </div>
-          )}
-        </div>
-
+          </div>
+        )}
         {/* RFI list */}
         <div className="flex-1 overflow-y-auto">
           {rfis.length === 0 && !uploading && (
             <div className="text-center py-8 px-4">
               <div className="text-3xl mb-2">📋</div>
-              <div className="text-xs text-slate-400">No RFIs evaluated yet. Upload a PDF to begin.</div>
+              <div className="text-xs text-slate-400">
+                {isViewer
+                  ? 'No RFIs yet for this project.'
+                  : 'No RFIs evaluated yet. Upload a PDF to begin.'}
+              </div>
             </div>
           )}
           {rfis.map(r => {
@@ -248,15 +269,18 @@ export default function RFIsPage() {
           })}
         </div>
       </div>
-
       {/* Right panel - RFI detail */}
       <div className="flex-1 overflow-y-auto bg-slate-50">
         {!selectedRFI ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <div className="text-5xl mb-3">📋</div>
-              <div className="text-slate-500 text-sm font-semibold">Upload an RFI PDF to see the analysis</div>
-              <div className="text-slate-400 text-xs mt-1">NobelPM will evaluate schedule impact and generate TIA guidance</div>
+              <div className="text-slate-500 text-sm font-semibold">
+                {isViewer ? 'Select an RFI to view its analysis' : 'Upload an RFI PDF to see the analysis'}
+              </div>
+              {!isViewer && (
+                <div className="text-slate-400 text-xs mt-1">ControlLens will evaluate schedule impact and generate TIA guidance</div>
+              )}
             </div>
           </div>
         ) : (
@@ -273,7 +297,6 @@ export default function RFIsPage() {
                 🖨 Print / PDF
               </button>
             </div>
-
             {/* Classification banner */}
             {(() => {
               const col = classificationColor(selectedRFI.evaluation.classification)
@@ -304,7 +327,6 @@ export default function RFIsPage() {
                 </div>
               )
             })()}
-
             {/* RFI Details */}
             <div className="bg-white border border-slate-200 rounded-xl p-4">
               <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">RFI Details</div>
@@ -333,7 +355,6 @@ export default function RFIsPage() {
                 </div>
               </div>
             </div>
-
             {/* Fragnet Instructions — only show if schedule impacting */}
             {selectedRFI.evaluation.fragnet_required && selectedRFI.evaluation.fragnet_instructions && (
               <div className="bg-white border border-red-200 rounded-xl p-4">
@@ -345,7 +366,6 @@ export default function RFIsPage() {
                   This RFI requires a fragnet activity to be inserted in your impacted current schedule in Primavera P6.
                   Follow the steps below, then upload both schedules (un-impacted and impacted) to the TIA Comparison page.
                 </div>
-
                 <div className="grid grid-cols-2 gap-3 mb-4 text-xs">
                   <div className="bg-slate-50 rounded-lg p-3">
                     <div className="text-slate-400 mb-1">WBS Location</div>
@@ -368,14 +388,12 @@ export default function RFIsPage() {
                     <div className="text-slate-700">{selectedRFI.evaluation.fragnet_instructions.duration_basis}</div>
                   </div>
                 </div>
-
                 <div className="mb-4 text-xs">
                   <div className="font-bold text-slate-600 mb-2">Activities Likely Affected</div>
                   <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-900 leading-relaxed">
                     {selectedRFI.evaluation.fragnet_instructions.activities_likely_affected}
                   </div>
                 </div>
-
                 <div className="text-xs">
                   <div className="font-bold text-slate-600 mb-2">Step-by-step P6 instructions</div>
                   <div className="space-y-2">
@@ -399,7 +417,6 @@ export default function RFIsPage() {
                 </div>
               </div>
             )}
-
             {/* PM Action Summary */}
             <div className="bg-white border border-slate-200 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-3">
@@ -410,7 +427,6 @@ export default function RFIsPage() {
                 {selectedRFI.evaluation.pm_action_summary}
               </div>
             </div>
-
             {/* TIA Narrative */}
             <div className="bg-white border border-blue-200 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-3">
@@ -424,7 +440,6 @@ export default function RFIsPage() {
                 This narrative will automatically appear in the Fragnet Analysis section of your TIA Word report when generated from the TIA Comparison page.
               </div>
             </div>
-
             {/* Impact type explanation */}
             {selectedRFI.evaluation.impact_type !== 'INFORMATIONAL' && (
               <div className="bg-white border border-slate-200 rounded-xl p-4">
