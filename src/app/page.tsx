@@ -335,7 +335,6 @@ function DashboardMockup() {
                 <SidebarItem dot label="CU-NT01-01" sub small active />
               </div>
               <SidebarItem icon="▸" label="KENNEL" />
-              <SidebarItem icon="▸" label="AZIZI-01" />
 
               <div className="px-2 pt-3 pb-1 text-white/40 uppercase font-bold tracking-widest text-[8px]">Account</div>
               <SidebarItem icon="⚙" label="Settings" />
