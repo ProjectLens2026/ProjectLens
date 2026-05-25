@@ -17,6 +17,7 @@ import { usePermissions, roleLabel } from '@/lib/usePermissions'
 import {
   loadProjectTeam, loadOrgMembersNotOnProject,
   addProjectMember, removeProjectMember,
+  createProjectInvitation,
   ProjectTeamMember, AssignableMember,
 } from '@/lib/supabase/db'
 
@@ -40,6 +41,14 @@ export default function ProjectTeamModal({
   const [selectedAccess, setSelectedAccess] = useState<'edit' | 'view'>('view')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+
+  // Phase 3D+ — Email invite form (new in Day 10)
+  const [showInviteByEmail, setShowInviteByEmail] = useState(false)
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteRole, setInviteRole] = useState<'viewer' | 'pm'>('viewer')
+  const [inviting, setInviting] = useState(false)
+  const [inviteError, setInviteError] = useState('')
+  const [inviteSuccess, setInviteSuccess] = useState<{ email: string; url: string } | null>(null)
 
   // Who's the caller? Determines what they can do
   const canManageAsAdmin = perms.isOwner || perms.isAdmin  // adds PM or Viewer
@@ -71,6 +80,11 @@ export default function ProjectTeamModal({
     setSelectedUserId('')
     setSelectedAccess(canManageAsAdmin ? 'edit' : 'view')
     setError('')
+    setShowInviteByEmail(false)
+    setInviteEmail('')
+    setInviteRole(canManageAsAdmin ? 'pm' : 'viewer')
+    setInviteError('')
+    setInviteSuccess(null)
     refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, projectId, perms.loading, perms.isOwner, perms.isAdmin, perms.isPM])
@@ -109,6 +123,40 @@ export default function ProjectTeamModal({
       return
     }
     refresh()
+  }
+
+  // Phase 3D+ — Email invitation handler.
+  // PMs can only invite Viewers. Admins/Owners can invite either PM or Viewer.
+  async function handleInviteByEmail() {
+    setInviteError('')
+    setInviteSuccess(null)
+    if (!inviteEmail.trim()) { setInviteError('Enter an email address.'); return }
+    setInviting(true)
+    const result = await createProjectInvitation({
+      email: inviteEmail.trim(),
+      role: inviteRole,
+      projectId,
+    })
+    setInviting(false)
+    if (!result.ok) {
+      setInviteError(result.error || 'Failed to create invitation.')
+      return
+    }
+    setInviteSuccess({ email: inviteEmail.trim(), url: result.acceptUrl || '' })
+    setInviteEmail('')
+    refresh()
+  }
+
+  function copyInviteUrl(url: string) {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(url).then(() => {
+        alert('Invitation link copied to clipboard!\n\nShare this with the invitee via email, WhatsApp, etc.')
+      }).catch(() => {
+        window.prompt('Copy this invitation link:', url)
+      })
+    } else {
+      window.prompt('Copy this invitation link:', url)
+    }
   }
 
   if (!open) return null
@@ -242,6 +290,112 @@ export default function ProjectTeamModal({
               {!canManageAsAdmin && !canManageAsPM && (
                 <div className="mt-4 text-xs text-slate-400 italic text-center">
                   You don't have permission to add members to this project.
+                </div>
+              )}
+
+              {/* Phase 3D+ — Invite by Email section.
+                  Lets PMs/Admins/Owners invite people who are NOT yet in the
+                  org. On acceptance, the new user joins the org AND gets
+                  access to this specific project. */}
+              {(canManageAsAdmin || canManageAsPM) && !showAddForm && (
+                <div className="mt-3">
+                  {!showInviteByEmail && (
+                    <button
+                      onClick={() => setShowInviteByEmail(true)}
+                      className="w-full px-4 py-2 text-xs font-semibold text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 border border-emerald-200 rounded-lg transition-colors flex items-center justify-center gap-2">
+                      <span>✉</span> Invite new person by email
+                      <span className="text-[10px] text-slate-500 font-normal">
+                        ({canManageAsPM && !canManageAsAdmin ? 'Viewer only' : 'PM or Viewer'})
+                      </span>
+                    </button>
+                  )}
+
+                  {showInviteByEmail && (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="text-[11px] font-bold text-emerald-900 uppercase tracking-wide">
+                          ✉ Invite by email
+                        </div>
+                        <button
+                          onClick={() => { setShowInviteByEmail(false); setInviteError(''); setInviteSuccess(null); setInviteEmail('') }}
+                          className="text-slate-400 hover:text-slate-700 text-lg leading-none">×</button>
+                      </div>
+
+                      {inviteSuccess ? (
+                        <div className="bg-white border border-emerald-300 rounded-lg p-3">
+                          <div className="text-xs font-bold text-emerald-900 mb-1.5">✓ Invitation created for {inviteSuccess.email}</div>
+                          <div className="text-[10px] text-slate-600 mb-2">
+                            Copy the link below and send it to them via email or WhatsApp. When they accept, they'll automatically join your workspace AND get access to this project.
+                          </div>
+                          <div className="bg-slate-50 border border-slate-200 rounded p-2 text-[10px] font-mono text-slate-700 break-all mb-2">
+                            {inviteSuccess.url}
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => copyInviteUrl(inviteSuccess.url)}
+                              className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-1.5 rounded">
+                              📋 Copy Link
+                            </button>
+                            <button
+                              onClick={() => { setInviteSuccess(null); setInviteEmail('') }}
+                              className="px-3 text-xs font-semibold text-slate-600 hover:text-slate-900">
+                              Invite another
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                              Email address
+                            </label>
+                            <input
+                              type="email"
+                              value={inviteEmail}
+                              onChange={e => { setInviteEmail(e.target.value); setInviteError('') }}
+                              placeholder="someone@example.com"
+                              className="w-full px-3 py-2 border border-slate-200 rounded text-sm bg-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                              Role on this project
+                            </label>
+                            <select
+                              value={inviteRole}
+                              onChange={e => setInviteRole(e.target.value as 'viewer' | 'pm')}
+                              className="w-full px-3 py-2 border border-slate-200 rounded text-sm bg-white">
+                              {canManageAsAdmin && <option value="pm">Project Manager — uploads, edits, shares</option>}
+                              <option value="viewer">Viewer — read-only access</option>
+                            </select>
+                            {!canManageAsAdmin && (
+                              <div className="text-[10px] text-slate-500 mt-1">
+                                As a PM, you can only invite Viewers. Promotions to PM require an Admin.
+                              </div>
+                            )}
+                          </div>
+
+                          {inviteError && (
+                            <div className="bg-red-50 border border-red-200 text-red-800 text-xs px-3 py-2 rounded font-semibold">
+                              ⚠ {inviteError}
+                            </div>
+                          )}
+
+                          <div className="flex gap-2">
+                            <button
+                              onClick={handleInviteByEmail}
+                              disabled={inviting || !inviteEmail.trim()}
+                              className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white text-sm font-bold py-2 rounded-lg">
+                              {inviting ? 'Creating...' : 'Generate Invitation Link'}
+                            </button>
+                          </div>
+                          <div className="text-[10px] text-slate-500 leading-relaxed">
+                            <strong>How it works:</strong> ControlLens generates a unique link. You copy and send it to {inviteEmail || 'them'} via email/WhatsApp. When they click and sign up, they'll auto-join your workspace as a {inviteRole === 'pm' ? 'Project Manager' : 'Viewer'} AND get access to <strong>this project only</strong>. Link expires in 7 days.
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </>

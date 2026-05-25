@@ -1352,3 +1352,82 @@ export async function removeProjectMember(opts: {
   }
   return { ok: true }
 }
+
+// =============================================================================
+// Phase 3D+ — Email-invite from Team modal (PMs invite Viewers by email)
+// =============================================================================
+
+/**
+ * createProjectInvitation — invite someone by email AND auto-grant them
+ * access to a specific project on acceptance.
+ *
+ * Used from Project Team modal (PMs + Admins + Owners).
+ * The trigger handles auto-granting project access when the invite is accepted.
+ */
+export async function createProjectInvitation(opts: {
+  email: string
+  role: 'viewer' | 'pm'
+  projectId: string  // local proj_xxx id
+}): Promise<{ ok: boolean; token?: string; acceptUrl?: string; error?: string }> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { ok: false, error: 'Not signed in' }
+
+  const orgId = await ensureUserHasOrg()
+  if (!orgId) return { ok: false, error: 'No active org' }
+
+  const normalizedEmail = opts.email.trim().toLowerCase()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    return { ok: false, error: 'Invalid email address' }
+  }
+
+  // Check: is this email already in the org?
+  const { data: existingUser } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('email', normalizedEmail)
+    .maybeSingle()
+
+  if (existingUser) {
+    const { data: existingMember } = await supabase
+      .from('organization_members')
+      .select('user_id')
+      .eq('org_id', orgId)
+      .eq('user_id', existingUser.id)
+      .maybeSingle()
+    if (existingMember) {
+      return { ok: false, error: 'This email is already a member of your workspace. Use "+ Add Existing Member" instead.' }
+    }
+  }
+
+  const token = typeof crypto !== 'undefined' && (crypto as any).randomUUID
+    ? (crypto as any).randomUUID()
+    : Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
+
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+  const cloudProjectId = toUuid(opts.projectId)
+
+  const { error } = await supabase
+    .from('invitations')
+    .insert({
+      org_id: orgId,
+      email: normalizedEmail,
+      role: opts.role,
+      token,
+      invited_by: user.id,
+      expires_at: expiresAt,
+      project_id: cloudProjectId,
+    })
+
+  if (error) {
+    console.error('[db.createProjectInvitation] failed:', error)
+    return { ok: false, error: error.message }
+  }
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.control-lens.com'
+  return {
+    ok: true,
+    token,
+    acceptUrl: `${origin}/auth/accept-invite?token=${token}`,
+  }
+}
