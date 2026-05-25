@@ -129,6 +129,55 @@ function WorkspaceTab({ perms }: { perms: ReturnType<typeof usePermissions> }) {
           👤 Open My Profile →
         </Link>
       </Card>
+
+      <SectionHeader title="Help & Support" subtitle="Reach the ControlLens team — we usually respond within 24 hours" />
+      <Card>
+        <div className="space-y-3">
+          <div className="flex items-start gap-3">
+            <span className="text-xl">📧</span>
+            <div className="flex-1">
+              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Support Email</div>
+              <a href="mailto:support@control-lens.com" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
+                support@control-lens.com
+              </a>
+              <div className="text-xs text-slate-500 mt-0.5">
+                Technical issues, bug reports, account problems, or anything that's not working
+              </div>
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <span className="text-xl">💼</span>
+            <div className="flex-1">
+              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Sales & General Inquiries</div>
+              <a href="mailto:info@control-lens.com" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
+                info@control-lens.com
+              </a>
+              <div className="text-xs text-slate-500 mt-0.5">
+                Pricing, demos, partnership opportunities, custom features
+              </div>
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <span className="text-xl">🏢</span>
+            <div className="flex-1">
+              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Company</div>
+              <div className="text-sm font-semibold text-slate-900">Nobel Project Management Services, LLC</div>
+              <div className="text-xs text-slate-500 mt-0.5">
+                Construction schedule intelligence built by construction PMs
+              </div>
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <span className="text-xl">🌐</span>
+            <div className="flex-1">
+              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Website</div>
+              <a href="https://app.control-lens.com" target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
+                app.control-lens.com
+              </a>
+            </div>
+          </div>
+        </div>
+      </Card>
     </>
   )
 }

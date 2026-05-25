@@ -1037,6 +1037,11 @@ export default function Sidebar({ user }: SidebarProps) {
           <span className="text-sm w-4 text-center">⚙</span>
           <span className="flex-1">Settings</span>
         </Link>
+        <Link href="/dashboard/settings?tab=workspace#help"
+          className="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2 text-slate-400 border-transparent hover:text-white hover:bg-white/5">
+          <span className="text-sm w-4 text-center">❓</span>
+          <span className="flex-1">Help & Support</span>
+        </Link>
       </div>
       <div className="px-3 py-2.5 border-t border-white/10 flex-shrink-0">
         <button
