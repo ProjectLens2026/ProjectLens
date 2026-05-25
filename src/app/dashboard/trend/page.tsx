@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { loadProjects, Project, ScheduleVersion, setActiveProjectId } from '@/lib/projectStore'
 import { analyzeProjectTrend, TrendAnalysisResult, VersionDataPoint } from '@/lib/trendAnalyzer'
+import { usePermissions } from '@/lib/usePermissions'
 
 type Step = 'select-project' | 'select-versions' | 'results'
 
@@ -12,9 +13,6 @@ function MiniLineChart({ data, label, color, suffix = '', chartId }: {
   label: string
   color: string
   suffix?: string
-  // Optional DOM id placed on the inner <svg>. Used by the Word-report
-  // download flow to find the chart and rasterize it to a PNG before
-  // sending to the server.
   chartId?: string
 }) {
   if (!data || data.length < 2) return null
@@ -24,18 +22,15 @@ function MiniLineChart({ data, label, color, suffix = '', chartId }: {
   const range = maxVal - minVal || 1
   const width = 100
   const height = 50
-
   const points = data.map((d, i) => {
     const x = (i / (data.length - 1)) * width
     const y = height - ((d.y - minVal) / range) * height
     return { x, y, val: d.y, label: d.x }
   })
-
   const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
   const first = points[0].val
   const last = points[points.length - 1].val
   const trend = last > first ? 'up' : last < first ? 'down' : 'flat'
-
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-4">
       <div className="flex items-center justify-between mb-2">
@@ -62,129 +57,86 @@ function MiniLineChart({ data, label, color, suffix = '', chartId }: {
     </div>
   )
 }
-
 function conditionColor(c?: string) {
   if (c === 'Recovery Required') return 'bg-red-100 text-red-700'
   if (c === 'Attention Needed') return 'bg-amber-100 text-amber-700'
   if (c === 'Monitor Closely') return 'bg-yellow-100 text-yellow-700'
   return 'bg-green-100 text-green-700'
 }
-
 function shortDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
-
-// Resolve a version's effective date for display and sorting.
-// Prefers the schedule's actual data date (from inside the XER's
-// PROJECT.last_recalc_date), falling back to upload time for legacy versions
-// stored before the dataDate field was introduced.
 function versionEffectiveDate(v: ScheduleVersion): string {
   return v.dataDate || v.analysis?.dataDate || v.uploadedAt
 }
-
-// True if this version has a real data date from inside the XER.
-// Used by the UI to distinguish "real schedule date" from "fallback to upload time".
 function hasRealDataDate(v: ScheduleVersion): boolean {
   return !!(v.dataDate || v.analysis?.dataDate)
 }
 
 export default function TrendAnalysisPage() {
+  const perms = usePermissions()
   const [step, setStep] = useState<Step>('select-project')
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [selectedVersionIds, setSelectedVersionIds] = useState<Set<string>>(new Set())
   const [trend, setTrend] = useState<TrendAnalysisResult | null>(null)
   const [downloading, setDownloading] = useState(false)
-
   useEffect(() => {
     setProjects(loadProjects())
   }, [])
-
   function pickProject(p: Project) {
     setSelectedProject(p)
-    setSelectedVersionIds(new Set())  // empty by default — user picks
+    setSelectedVersionIds(new Set())
     setStep('select-versions')
   }
-
   function toggleVersion(id: string) {
     const next = new Set(selectedVersionIds)
     if (next.has(id)) next.delete(id)
     else next.add(id)
     setSelectedVersionIds(next)
   }
-
   function runAnalysis() {
     if (!selectedProject) return
     if (selectedVersionIds.size < 2) return
-
-    // Build a filtered project with only the selected versions
     const filteredProject: Project = {
       ...selectedProject,
       versions: selectedProject.versions.filter(v => selectedVersionIds.has(v.id))
     }
-
     const result = analyzeProjectTrend(filteredProject)
     setTrend(result)
     setActiveProjectId(selectedProject.id)
     setStep('results')
   }
-
   function backToProjects() {
     setSelectedProject(null)
     setSelectedVersionIds(new Set())
     setTrend(null)
     setStep('select-project')
-    setProjects(loadProjects())  // Refresh
+    setProjects(loadProjects())
   }
-
   function backToVersions() {
     setTrend(null)
     setStep('select-versions')
   }
 
-  // ============================================================================
-  // CHART CAPTURE FOR WORD REPORT
-  // ============================================================================
-  // The trend page renders inline SVG charts via MiniLineChart. The Word doc
-  // can't consume SVG directly, so we rasterize each chart to a PNG (drawn
-  // onto a canvas with version labels added at the bottom), then send the
-  // base64 PNGs to the server-side route which embeds them as images.
-  // ============================================================================
-
-  /**
-   * Rasterize one chart SVG to a base64 PNG.
-   * Returns null if the SVG isn't in the DOM or rendering fails.
-   */
-  async function captureChartAsPng(
-    svgId: string,
-    versionLabels: string[],
-  ): Promise<string | null> {
+  async function captureChartAsPng(svgId: string, versionLabels: string[]): Promise<string | null> {
     if (typeof document === 'undefined') return null
     const svg = document.getElementById(svgId) as SVGSVGElement | null
     if (!svg) return null
-
-    // Target output dimensions — wide enough for a clean Word doc embed.
-    // Aspect roughly matches the on-screen chart's viewBox.
     const chartWidth = 720
     const chartHeight = 360
-    const labelStripHeight = 36  // space below for version labels
+    const labelStripHeight = 36
     const totalHeight = chartHeight + labelStripHeight
-
-    // Clone the SVG so our changes don't affect the live DOM
     const clone = svg.cloneNode(true) as SVGSVGElement
     clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
     clone.setAttribute('width', String(chartWidth))
     clone.setAttribute('height', String(chartHeight))
-    // Force a font on all text so canvas rendering is consistent.
-    // Inline a <style> block — safer than relying on document CSS.
     const style = document.createElementNS('http://www.w3.org/2000/svg', 'style')
     style.textContent = 'text { font-family: Arial, Helvetica, sans-serif; }'
     clone.insertBefore(style, clone.firstChild)
-
     const svgString = new XMLSerializer().serializeToString(clone)
     const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' })
     const url = URL.createObjectURL(svgBlob)
-
     try {
       const img = await new Promise<HTMLImageElement>((resolve, reject) => {
         const i = new Image()
@@ -192,35 +144,24 @@ export default function TrendAnalysisPage() {
         i.onerror = () => reject(new Error('SVG image load failed'))
         i.src = url
       })
-
       const canvas = document.createElement('canvas')
       canvas.width = chartWidth
       canvas.height = totalHeight
       const ctx = canvas.getContext('2d')
       if (!ctx) return null
-
-      // White background — embedded images on transparent look bad in Word
       ctx.fillStyle = '#ffffff'
       ctx.fillRect(0, 0, chartWidth, totalHeight)
       ctx.drawImage(img, 0, 0, chartWidth, chartHeight)
-
-      // Draw version labels along the bottom strip
       ctx.fillStyle = '#475569'
       ctx.font = '14px Arial, Helvetica, sans-serif'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
       const labelY = chartHeight + labelStripHeight / 2
       versionLabels.forEach((label, i) => {
-        const rawX = versionLabels.length === 1
-          ? chartWidth / 2
-          : (i / (versionLabels.length - 1)) * chartWidth
-        // Keep edge labels visible (don't push half off-canvas)
+        const rawX = versionLabels.length === 1 ? chartWidth / 2 : (i / (versionLabels.length - 1)) * chartWidth
         const x = Math.max(20, Math.min(chartWidth - 20, rawX))
         ctx.fillText(label, x, labelY)
       })
-
-      // canvas.toDataURL throws SecurityError if tainted, but our SVG is
-      // same-origin so it should always work.
       const dataUrl = canvas.toDataURL('image/png')
       return dataUrl.split(',')[1] || null
     } catch {
@@ -230,16 +171,7 @@ export default function TrendAnalysisPage() {
     }
   }
 
-  /**
-   * Capture all 4 trend charts in parallel. Returns an object mapping each
-   * metric key to its base64 PNG (or undefined if capture failed).
-   */
-  async function captureAllCharts(): Promise<{
-    delayDays?: string
-    negativeFloat?: string
-    healthScore?: string
-    completePct?: string
-  }> {
+  async function captureAllCharts(): Promise<{ delayDays?: string; negativeFloat?: string; healthScore?: string; completePct?: string }> {
     if (!trend) return {}
     const labels = trend.dataPoints.map(d => d.versionLabel)
     const [delayDays, negativeFloat, healthScore, completePct] = await Promise.all([
@@ -260,10 +192,7 @@ export default function TrendAnalysisPage() {
     if (!trend) return
     setDownloading(true)
     try {
-      // Rasterize the 4 trend charts to PNGs before calling the API.
-      // The route uses these to embed real images in the Word doc.
       const charts = await captureAllCharts()
-
       const res = await fetch('/api/trend-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -284,9 +213,12 @@ export default function TrendAnalysisPage() {
     }
   }
 
-  // ============================================
-  // STEP 1: PROJECT SELECTION
-  // ============================================
+  // Phase 3D — Viewer lockdown. Block Trend Analysis for Viewers (heavy
+  // analytics that read across all versions — not appropriate for read-only).
+  if (!perms.loading && !perms.can.runAdvancedAnalytics) {
+    return <BlockedPage feature="Trend Analysis" />
+  }
+
   if (step === 'select-project') {
     return (
       <div className="flex flex-col h-full">
@@ -296,21 +228,18 @@ export default function TrendAnalysisPage() {
             <span className="text-slate-400 text-sm ml-2">· Choose a project to analyze</span>
           </div>
         </div>
-
         <div className="flex-1 overflow-y-auto p-5 bg-slate-50">
           <div className="max-w-6xl mx-auto">
-            {/* Intro */}
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5 flex items-start gap-3">
               <span className="text-2xl">📈</span>
               <div>
                 <div className="font-bold text-blue-900 text-sm">Pick a project to analyze trends</div>
                 <div className="text-xs text-blue-800 mt-0.5">
-                  Trend Analysis uses the schedule versions already saved in NobelPM — no new uploads needed.
+                  Trend Analysis uses the schedule versions already saved in ControlLens — no new uploads needed.
                   Choose a project below to see how it has performed across all its updates.
                 </div>
               </div>
             </div>
-
             {projects.length === 0 ? (
               <div className="text-center py-16">
                 <div className="w-16 h-16 mx-auto mb-4 bg-slate-200 rounded-2xl flex items-center justify-center">
@@ -331,7 +260,6 @@ export default function TrendAnalysisPage() {
                     new Date(versionEffectiveDate(a)).getTime()
                   )[0]
                   const analysis = latest?.analysis
-
                   return (
                     <button
                       key={p.id}
@@ -357,7 +285,6 @@ export default function TrendAnalysisPage() {
                           </span>
                         )}
                       </div>
-
                       {analysis ? (
                         <>
                           <div className="flex items-center gap-2 mb-2">
@@ -376,7 +303,6 @@ export default function TrendAnalysisPage() {
                       ) : (
                         <div className="text-xs text-slate-400 mb-3">No analysis on latest version</div>
                       )}
-
                       {eligible && (
                         <div className="text-xs font-bold text-blue-600">
                           Analyze trends →
@@ -393,15 +319,11 @@ export default function TrendAnalysisPage() {
     )
   }
 
-  // ============================================
-  // STEP 2: VERSION SELECTION
-  // ============================================
   if (step === 'select-versions' && selectedProject) {
     const sortedVersions = [...selectedProject.versions].sort((a, b) =>
       new Date(versionEffectiveDate(b)).getTime() -
       new Date(versionEffectiveDate(a)).getTime()
     )
-
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0">
@@ -424,7 +346,6 @@ export default function TrendAnalysisPage() {
             </button>
           </div>
         </div>
-
         <div className="flex-1 overflow-y-auto p-5 bg-slate-50">
           <div className="max-w-4xl mx-auto">
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-5 flex items-start gap-3">
@@ -436,7 +357,6 @@ export default function TrendAnalysisPage() {
                 </div>
               </div>
             </div>
-
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
               <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex items-center gap-3">
                 <button
@@ -452,7 +372,6 @@ export default function TrendAnalysisPage() {
                 </button>
                 <div className="text-xs text-slate-500 ml-auto">{sortedVersions.length} total versions</div>
               </div>
-
               {sortedVersions.map((v, i) => {
                 const isSelected = selectedVersionIds.has(v.id)
                 const analysis = v.analysis
@@ -503,7 +422,6 @@ export default function TrendAnalysisPage() {
                 )
               })}
             </div>
-
             {selectedVersionIds.size < 2 && (
               <div className="mt-4 text-center text-xs text-amber-600 font-semibold">
                 Select at least 2 versions to run the analysis
@@ -515,9 +433,6 @@ export default function TrendAnalysisPage() {
     )
   }
 
-  // ============================================
-  // STEP 3: RESULTS
-  // ============================================
   if (step === 'results' && trend) {
     const recStyle = (() => {
       if (trend.recommendation.type === 'HEALTHY') return { bg: 'bg-green-50', border: 'border-green-300', text: 'text-green-900', icon: '✅' }
@@ -525,19 +440,16 @@ export default function TrendAnalysisPage() {
       if (trend.recommendation.type === 'REBASELINE_RECOMMENDED') return { bg: 'bg-amber-50', border: 'border-amber-300', text: 'text-amber-900', icon: '⚠️' }
       return { bg: 'bg-red-50', border: 'border-red-300', text: 'text-red-900', icon: '🚨' }
     })()
-
     const trendLabel = (() => {
       if (trend.summary.trendDirection === 'IMPROVING') return { text: 'Improving', color: 'text-green-600', icon: '↗' }
       if (trend.summary.trendDirection === 'STABLE') return { text: 'Stable', color: 'text-slate-600', icon: '→' }
       if (trend.summary.trendDirection === 'DETERIORATING') return { text: 'Deteriorating', color: 'text-amber-600', icon: '↘' }
       return { text: 'Severely Deteriorating', color: 'text-red-600', icon: '↓↓' }
     })()
-
     const chartData = (key: keyof VersionDataPoint) => trend.dataPoints.map(d => ({
       x: d.versionLabel,
       y: typeof d[key] === 'number' ? (d[key] as number) : 0,
     }))
-
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0 no-print">
@@ -560,10 +472,8 @@ export default function TrendAnalysisPage() {
             </button>
           </div>
         </div>
-
         <div className="flex-1 overflow-y-auto p-5 bg-slate-50">
           <div className="max-w-6xl mx-auto space-y-4">
-
             <div className="bg-white border border-slate-200 rounded-xl p-5 flex items-center justify-between">
               <div>
                 <div className="text-2xl font-extrabold text-slate-900">{trend.projectName}</div>
@@ -577,17 +487,15 @@ export default function TrendAnalysisPage() {
                 <div className={`text-xl font-extrabold ${trendLabel.color}`}>{trendLabel.icon} {trendLabel.text}</div>
               </div>
             </div>
-
             <div className={`${recStyle.bg} ${recStyle.border} border-2 rounded-2xl p-6`}>
               <div className="flex items-start gap-4 mb-3">
                 <div className="text-4xl flex-shrink-0">{recStyle.icon}</div>
                 <div className="flex-1">
-                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">NobelPM Recommendation</div>
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">ControlLens Recommendation</div>
                   <div className={`text-2xl font-extrabold ${recStyle.text}`}>{trend.recommendation.title}</div>
                 </div>
               </div>
               <p className={`text-sm leading-relaxed ${recStyle.text} mb-4`}>{trend.recommendation.summary}</p>
-
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                 <div>
                   <div className={`text-xs font-bold mb-2 ${recStyle.text}`}>WHY:</div>
@@ -607,7 +515,6 @@ export default function TrendAnalysisPage() {
                 </div>
               </div>
             </div>
-
             <div className="grid grid-cols-4 gap-3">
               <div className="bg-white border border-slate-200 rounded-xl p-3">
                 <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Delay Change</div>
@@ -638,14 +545,12 @@ export default function TrendAnalysisPage() {
                 <div className="text-[10px] text-slate-400 mt-0.5">days/month</div>
               </div>
             </div>
-
             <div className="grid grid-cols-2 gap-3">
               <MiniLineChart data={chartData('delayDays')} label="Days Behind Contract" color="#dc2626" suffix="d" chartId="chart-delayDays" />
               <MiniLineChart data={chartData('negativeFloat')} label="Negative Float Activities" color="#dc2626" chartId="chart-negativeFloat" />
               <MiniLineChart data={chartData('healthScore')} label="Health Score" color="#2563eb" chartId="chart-healthScore" />
               <MiniLineChart data={chartData('completePct')} label="Work Complete %" color="#16a34a" suffix="%" chartId="chart-completePct" />
             </div>
-
             <div className="bg-white border border-slate-200 rounded-xl p-5">
               <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Version Data</div>
               <div className="overflow-x-auto">
@@ -687,7 +592,6 @@ export default function TrendAnalysisPage() {
                 </table>
               </div>
             </div>
-
             <div className="bg-white border border-slate-200 rounded-xl p-5">
               <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Major Changes Between Versions</div>
               <div className="space-y-3">
@@ -708,15 +612,33 @@ export default function TrendAnalysisPage() {
                 ))}
               </div>
             </div>
-
             <div className="text-center text-xs text-slate-400 py-4">
-              All metrics derived from your saved XER files · NobelPM does not replace your judgment
+              All metrics derived from your saved XER files · ControlLens does not replace your judgment
             </div>
           </div>
         </div>
       </div>
     )
   }
-
   return null
+}
+
+// =============================================================================
+// BlockedPage — Phase 3D. Shown when a Viewer URL-hacks to this page.
+// =============================================================================
+function BlockedPage({ feature }: { feature: string }) {
+  return (
+    <div className="flex flex-col h-full bg-slate-50 items-center justify-center p-6">
+      <div className="max-w-md bg-white border border-slate-200 rounded-xl shadow-sm p-8 text-center">
+        <div className="text-4xl mb-3">🔒</div>
+        <div className="text-lg font-bold text-slate-900 mb-2">Access denied</div>
+        <div className="text-sm text-slate-600 mb-6 leading-relaxed">
+          <strong>{feature}</strong> is available to <strong>Project Manager</strong>, <strong>Admin</strong>, and <strong>Owner</strong> roles. As a Viewer you have read-only access — ask your admin if you need this feature.
+        </div>
+        <Link href="/dashboard" className="inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-5 py-2.5 rounded-lg">
+          Back to Dashboard
+        </Link>
+      </div>
+    </div>
+  )
 }

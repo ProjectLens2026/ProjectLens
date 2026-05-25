@@ -5,16 +5,17 @@ import {
   getActiveProject, getLatestVersion, addVersionToProject,
   Project, ScheduleVersion
 } from '@/lib/projectStore'
+import { usePermissions } from '@/lib/usePermissions'
 
 type Step = 'mode-select' | 'upload' | 'analyzing' | 'review' | 'categorize' | 'generating'
 type TIAMode = 'project' | 'quick'
-
 interface FragnetCategorization {
   category: string
   description: string
 }
 
 export default function TIAPage() {
+  const perms = usePermissions()
   const [step, setStep] = useState<Step>('mode-select')
   const [mode, setMode] = useState<TIAMode>('project')
   const [activeProject, setActiveProject] = useState<Project | null>(null)
@@ -34,7 +35,6 @@ export default function TIAPage() {
     preparedBy: '',
     contractCompletionDate: '',
   })
-
   useEffect(() => {
     const p = getActiveProject()
     setActiveProject(p)
@@ -42,18 +42,14 @@ export default function TIAPage() {
       const latest = getLatestVersion(p)
       if (latest) setSelectedBaselineId(latest.id)
       setCtx(prev => ({ ...prev, projectName: p.name, projectNumber: p.projectId || '' }))
-      // If active project has 2+ versions, default to project mode
       setMode(p.versions.length >= 1 ? 'project' : 'quick')
     } else {
       setMode('quick')
     }
   }, [])
-
   const fragnetRef = useRef<HTMLInputElement>(null)
-
   const fileARef = useRef<HTMLInputElement>(null)
   const fileBRef = useRef<HTMLInputElement>(null)
-
   const categories = [
     { value: 'owner', label: 'Owner-Caused' },
     { value: 'force_majeure', label: 'Force Majeure (weather, pandemic)' },
@@ -62,22 +58,17 @@ export default function TIAPage() {
     { value: 'contractor', label: 'Contractor-Caused' },
     { value: 'excusable', label: 'Excusable / Non-Compensable' },
   ]
-
   function shortDate(d?: string) {
     if (!d) return '—'
     return d.slice(0, 10)
   }
-
   async function runComparison() {
     setStep('analyzing')
     setProgress(0)
     const prog = setInterval(() => setProgress(p => p < 85 ? p + Math.random() * 8 : p), 400)
-
     try {
       const fd = new FormData()
-
       if (mode === 'project') {
-        // PROJECT TIA: pull un-impacted from saved baseline + uploaded fragnet
         if (!activeProject || !selectedBaselineId || !fragnetFile) {
           clearInterval(prog)
           alert('Pick a baseline and upload a fragnet XER')
@@ -91,13 +82,11 @@ export default function TIAPage() {
           setStep('upload')
           return
         }
-        // Convert raw XER text to a File-like Blob
         const baselineBlob = new Blob([baseline.rawXER], { type: 'text/plain' })
         const baselineFile = new File([baselineBlob], baseline.fileName, { type: 'text/plain' })
         fd.append('fileA', baselineFile)
         fd.append('fileB', fragnetFile)
       } else {
-        // QUICK TIA: both files uploaded
         if (!fileA || !fileB) {
           clearInterval(prog)
           alert('Upload both schedules')
@@ -107,7 +96,6 @@ export default function TIAPage() {
         fd.append('fileA', fileA)
         fd.append('fileB', fileB)
       }
-
       fd.append('mode', 'compare')
       const res = await fetch('/api/compare', { method: 'POST', body: fd })
       clearInterval(prog)
@@ -115,14 +103,11 @@ export default function TIAPage() {
       if (!res.ok) throw new Error('Comparison failed')
       const data = await res.json()
       setComparison(data.comparison)
-
-      // Initialize categorizations
       const initialCats: Record<string, FragnetCategorization> = {}
       for (const frag of data.comparison.fragnetActivities || []) {
         initialCats[frag.task_id] = { category: 'owner', description: '' }
       }
       setCategorizations(initialCats)
-
       setTimeout(() => setStep('review'), 400)
     } catch (err: any) {
       clearInterval(prog)
@@ -130,14 +115,11 @@ export default function TIAPage() {
       setStep('upload')
     }
   }
-
   async function generateReport() {
     if (!comparison) return
     setStep('generating')
-
     try {
       const fd = new FormData()
-
       if (mode === 'project') {
         if (!activeProject || !selectedBaselineId || !fragnetFile) return
         const baseline = activeProject.versions.find(v => v.id === selectedBaselineId)
@@ -151,14 +133,11 @@ export default function TIAPage() {
         fd.append('fileA', fileA)
         fd.append('fileB', fileB)
       }
-
       fd.append('mode', 'tia')
       fd.append('context', JSON.stringify(ctx))
       fd.append('fragnetCategorizations', JSON.stringify(categorizations))
-
       const res = await fetch('/api/compare', { method: 'POST', body: fd })
       if (!res.ok) throw new Error('Report generation failed')
-
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -168,8 +147,6 @@ export default function TIAPage() {
       a.click()
       a.remove()
       URL.revokeObjectURL(url)
-
-      // PROJECT TIA: Save fragnet to project history as new version
       if (mode === 'project' && activeProject && fragnetFile) {
         try {
           const rawXER = await fragnetFile.text()
@@ -187,7 +164,6 @@ export default function TIAPage() {
           console.warn('Could not save fragnet to project:', e)
         }
       }
-
       setStep('review')
     } catch (err: any) {
       alert('Failed: ' + err.message)
@@ -195,7 +171,25 @@ export default function TIAPage() {
     }
   }
 
-  // ===== MODE SELECT STEP =====
+  // Phase 3D — Viewer lockdown. TIA runs heavy comparative analytics and
+  // writes fragnets back to project history — Viewers cannot do either.
+  if (!perms.loading && !perms.can.runAdvancedAnalytics) {
+    return (
+      <div className="flex flex-col h-full bg-slate-50 items-center justify-center p-6">
+        <div className="max-w-md bg-white border border-slate-200 rounded-xl shadow-sm p-8 text-center">
+          <div className="text-4xl mb-3">🔒</div>
+          <div className="text-lg font-bold text-slate-900 mb-2">Access denied</div>
+          <div className="text-sm text-slate-600 mb-6 leading-relaxed">
+            <strong>TIA Comparison</strong> is available to <strong>Project Manager</strong>, <strong>Admin</strong>, and <strong>Owner</strong> roles. As a Viewer you have read-only access — ask your admin if you need this feature.
+          </div>
+          <Link href="/dashboard" className="inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-5 py-2.5 rounded-lg">
+            Back to Dashboard
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
   if (step === 'mode-select') {
     return (
       <div className="flex flex-col h-full">
@@ -203,16 +197,13 @@ export default function TIAPage() {
           <span className="font-bold text-slate-900 text-base">TIA Comparison <span className="text-slate-400 text-xs font-normal">— Time Impact Analysis</span></span>
           <span className="text-slate-400 text-sm ml-2">· Choose TIA mode</span>
         </div>
-
         <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
           <div className="max-w-4xl mx-auto">
             <h2 className="text-xl font-extrabold text-slate-900 mb-1">How do you want to run this TIA?</h2>
             <p className="text-slate-500 text-sm mb-6">
               Pick the mode that matches your situation.
             </p>
-
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              {/* Project TIA */}
               <button
                 onClick={() => { setMode('project'); setStep('upload') }}
                 disabled={!activeProject}
@@ -233,8 +224,6 @@ export default function TIAPage() {
                   <div className="text-[10px] text-slate-500">No active project — select one first</div>
                 )}
               </button>
-
-              {/* Quick TIA */}
               <button
                 onClick={() => { setMode('quick'); setStep('upload') }}
                 className="text-left p-5 rounded-2xl border-2 border-slate-300 bg-white hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer">
@@ -249,7 +238,6 @@ export default function TIAPage() {
                 <div className="text-[10px] text-slate-500">No project context required</div>
               </button>
             </div>
-
             {!activeProject && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-900">
                 💡 <strong>Tip:</strong> Open a project from the Projects page to enable Project TIA mode.
@@ -261,15 +249,12 @@ export default function TIAPage() {
       </div>
     )
   }
-
-  // ===== UPLOAD STEP =====
   if (step === 'upload') {
     const isProjectMode = mode === 'project'
     const baselineVersion = activeProject?.versions.find(v => v.id === selectedBaselineId)
     const canRun = isProjectMode
       ? !!(activeProject && selectedBaselineId && fragnetFile && baselineVersion?.rawXER)
       : !!(fileA && fileB)
-
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4">
@@ -281,7 +266,6 @@ export default function TIAPage() {
             · {isProjectMode ? `Project TIA · ${activeProject?.name || ''}` : 'Quick TIA · One-off comparison'}
           </span>
         </div>
-
         <div className="flex-1 overflow-y-auto p-6">
           <div className="max-w-4xl mx-auto">
             {isProjectMode ? (
@@ -290,8 +274,6 @@ export default function TIAPage() {
                 <p className="text-slate-500 text-sm mb-6">
                   Pick the un-impacted baseline from saved versions, then upload your fragnet XER (the impacted schedule).
                 </p>
-
-                {/* Step 1: Pick baseline */}
                 <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
                   <div className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-2">Step 1 — Un-Impacted Baseline</div>
                   <div className="text-xs text-slate-500 mb-3">
@@ -319,8 +301,6 @@ export default function TIAPage() {
                     </div>
                   )}
                 </div>
-
-                {/* Step 2: Upload fragnet */}
                 <div className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-6 mb-4 hover:border-blue-400 transition-colors">
                   <div className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-2">Step 2 — Fragnet XER (Impacted)</div>
                   <div className="text-xs text-slate-500 mb-3">
@@ -339,8 +319,6 @@ export default function TIAPage() {
                     )}
                   </div>
                 </div>
-
-                {/* Step 3: Delay description */}
                 <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
                   <div className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-2">Step 3 — Delay Event Description</div>
                   <input
@@ -352,7 +330,6 @@ export default function TIAPage() {
                     The fragnet will be saved to project history with this label.
                   </div>
                 </div>
-
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
                   <div className="text-xs font-bold text-slate-600 mb-3">PROJECT INFORMATION (for the TIA report)</div>
                   <div className="grid grid-cols-2 gap-3">
@@ -374,7 +351,6 @@ export default function TIAPage() {
                   Upload an un-impacted current schedule and an impacted current schedule (with fragnet WBS inserted).
                   This mode does not save to project history.
                 </p>
-
                 <div className="grid grid-cols-2 gap-4 mb-6">
                   <div className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-6 hover:border-blue-400 transition-colors cursor-pointer"
                     onClick={() => fileARef.current?.click()}>
@@ -393,7 +369,6 @@ export default function TIAPage() {
                       )}
                     </div>
                   </div>
-
                   <div className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-6 hover:border-blue-400 transition-colors cursor-pointer"
                     onClick={() => fileBRef.current?.click()}>
                     <input ref={fileBRef} type="file" accept=".xer" className="hidden"
@@ -412,7 +387,6 @@ export default function TIAPage() {
                     </div>
                   </div>
                 </div>
-
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
                   <div className="text-xs font-bold text-slate-600 mb-3">PROJECT INFORMATION (for the TIA report)</div>
                   <div className="grid grid-cols-2 gap-3">
@@ -428,24 +402,20 @@ export default function TIAPage() {
                 </div>
               </>
             )}
-
             <button
               disabled={!canRun}
               onClick={runComparison}
               className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold disabled:bg-slate-200 disabled:text-slate-400 hover:bg-blue-700 transition-colors">
               🔍 Compare Schedules →
             </button>
-
             <div className="mt-6 p-4 bg-blue-50 border-l-4 border-blue-500 rounded-r-lg text-xs text-blue-900 leading-relaxed">
-              <strong>How NobelPM detects fragnets:</strong> The system looks for activities and WBS sections containing keywords like "Frag", "Schedule Issue", "TIA", or "Delay Event" in the impacted schedule. Make sure your fragnet WBS uses one of these naming conventions in P6.
+              <strong>How ControlLens detects fragnets:</strong> The system looks for activities and WBS sections containing keywords like "Frag", "Schedule Issue", "TIA", or "Delay Event" in the impacted schedule. Make sure your fragnet WBS uses one of these naming conventions in P6.
             </div>
           </div>
         </div>
       </div>
     )
   }
-
-  // ===== ANALYZING STEP =====
   if (step === 'analyzing') {
     return (
       <div className="flex flex-col h-full">
@@ -463,8 +433,6 @@ export default function TIAPage() {
       </div>
     )
   }
-
-  // ===== REVIEW STEP =====
   if (step === 'review' && comparison) {
     return (
       <div className="flex flex-col h-full">
@@ -481,9 +449,7 @@ export default function TIAPage() {
             </button>
           </div>
         </div>
-
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
-          {/* Summary banner */}
           <div className={`rounded-xl border p-4 flex items-center gap-4 ${comparison.totalDelayDays > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
             <div className="text-3xl">{comparison.totalDelayDays > 0 ? '🔴' : '🟢'}</div>
             <div className="flex-1">
@@ -503,8 +469,6 @@ export default function TIAPage() {
               <div className="text-[10px] opacity-70">calendar days</div>
             </div>
           </div>
-
-          {/* KPI Grid */}
           <div className="grid grid-cols-5 gap-2">
             <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Activities Changed</div><div className="text-xl font-bold text-amber-600">{comparison.changed?.length || 0}</div></div>
             <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Activities Added</div><div className="text-xl font-bold text-blue-600">{comparison.added?.length || 0}</div></div>
@@ -512,8 +476,6 @@ export default function TIAPage() {
             <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Milestones Moved</div><div className="text-xl font-bold text-red-600">{comparison.milestoneMovements?.length || 0}</div></div>
             <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Fragnets Found</div><div className="text-xl font-bold text-blue-600">{comparison.fragnetActivities?.length || 0}</div></div>
           </div>
-
-          {/* Tabs */}
           <div className="bg-white border border-slate-200 rounded-xl">
             <div className="flex gap-0 border-b border-slate-100 overflow-x-auto">
               {[
@@ -531,7 +493,6 @@ export default function TIAPage() {
                 </button>
               ))}
             </div>
-
             <div className="p-4">
               {activeTab === 'summary' && (
                 <div>
@@ -552,7 +513,6 @@ export default function TIAPage() {
                   </div>
                 </div>
               )}
-
               {activeTab === 'milestones' && (
                 <div>
                   <h3 className="text-sm font-bold mb-3">Milestones with date movements ({comparison.milestoneMovements?.length || 0})</h3>
@@ -573,7 +533,6 @@ export default function TIAPage() {
                   )}
                 </div>
               )}
-
               {activeTab === 'changed' && (
                 <div>
                   <h3 className="text-sm font-bold mb-3">Activities with changes ({comparison.changed?.length || 0})</h3>
@@ -590,7 +549,6 @@ export default function TIAPage() {
                   </div>
                 </div>
               )}
-
               {activeTab === 'added' && (
                 <div>
                   <h3 className="text-sm font-bold mb-3">Activities added in impacted schedule ({comparison.added?.length || 0})</h3>
@@ -605,7 +563,6 @@ export default function TIAPage() {
                   </div>
                 </div>
               )}
-
               {activeTab === 'removed' && (
                 <div>
                   <h3 className="text-sm font-bold mb-3">Activities removed from impacted schedule ({comparison.removed?.length || 0})</h3>
@@ -619,7 +576,6 @@ export default function TIAPage() {
                   </div>
                 </div>
               )}
-
               {activeTab === 'fragnets' && (
                 <div>
                   <h3 className="text-sm font-bold mb-3">Fragnet activities detected ({comparison.fragnetActivities?.length || 0})</h3>
@@ -649,7 +605,6 @@ export default function TIAPage() {
                   )}
                 </div>
               )}
-
               {activeTab === 'cp' && (
                 <div>
                   <h3 className="text-sm font-bold mb-3">Critical Path Comparison</h3>
@@ -683,8 +638,6 @@ export default function TIAPage() {
       </div>
     )
   }
-
-  // ===== CATEGORIZE STEP =====
   if (step === 'categorize') {
     const frags = comparison?.fragnetActivities || []
     return (
@@ -701,19 +654,16 @@ export default function TIAPage() {
             </button>
           </div>
         </div>
-
         <div className="flex-1 overflow-y-auto p-6">
           <div className="max-w-3xl mx-auto">
             <h2 className="text-xl font-extrabold text-slate-900 mb-1">Categorize each fragnet activity</h2>
             <p className="text-slate-500 text-sm mb-6">For each delay event, select the responsible party and add a brief narrative description that will appear in the TIA report.</p>
-
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-5">
               <input className="w-full px-3 py-2 border border-amber-200 rounded-lg text-sm bg-white"
                 placeholder="Contract Completion Date (e.g. 2024-09-30)"
                 value={ctx.contractCompletionDate}
                 onChange={e => setCtx({...ctx, contractCompletionDate: e.target.value})} />
             </div>
-
             {frags.length === 0 ? (
               <div className="bg-white border border-slate-200 rounded-xl p-8 text-center">
                 <div className="text-3xl mb-2">⚠️</div>
@@ -762,8 +712,6 @@ export default function TIAPage() {
       </div>
     )
   }
-
-  // ===== GENERATING STEP =====
   if (step === 'generating') {
     return (
       <div className="flex flex-col h-full">
@@ -777,6 +725,5 @@ export default function TIAPage() {
       </div>
     )
   }
-
   return null
 }

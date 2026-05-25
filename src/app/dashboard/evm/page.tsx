@@ -1,24 +1,14 @@
 'use client'
 // =============================================================================
-// Earned Value Management — standalone page (Day 5, v13)
+// Earned Value Management — standalone page
 //
-// Reachable from the sidebar at /dashboard/evm. Replaces the Project
-// Production tab that previously lived in the Lens page.
-//
-// Start date = project.contractDates.ntp (manual).
-// End date   = analysis.projectedEnd  (from latest XER) — falls back to
-//              project.contractDates.originalContractCompletion if no XER.
-// The "money left to spread" runs to the projected end, not the original
-// contract date, so the S-curve stretches to where the project actually
-// finishes.
-//
-// Chart: cumulative S-curves (Planned vs Earned, plus Actual Cost when any
-// AC has been entered). Replaces the v12 bar chart which read as tiny slivers.
+// Phase 3D — Viewer lockdown applied. Viewers see "Access denied" page;
+// PMs/Admins/Owners see full EVM functionality as before.
 // =============================================================================
-
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { getActiveProject, getActiveVersion, updateProjectEvm } from '@/lib/projectStore'
+import { usePermissions } from '@/lib/usePermissions'
 import type { EvmData, EvmMonth, DistributionMode } from '@/lib/evm'
 import {
   buildEvmMonths, evmCumulative,
@@ -29,22 +19,42 @@ import {
 } from '@/lib/evm'
 
 export default function EvmPage() {
+  const perms = usePermissions()
   const [project, setProject] = useState<any>(null)
   const [version, setVersion] = useState<any>(null)
   const [analysis, setAnalysis] = useState<any>(null)
-
   useEffect(() => {
     refresh()
     const interval = setInterval(refresh, 1000)
     return () => clearInterval(interval)
   }, [])
-
   function refresh() {
     const p = getActiveProject()
     setProject(p)
     const v = getActiveVersion(p)
     setVersion(v)
     setAnalysis(v?.analysis || null)
+  }
+
+  // Phase 3D — Viewer lockdown. EVM is heavy advanced analytics (S-curves,
+  // SPI/CPI, budget tracking) — restricted to PM/Admin/Owner. Placed after
+  // hooks but before any other conditional return to avoid React hook
+  // ordering violations.
+  if (!perms.loading && !perms.can.runAdvancedAnalytics) {
+    return (
+      <div className="flex flex-col h-full bg-slate-50 items-center justify-center p-6">
+        <div className="max-w-md bg-white border border-slate-200 rounded-xl shadow-sm p-8 text-center">
+          <div className="text-4xl mb-3">🔒</div>
+          <div className="text-lg font-bold text-slate-900 mb-2">Access denied</div>
+          <div className="text-sm text-slate-600 mb-6 leading-relaxed">
+            <strong>Earned Value Management</strong> is available to <strong>Project Manager</strong>, <strong>Admin</strong>, and <strong>Owner</strong> roles. As a Viewer you have read-only access — ask your admin if you need this feature.
+          </div>
+          <Link href="/dashboard" className="inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-5 py-2.5 rounded-lg">
+            Back to Dashboard
+          </Link>
+        </div>
+      </div>
+    )
   }
 
   if (!project) {
@@ -69,7 +79,6 @@ export default function EvmPage() {
       </div>
     )
   }
-
   return (
     <div className="flex flex-col h-full">
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0 no-print">
@@ -88,10 +97,8 @@ export default function EvmPage() {
           </button>
         </div>
       </div>
-
       <div className="flex-1 overflow-y-auto p-5 bg-slate-50">
         <div className="max-w-7xl mx-auto space-y-4">
-          {/* Page intro card */}
           <div className="bg-gradient-to-br from-blue-50 to-emerald-50 border border-blue-200 rounded-2xl p-5">
             <div className="flex items-start gap-4">
               <div className="text-4xl">📈</div>
@@ -106,7 +113,6 @@ export default function EvmPage() {
               </div>
             </div>
           </div>
-
           <EvmContent project={project} analysis={analysis} />
         </div>
       </div>
@@ -114,32 +120,20 @@ export default function EvmPage() {
   )
 }
 
-// =============================================================================
-// EvmContent — setup, KPIs, S-curve chart, table, explainers
-// =============================================================================
 function EvmContent({ project, analysis }: { project: any; analysis: any }) {
-  // ---- date range ----
   const ntp = project.contractDates?.ntp
-  // v13: prefer the LATEST XER's projected end so the budget spreads to where
-  // the project actually finishes. Fallback to manual contract end when no XER
-  // has been analyzed yet.
   const projectedEndIso = (() => {
     const fromXer = analysis?.projectedEnd
     if (fromXer) {
-      // analysis.projectedEnd is ISO-with-time; trim to YYYY-MM-DD.
       const d = new Date(fromXer)
       if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10)
     }
     return project.contractDates?.originalContractCompletion || ''
   })()
-
-  // ---- state ----
   const migrated = migrateEvmData(project.evm)
   const [budget, setBudget] = useState<string>(migrated?.totalBudget ? String(migrated.totalBudget) : '')
   const [distMode, setDistMode] = useState<DistributionMode>(migrated?.distributionMode || 'scurve')
   const [months, setMonths] = useState<EvmMonth[]>(migrated?.months || [])
-
-  // Sync on project change
   useEffect(() => {
     const m = migrateEvmData(project.evm)
     if (m) {
@@ -153,15 +147,10 @@ function EvmContent({ project, analysis }: { project: any; analysis: any }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id])
-
-  // When the projected end shifts (new XER uploaded), offer to regenerate
-  // the month range. We auto-extend on first detection so the chart never
-  // looks "truncated" — extra months get appended with 0/0 values and the
-  // PM's existing earned/actuals are preserved by isoMonth.
   useEffect(() => {
     if (!ntp || !projectedEndIso || months.length === 0) return
     const expectedLast = monthsEndIso(months)
-    const desiredLast = projectedEndIso.slice(0, 7)  // YYYY-MM
+    const desiredLast = projectedEndIso.slice(0, 7)
     if (expectedLast && desiredLast && desiredLast > expectedLast) {
       const newMonths = buildEvmMonths(ntp, projectedEndIso, distMode, months)
       setMonths(newMonths)
@@ -169,13 +158,7 @@ function EvmContent({ project, analysis }: { project: any; analysis: any }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectedEndIso])
-
-  // ---- persistence ----
-  function persistInline(
-    nextMonths?: EvmMonth[],
-    nextBudget?: number,
-    nextDist?: DistributionMode,
-  ) {
+  function persistInline(nextMonths?: EvmMonth[], nextBudget?: number, nextDist?: DistributionMode) {
     const data: EvmData = {
       totalBudget: nextBudget ?? (parseFloat(budget) || 0),
       currency: 'USD',
@@ -184,7 +167,6 @@ function EvmContent({ project, analysis }: { project: any; analysis: any }) {
     }
     updateProjectEvm(project.id, data)
   }
-
   function setupEvm() {
     if (!ntp || !projectedEndIso) return
     const newMonths = buildEvmMonths(ntp, projectedEndIso, distMode, months)
@@ -216,8 +198,6 @@ function EvmContent({ project, analysis }: { project: any; analysis: any }) {
     setMonths(newMonths)
     persistInline(newMonths)
   }
-
-  // Excel-like clear-all buttons per column
   function clearEarnedColumn() {
     if (months.length === 0) return
     if (!confirm('Clear all Earned % values? You can re-enter them anytime.')) return
@@ -239,8 +219,6 @@ function EvmContent({ project, analysis }: { project: any; analysis: any }) {
     setMonths(newMonths)
     persistInline(newMonths)
   }
-
-  // ---- guards ----
   if (!ntp || !projectedEndIso) {
     return (
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
@@ -263,11 +241,8 @@ function EvmContent({ project, analysis }: { project: any; analysis: any }) {
       </div>
     )
   }
-
   const totalBudgetNum = parseFloat(budget) || 0
   const hasMonths = months.length > 0
-
-  // Cutoff month for cumulative (data date)
   const cutoff = (() => {
     const d = analysis?.dataDate ? new Date(analysis.dataDate) : new Date()
     if (isNaN(d.getTime())) return undefined
@@ -275,17 +250,13 @@ function EvmContent({ project, analysis }: { project: any; analysis: any }) {
     const mm = String(d.getMonth() + 1).padStart(2, '0')
     return `${yy}-${mm}`
   })()
-
   const cumulative = evmCumulative(totalBudgetNum, months, cutoff)
   const sCurveData = useMemo(
     () => buildCumulativeArray(months, totalBudgetNum, cutoff),
     [months, totalBudgetNum, cutoff],
   )
-
-  // ---- render ----
   return (
     <>
-      {/* Setup card */}
       <div className="bg-white border border-slate-200 rounded-2xl p-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
@@ -327,7 +298,6 @@ function EvmContent({ project, analysis }: { project: any; analysis: any }) {
           </div>
         </div>
       </div>
-
       {!hasMonths ? (
         <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-8 text-center">
           <div className="text-4xl mb-3">💰</div>
@@ -340,7 +310,6 @@ function EvmContent({ project, analysis }: { project: any; analysis: any }) {
         </div>
       ) : (
         <>
-          {/* KPI tiles */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
             <KpiCell label="Total Budget" value={fmtDollars(totalBudgetNum)} subtle />
             <KpiCell label={`Planned (${fmtPct(cumulative.plannedPct)})`} value={fmtDollars(cumulative.pv)} subtitle="PV cumulative through data date" />
@@ -355,8 +324,6 @@ function EvmContent({ project, analysis }: { project: any; analysis: any }) {
               valueColor={cumulative.cpi === null ? 'text-slate-400' : cumulative.cpi < 0.995 ? 'text-red-600' : cumulative.cpi > 1.005 ? 'text-emerald-600' : 'text-slate-700'}
               subtitle={cpiMeaning(cumulative.cpi)} />
           </div>
-
-          {/* S-Curve chart */}
           <SCurveChart
             data={sCurveData.rows}
             maxValue={Math.max(sCurveData.maxValue, totalBudgetNum)}
@@ -364,8 +331,6 @@ function EvmContent({ project, analysis }: { project: any; analysis: any }) {
             cutoff={cutoff}
             totalBudget={totalBudgetNum}
           />
-
-          {/* Editable monthly table */}
           <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
             <div className="bg-slate-50 border-b border-slate-200 px-3 py-2 grid gap-2 text-[10px] font-bold text-slate-600 uppercase tracking-wider items-center"
               style={{ gridTemplateColumns: '1.2fr 1fr 1.1fr 1fr 1.1fr 1.2fr 0.8fr 0.8fr 0.7fr' }}>
@@ -453,12 +418,7 @@ function EvmContent({ project, analysis }: { project: any; analysis: any }) {
               })}
             </div>
           </div>
-
-          {/* Educational explainers — three callouts.
-              We lead with AC vs EV because the difference between those two
-              underpins both CPI and the project margin story. */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {/* AC vs EV — fundamentals (NEW in v13) */}
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-[11px] leading-relaxed">
               <div className="font-bold text-blue-900 mb-1.5">💡 Earned Value vs Actual Cost</div>
               <div className="text-slate-700 space-y-1.5">
@@ -474,8 +434,6 @@ function EvmContent({ project, analysis }: { project: any; analysis: any }) {
                 </div>
               </div>
             </div>
-
-            {/* SPI — primary metric */}
             <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-[11px] leading-relaxed">
               <div className="font-bold text-emerald-900 mb-1">📊 Schedule Performance Index (SPI)</div>
               <div className="font-mono text-[10px] text-emerald-700 mb-2">SPI = Earned % ÷ Planned %</div>
@@ -485,8 +443,6 @@ function EvmContent({ project, analysis }: { project: any; analysis: any }) {
                 <div><span className="font-bold text-red-700">SPI &lt; 1.00</span> → Behind schedule (production slower than planned)</div>
               </div>
             </div>
-
-            {/* CPI — optional */}
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-[11px] leading-relaxed">
               <div className="font-bold text-slate-900 mb-1">💵 Cost Performance Index (CPI) — optional</div>
               <div className="font-mono text-[10px] text-slate-600 mb-2">CPI = Earned $ ÷ Actual Cost</div>
@@ -506,17 +462,6 @@ function EvmContent({ project, analysis }: { project: any; analysis: any }) {
   )
 }
 
-// =============================================================================
-// SCurveChart — cumulative S-curves (Planned, Earned, optional Actual).
-//
-// Replaces the v12 bar chart which was unreadable at narrow bar widths. The
-// cumulative view also makes "where we should be vs where we are" obvious at
-// a glance — exactly what construction PMs read S-curves for.
-//
-// Past portion of each line is drawn solid; future portion of the PLANNED
-// line continues solid (we know the plan); future portion of the EARNED /
-// ACTUAL lines isn't drawn (no data yet).
-// =============================================================================
 function SCurveChart({
   data, maxValue, hasActual, cutoff, totalBudget,
 }: {
@@ -527,24 +472,16 @@ function SCurveChart({
   totalBudget: number
 }) {
   if (data.length === 0 || totalBudget === 0) return null
-
   const W = 920
   const H = 420
   const padL = 72, padR = 24, padT = 28, padB = 56
   const innerW = W - padL - padR
   const innerH = H - padT - padB
-
-  // Y-axis tops at total budget (or higher if any line exceeds it, e.g. AC > budget).
   const yMax = Math.max(maxValue, totalBudget)
   const yFor = (v: number) => padT + innerH * (1 - v / yMax)
   const stepX = innerW / Math.max(data.length - 1, 1)
   const xFor = (i: number) => padL + i * stepX
-
-  // X-axis label thinning — show every Nth month label if too many.
   const labelEvery = data.length <= 14 ? 1 : data.length <= 30 ? 2 : data.length <= 60 ? 4 : 6
-
-  // Build polyline points for each line. Earned and Actual stop at the last
-  // month that has data; Planned spans the full range.
   const plannedPts = data.map((r, i) => `${xFor(i)},${yFor(r.plannedCum)}`).join(' ')
   const lastEarnedIdx = (() => {
     let idx = -1
@@ -562,13 +499,9 @@ function SCurveChart({
     return idx
   })()
   const actualPts = lastActualIdx < 0 ? '' : data.slice(0, lastActualIdx + 1).map((r, i) => `${xFor(i)},${yFor(r.actualCum)}`).join(' ')
-
-  // Data-date marker x position. Find the index of the cutoff month if present.
   const cutoffIdx = cutoff ? data.findIndex(r => r.isoMonth === cutoff) : -1
   const cutoffX = cutoffIdx >= 0 ? xFor(cutoffIdx) : -1
-
   const yTicks = [0, 0.25, 0.5, 0.75, 1.0].map(t => t * yMax)
-
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-4">
       <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
@@ -582,17 +515,13 @@ function SCurveChart({
           {hasActual && <span className="flex items-center gap-1.5"><span className="inline-block w-4 h-0.5 bg-amber-600" style={{borderTop:'2px dashed #d97706', background:'none'}}/>Actual Cost (AC)</span>}
         </div>
       </div>
-
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto' }}>
-        {/* Y-axis gridlines + labels */}
         {yTicks.map((v, i) => (
           <g key={i}>
             <line x1={padL} y1={yFor(v)} x2={W - padR} y2={yFor(v)} stroke="#e2e8f0" strokeWidth="0.5" strokeDasharray={v === 0 ? '0' : '2'} />
             <text x={padL - 8} y={yFor(v) + 4} fontSize="10" fill="#94a3b8" textAnchor="end">{fmtDollarsShort(v)}</text>
           </g>
         ))}
-
-        {/* X-axis labels */}
         {data.map((r, i) => {
           if (i % labelEvery !== 0 && i !== data.length - 1) return null
           return (
@@ -602,8 +531,6 @@ function SCurveChart({
             </g>
           )
         })}
-
-        {/* Data date vertical line */}
         {cutoffX > 0 && (
           <g>
             <line x1={cutoffX} y1={padT} x2={cutoffX} y2={padT + innerH} stroke="#dc2626" strokeWidth="1" strokeDasharray="4,3" opacity="0.7" />
@@ -611,13 +538,9 @@ function SCurveChart({
             <text x={cutoffX} y={padT - 8} fontSize="9" fontWeight="700" fill="#dc2626" textAnchor="middle" letterSpacing="0.05em">DATA DATE</text>
           </g>
         )}
-
-        {/* Lines — drawn after gridlines so they sit on top */}
         <polyline points={plannedPts} stroke="#2563eb" strokeWidth="2.5" fill="none" />
         {earnedPts && <polyline points={earnedPts} stroke="#16a34a" strokeWidth="2.5" fill="none" />}
         {actualPts && hasActual && <polyline points={actualPts} stroke="#d97706" strokeWidth="2.5" fill="none" strokeDasharray="5,4" />}
-
-        {/* Dots at each data point */}
         {data.map((r, i) => (
           <g key={r.isoMonth + '-dots'}>
             <circle cx={xFor(i)} cy={yFor(r.plannedCum)} r="2.5" fill="#2563eb" />
@@ -630,10 +553,6 @@ function SCurveChart({
   )
 }
 
-// =============================================================================
-// KpiCell — small KPI tile, reused across the EVM page.
-// `prominent` adds an emerald border to highlight SPI as the primary metric.
-// =============================================================================
 function KpiCell({ label, value, subtle, valueColor, subtitle, prominent }: {
   label: string; value: string; subtle?: boolean; valueColor?: string; subtitle?: string; prominent?: boolean
 }) {
@@ -649,7 +568,6 @@ function KpiCell({ label, value, subtle, valueColor, subtitle, prominent }: {
   )
 }
 
-// Helper — last isoMonth in a months array, or undefined if empty
 function monthsEndIso(months: EvmMonth[]): string | undefined {
   if (!months.length) return undefined
   return months[months.length - 1].isoMonth
