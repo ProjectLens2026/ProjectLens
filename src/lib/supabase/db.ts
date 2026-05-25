@@ -1477,3 +1477,154 @@ export async function restoreVersionInSupabase(
   }
   return true
 }
+
+// =============================================================================
+// Day 10 — Platform Portfolio (ControlLens staff only)
+// =============================================================================
+
+/**
+ * loadPlatformPortfolio — returns a cross-org summary for the Portfolio page.
+ *
+ * SECURITY: This calls the platform_portfolio() Postgres function which is
+ * SECURITY DEFINER and checks the caller's email against the platform owner
+ * allowlist BEFORE returning data. Non-platform-owners get an empty array.
+ * Whitelist must match the one in usePermissions.ts (single source of truth
+ * lives in the DB function).
+ *
+ * Returns: one row per organization with member counts, project counts, etc.
+ */
+export interface PortfolioOrg {
+  org_id: string
+  org_name: string
+  account_type: string
+  created_at: string
+  owner_count: number
+  admin_count: number
+  pm_count: number
+  viewer_count: number
+  total_members: number
+  active_project_count: number
+  archived_project_count: number
+  total_version_count: number
+  primary_owner_email: string | null
+  primary_owner_name: string | null
+  last_activity_at: string | null
+}
+
+export async function loadPlatformPortfolio(): Promise<PortfolioOrg[]> {
+  const supabase = createClient()
+  const { data, error } = await supabase.rpc('platform_portfolio')
+  if (error) {
+    console.error('[db.loadPlatformPortfolio] failed:', error)
+    return []
+  }
+  return (data || []) as PortfolioOrg[]
+}
+
+// =============================================================================
+// Day 10 — Platform Portfolio (Platform Owner only — Jawid + backup)
+// =============================================================================
+
+export interface PortfolioOrg {
+  org_id: string
+  org_name: string
+  account_type: string
+  created_at: string
+  // Member counts
+  owner_count: number
+  admin_count: number
+  pm_count: number
+  viewer_count: number
+  total_members: number
+  // Project + version totals
+  project_count: number
+  active_project_count: number
+  version_count: number
+  // First Admin (for "who's in charge here?" at a glance)
+  primary_admin_email: string | null
+  primary_admin_name: string | null
+}
+
+/**
+ * loadPortfolio — Platform-owner only function. Returns one row per
+ * organization with member counts, project counts, and primary admin info.
+ *
+ * Server-side check: the SQL function uses SECURITY DEFINER and rejects
+ * non-whitelisted emails. Client-side check is here for UX (no point
+ * making the API call if perms.isPlatformOwner is false).
+ */
+export async function loadPortfolio(): Promise<PortfolioOrg[]> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user?.email) return []
+
+  // Client-side whitelist guard. The DB function double-checks via SECURITY DEFINER.
+  const PLATFORM_OWNER_EMAILS = ['support@nobelpm.org', 'support@control-lens.com']
+  if (!PLATFORM_OWNER_EMAILS.includes(user.email.toLowerCase())) {
+    console.warn('[db.loadPortfolio] caller is not a platform owner')
+    return []
+  }
+
+  const { data, error } = await supabase.rpc('platform_portfolio')
+  if (error) {
+    console.error('[db.loadPortfolio] failed:', error)
+    return []
+  }
+  return (data || []) as PortfolioOrg[]
+}
+
+/**
+ * loadOrgMembersForPlatformOwner — drill-down: list of members for one org.
+ * Platform-owner only.
+ */
+export interface PortfolioMember {
+  user_id: string
+  email: string
+  name: string
+  role: string
+  joined_at: string
+}
+
+export async function loadOrgMembersForPlatformOwner(orgId: string): Promise<PortfolioMember[]> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user?.email) return []
+  const PLATFORM_OWNER_EMAILS = ['support@nobelpm.org', 'support@control-lens.com']
+  if (!PLATFORM_OWNER_EMAILS.includes(user.email.toLowerCase())) return []
+
+  const { data, error } = await supabase.rpc('platform_org_members', { p_org_id: orgId })
+  if (error) {
+    console.error('[db.loadOrgMembersForPlatformOwner] failed:', error)
+    return []
+  }
+  return (data || []) as PortfolioMember[]
+}
+
+/**
+ * loadOrgProjectsForPlatformOwner — drill-down: list of projects for one org.
+ * Platform-owner only.
+ */
+export interface PortfolioProject {
+  project_id: string
+  project_code: string
+  name: string
+  status: string
+  created_by_email: string
+  version_count: number
+  created_at: string
+}
+
+export async function loadOrgProjectsForPlatformOwner(orgId: string): Promise<PortfolioProject[]> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user?.email) return []
+  const PLATFORM_OWNER_EMAILS = ['support@nobelpm.org', 'support@control-lens.com']
+  if (!PLATFORM_OWNER_EMAILS.includes(user.email.toLowerCase())) return []
+
+  const { data, error } = await supabase.rpc('platform_org_projects', { p_org_id: orgId })
+  if (error) {
+    console.error('[db.loadOrgProjectsForPlatformOwner] failed:', error)
+    return []
+  }
+  return (data || []) as PortfolioProject[]
+}

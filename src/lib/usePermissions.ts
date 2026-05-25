@@ -56,6 +56,16 @@ export interface Permissions {
   isAdmin: boolean
   isPM: boolean
   isViewer: boolean
+
+  // Phase 3D+ (Day 10) — Platform owner. This is DIFFERENT from org Owner.
+  // Platform owners are the ControlLens team (Jawid + backup). They can see
+  // the cross-org Portfolio page and have visibility across all customer
+  // companies. Whitelist-based, defined by email.
+  isPlatformOwner: boolean
+  // Day 10 — Platform owner (ControlLens staff). Not a customer-facing role.
+  // True only for the email whitelist (Jawid + backup). Used to gate the
+  // /dashboard/portfolio page which shows all customer orgs.
+  isPlatformOwner: boolean
   // Action gates — every UI surface should call these to decide what to render
   can: {
     // Org-level actions
@@ -98,6 +108,10 @@ const EMPTY_PERMS: Permissions = {
   isAdmin: false,
   isPM: false,
   isViewer: false,
+  isPlatformOwner: false,
+  isPM: false,
+  isViewer: false,
+  isPlatformOwner: false,
   can: {
     inviteUsers: false,
     inviteAdmins: false,
@@ -206,11 +220,25 @@ export function usePermissions(): Permissions {
         const ownerOrAdmin = isOwner || isAdmin
         const ownerOrAdminOrPM = ownerOrAdmin || isPM
 
+        // Day 10 — Platform owner whitelist. These are ControlLens staff
+        // emails that get access to /dashboard/portfolio (cross-org view).
+        // NOT a database column — just an email allowlist. Easy to manage,
+        // hard to spoof (you can't change your own auth email without
+        // confirming via the new email).
+        const PLATFORM_OWNER_EMAILS = [
+          'support@nobelpm.org',
+          'support@control-lens.com',
+        ]
+        const isPlatformOwner = PLATFORM_OWNER_EMAILS.includes(
+          (current.email || '').toLowerCase()
+        )
+
         setPerms({
           loading: false,
           isAuthenticated: true,
           user: current,
           isOwner, isAdmin, isPM, isViewer,
+          isPlatformOwner,
           can: {
             inviteUsers: ownerOrAdmin,
             inviteAdmins: isOwner,

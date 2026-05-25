@@ -1071,6 +1071,17 @@ export default function Sidebar({ user }: SidebarProps) {
           <span className="text-sm w-4 text-center">❓</span>
           <span className="flex-1">Help & Support</span>
         </Link>
+        {/* Day 10 — Platform owner only. Sidebar link hidden for everyone
+            else. Page enforces same check (3 layers of protection). */}
+        {perms.isPlatformOwner && (
+          <Link href="/dashboard/portfolio"
+            className="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2 text-purple-300 border-transparent hover:text-white hover:bg-purple-500/10 mt-1 border-t border-white/10 pt-2"
+            title="ControlLens staff only — cross-org view">
+            <span className="text-sm w-4 text-center">🌐</span>
+            <span className="flex-1">Portfolio</span>
+            <span className="text-[8px] bg-purple-500/30 text-purple-200 px-1 rounded font-bold">STAFF</span>
+          </Link>
+        )}
       </div>
       <div className="px-3 py-2.5 border-t border-white/10 flex-shrink-0">
         <button
