@@ -949,6 +949,36 @@ export default function Sidebar({ user }: SidebarProps) {
                     })
                   }
                 </div>
+                {/* Day 10 — inline Views section. Only renders for the active
+                    project (views are version-context-dependent). Shows the
+                    active version label in the header so PMs never lose
+                    context. Replaces the bottom standalone Views panel. */}
+                {isActive && (
+                  <div className="ml-5 pl-2 border-l border-white/5 mt-1.5 mb-1">
+                    <div className="text-white/30 text-[9px] uppercase tracking-widest px-2 py-1 truncate"
+                      title={activeVersion?.versionLabel || 'No version selected'}>
+                      Views {activeVersion?.versionLabel ? `· ${activeVersion.versionLabel}` : ''}
+                    </div>
+                    {views.map(item => {
+                      const active = pathname === item.href
+                      return (
+                        <Link key={item.href} href={item.href}
+                          className={clsx(
+                            'flex items-center gap-2.5 px-2 py-1 rounded text-[11px] font-medium border-l-2 my-0.5',
+                            active
+                              ? 'bg-blue-600/20 text-white border-blue-500'
+                              : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
+                          )}>
+                          <span className="text-sm w-4 text-center">{item.icon}</span>
+                          <span className="flex-1">{item.label}</span>
+                          {(item as any).badge && (
+                            <span className="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">{(item as any).badge}</span>
+                          )}
+                        </Link>
+                      )
+                    })}
+                  </div>
+                )}
                 </>
                 )
               })()}
@@ -969,47 +999,9 @@ export default function Sidebar({ user }: SidebarProps) {
           </div>
         )}
       </div>
-      {activeProject && (
-        <>
-          {/* v14 — resize handle. Drag UP to grow the Views section, DOWN
-              to give the projects list more room. */}
-          <div
-            onMouseDown={startDragViews}
-            className={`h-1.5 cursor-row-resize transition-colors flex-shrink-0 ${
-              isDraggingViews ? 'bg-blue-500/60' : 'bg-white/10 hover:bg-blue-500/40'
-            }`}
-            title="Drag up/down to resize"
-          />
-          <div
-            className="px-2 py-2 flex-shrink-0 flex flex-col"
-            style={{ height: `${viewsHeight}px` }}
-          >
-            <div className="text-white/30 text-[9px] uppercase tracking-widest px-2 py-1 truncate" title={activeProject.name}>
-              Views · {activeProject.name}
-            </div>
-            <div className="overflow-y-auto flex-1 min-h-0">
-              {views.map(item => {
-                const active = pathname === item.href
-                return (
-                  <Link key={item.href} href={item.href}
-                    className={clsx(
-                      'flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2',
-                      active
-                        ? 'bg-blue-600/20 text-white border-blue-500'
-                        : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
-                    )}>
-                    <span className="text-sm w-4 text-center">{item.icon}</span>
-                    <span className="flex-1">{item.label}</span>
-                    {(item as any).badge && (
-                      <span className="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">{(item as any).badge}</span>
-                    )}
-                  </Link>
-                )
-              })}
-            </div>
-          </div>
-        </>
-      )}
+      {/* Day 10 — old standalone "Views · {project}" panel removed. Views are
+          now rendered inline under the active project in the projects list,
+          eliminating the dual-context confusion. */}
       {/* WORKSPACE NAV — Enterprise / Archive / Deleted / Settings */}
       <div className="border-t border-white/10 px-2 py-2 flex-shrink-0">
         <div className="text-white/30 text-[9px] uppercase tracking-widest px-2 py-1">
