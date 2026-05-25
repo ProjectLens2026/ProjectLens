@@ -62,10 +62,6 @@ export interface Permissions {
   // the cross-org Portfolio page and have visibility across all customer
   // companies. Whitelist-based, defined by email.
   isPlatformOwner: boolean
-  // Day 10 — Platform owner (ControlLens staff). Not a customer-facing role.
-  // True only for the email whitelist (Jawid + backup). Used to gate the
-  // /dashboard/portfolio page which shows all customer orgs.
-  isPlatformOwner: boolean
   // Action gates — every UI surface should call these to decide what to render
   can: {
     // Org-level actions
@@ -106,9 +102,6 @@ const EMPTY_PERMS: Permissions = {
   user: null,
   isOwner: false,
   isAdmin: false,
-  isPM: false,
-  isViewer: false,
-  isPlatformOwner: false,
   isPM: false,
   isViewer: false,
   isPlatformOwner: false,
