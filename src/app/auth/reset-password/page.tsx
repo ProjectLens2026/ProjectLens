@@ -1,9 +1,11 @@
 'use client'
-
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+
+// Day 10 — light theme + correct ControlLens horizontal-bars logo
+// (4 bars blue/red/green/slate + "Control" slate + "Lens" blue wordmark).
 
 export default function ResetPasswordPage() {
   const router = useRouter()
@@ -15,7 +17,6 @@ export default function ResetPasswordPage() {
   const [success, setSuccess] = useState(false)
 
   useEffect(() => {
-    // User must have a valid recovery session (from clicking the reset email link)
     const supabase = createClient()
     supabase.auth.getUser().then(({ data: { user } }) => {
       setHasSession(!!user)
@@ -25,7 +26,6 @@ export default function ResetPasswordPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
-
     if (password.length < 8) {
       setError('Password must be at least 8 characters.')
       return
@@ -34,54 +34,38 @@ export default function ResetPasswordPage() {
       setError('Passwords do not match.')
       return
     }
-
     setLoading(true)
     const supabase = createClient()
     const { error: updateError } = await supabase.auth.updateUser({ password })
-
     if (updateError) {
       setError(updateError.message)
       setLoading(false)
       return
     }
-
     setSuccess(true)
     setLoading(false)
-    // Sign them out then redirect to login (forces fresh login with new password)
     await supabase.auth.signOut()
     setTimeout(() => router.push('/login'), 2000)
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Logo — ControlLens Crosshair Lens */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2.5 mb-3">
-            <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" aria-label="ControlLens mark">
-              <circle cx="20" cy="20" r="15.3" fill="#0f172a"/>
-              <circle cx="20" cy="20" r="13.3" fill="#f8fafc"/>
-              <g style={{ clipPath: 'circle(13.3px at 20px 20px)' }}>
-                <rect x="8.4" y="13.9" width="16.7" height="2.3" rx="0.4" fill="#2563eb"/>
-                <rect x="8.4" y="17.2" width="22.6" height="2.3" rx="0.4" fill="#dc2626"/>
-                <rect x="8.4" y="20.5" width="13.8" height="2.3" rx="0.4" fill="#16a34a"/>
-                <rect x="8.4" y="23.8" width="18.2" height="2.3" rx="0.4" fill="#1f2937"/>
-              </g>
-              <g style={{ clipPath: 'circle(13.3px at 20px 20px)' }} opacity="0.55">
-                <line x1="4.7" y1="20" x2="16.4" y2="20" stroke="#0f172a" strokeWidth="0.5"/>
-                <line x1="23.6" y1="20" x2="35.3" y2="20" stroke="#0f172a" strokeWidth="0.5"/>
-                <line x1="20" y1="4.7" x2="20" y2="16.4" stroke="#0f172a" strokeWidth="0.5"/>
-                <line x1="20" y1="23.6" x2="20" y2="35.3" stroke="#0f172a" strokeWidth="0.5"/>
-                <circle cx="20" cy="20" r="0.6" fill="#0f172a"/>
-              </g>
+          <div className="inline-flex items-center gap-3">
+            <svg width="44" height="36" viewBox="0 0 44 36" xmlns="http://www.w3.org/2000/svg" aria-label="ControlLens mark">
+              <rect x="2"  y="6"  width="28" height="4" rx="1" fill="#2563eb"/>
+              <rect x="2"  y="13" width="40" height="4" rx="1" fill="#dc2626"/>
+              <rect x="2"  y="20" width="22" height="4" rx="1" fill="#16a34a"/>
+              <rect x="2"  y="27" width="34" height="4" rx="1" fill="#1f2937"/>
             </svg>
-            <span className="text-2xl font-extrabold text-white">
-              Control<span className="text-blue-500">Lens</span>
+            <span className="text-2xl font-extrabold tracking-tight">
+              <span className="text-slate-800">Control</span><span className="text-blue-600">Lens</span>
             </span>
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl p-8 shadow-2xl">
+        <div className="bg-white rounded-2xl p-8 shadow-xl border border-slate-200">
           {hasSession === null ? (
             <div className="text-center py-4 text-sm text-slate-500">Loading...</div>
           ) : !hasSession ? (
@@ -112,9 +96,8 @@ export default function ResetPasswordPage() {
             <>
               <h2 className="text-xl font-extrabold text-slate-900 mb-1">Set a new password</h2>
               <p className="text-sm text-slate-500 mb-6">
-                Choose a strong password — at least 8 characters.
+                Choose a strong password - at least 8 characters.
               </p>
-
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">New Password</label>
@@ -140,13 +123,11 @@ export default function ResetPasswordPage() {
                     className="w-full px-4 py-3 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-50"
                   />
                 </div>
-
                 {error && (
                   <div className="bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2.5 rounded-lg">
                     {error}
                   </div>
                 )}
-
                 <button
                   type="submit"
                   disabled={loading}
