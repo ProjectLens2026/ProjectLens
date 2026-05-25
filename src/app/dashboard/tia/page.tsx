@@ -1,30 +1,26 @@
 'use client'
 // =============================================================================
-// TIA Comparison page (Day 10 rewrite for Supabase Storage)
+// TIA Comparison page (Day 10 — project-only, fragnet-required rewrite)
 //
-// Changes from previous version:
-//   - Project TIA mode: pulls baseline raw XER from Supabase Storage via a
-//     signed URL (was: reading from local IndexedDB rawXER which is empty
-//     for older versions). Fixes the "Re-upload required for TIA" warning.
-//   - Both modes: upload XER files to Storage first, then send signed URLs
-//     to /api/compare. Bypasses Vercel's ~4.5MB request body limit. Works
-//     for any size XER file.
-//   - Better progress messages so PMs know what's happening during the
-//     longer upload-then-compare flow.
+// Simple flow:
+//   1. Must have active project with at least one Fragnet version uploaded
+//   2. Pick un-impacted version (any non-FRAG)
+//   3. Pick fragnet version (any FRAG)
+//   4. Both already in Supabase Storage → get signed URLs → send to API
+//
+// No file uploads happen on this page. TIA is purely about COMPARING already-
+// saved versions. Want to test a new impacted schedule? Upload it as a Fragnet
+// via the Upload page first, then come here.
 // =============================================================================
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import {
-  getActiveProject, getLatestVersion, addVersionToProject,
-  Project, ScheduleVersion,
+  getActiveProject, Project, ScheduleVersion,
 } from '@/lib/projectStore'
-import {
-  uploadTiaCompareFile, getSavedVersionXerSignedUrl, cleanupTiaTempFile,
-} from '@/lib/supabase/db'
+import { getSavedVersionXerSignedUrl } from '@/lib/supabase/db'
 import { usePermissions } from '@/lib/usePermissions'
 
-type Step = 'mode-select' | 'upload' | 'analyzing' | 'review' | 'categorize' | 'generating'
-type TIAMode = 'project' | 'quick'
+type Step = 'pick' | 'analyzing' | 'review' | 'categorize' | 'generating'
 
 interface FragnetCategorization {
   category: string
@@ -33,14 +29,10 @@ interface FragnetCategorization {
 
 export default function TIAPage() {
   const perms = usePermissions()
-  const [step, setStep] = useState<Step>('mode-select')
-  const [mode, setMode] = useState<TIAMode>('project')
+  const [step, setStep] = useState<Step>('pick')
   const [activeProject, setActiveProject] = useState<Project | null>(null)
-  const [selectedBaselineId, setSelectedBaselineId] = useState<string>('')
-  const [fragnetFile, setFragnetFile] = useState<File | null>(null)
-  const [delayDescription, setDelayDescription] = useState<string>('')
-  const [fileA, setFileA] = useState<File | null>(null)
-  const [fileB, setFileB] = useState<File | null>(null)
+  const [unimpactedId, setUnimpactedId] = useState<string>('')
+  const [fragnetId, setFragnetId] = useState<string>('')
   const [comparison, setComparison] = useState<any>(null)
   const [activeTab, setActiveTab] = useState('summary')
   const [progress, setProgress] = useState(0)
@@ -54,27 +46,25 @@ export default function TIAPage() {
     contractCompletionDate: '',
   })
 
-  // Track Storage paths so we can clean up after compare (best-effort)
-  const tempPathsRef = useRef<string[]>([])
-  // Cache resolved signed URLs so the second call (report gen) reuses them
-  const signedUrlsRef = useRef<{ a?: string; b?: string }>({})
-
   useEffect(() => {
     const p = getActiveProject()
     setActiveProject(p)
     if (p) {
-      const latest = getLatestVersion(p)
-      if (latest) setSelectedBaselineId(latest.id)
+      // Default un-impacted = latest non-FRAG version
+      const nonFragVersions = p.versions
+        .filter(v => !v.deletedAt && v.scheduleType !== 'fragnet')
+        .sort((a, b) => new Date(b.dataDate || b.uploadedAt).getTime() - new Date(a.dataDate || a.uploadedAt).getTime())
+      if (nonFragVersions[0]) setUnimpactedId(nonFragVersions[0].id)
+
+      // Default fragnet = latest FRAG version
+      const fragVersions = p.versions
+        .filter(v => !v.deletedAt && v.scheduleType === 'fragnet')
+        .sort((a, b) => new Date(b.dataDate || b.uploadedAt).getTime() - new Date(a.dataDate || a.uploadedAt).getTime())
+      if (fragVersions[0]) setFragnetId(fragVersions[0].id)
+
       setCtx(prev => ({ ...prev, projectName: p.name, projectNumber: p.projectId || '' }))
-      setMode(p.versions.length >= 1 ? 'project' : 'quick')
-    } else {
-      setMode('quick')
     }
   }, [])
-
-  const fragnetRef = useRef<HTMLInputElement>(null)
-  const fileARef = useRef<HTMLInputElement>(null)
-  const fileBRef = useRef<HTMLInputElement>(null)
 
   const categories = [
     { value: 'owner', label: 'Owner-Caused' },
@@ -90,54 +80,24 @@ export default function TIAPage() {
     return d.slice(0, 10)
   }
 
-  // ===========================================================================
-  // Resolve signed URLs for both files (downloads baseline from saved version
-  // OR uploads fresh files). Cached in signedUrlsRef so report-gen can reuse.
-  // ===========================================================================
+  // Cache resolved signed URLs so report-gen can reuse without re-fetching
+  const signedUrlsRef = useRef<{ a?: string; b?: string }>({})
+
   async function resolveSignedUrls(): Promise<{ ok: true; aUrl: string; bUrl: string } | { ok: false; error: string }> {
-    if (mode === 'project') {
-      if (!activeProject || !selectedBaselineId || !fragnetFile) {
-        return { ok: false, error: 'Pick a baseline and upload a fragnet XER' }
-      }
-      // Baseline: get from Supabase Storage (no re-upload needed)
-      setProgressLabel('Fetching baseline from storage...')
-      const baselineResult = await getSavedVersionXerSignedUrl(selectedBaselineId)
-      if (!baselineResult.ok || !baselineResult.signedUrl) {
-        return { ok: false, error: baselineResult.error || 'Failed to get baseline URL' }
-      }
-
-      // Fragnet: upload fresh to Storage
-      setProgressLabel('Uploading fragnet to storage...')
-      setProgress(20)
-      const fragnetResult = await uploadTiaCompareFile(fragnetFile, 'fragnet')
-      if (!fragnetResult.ok || !fragnetResult.signedUrl) {
-        return { ok: false, error: fragnetResult.error || 'Failed to upload fragnet' }
-      }
-      if (fragnetResult.path) tempPathsRef.current.push(fragnetResult.path)
-
-      return { ok: true, aUrl: baselineResult.signedUrl, bUrl: fragnetResult.signedUrl }
+    if (!unimpactedId || !fragnetId) {
+      return { ok: false, error: 'Pick both an un-impacted version and a fragnet version' }
     }
-
-    // Quick TIA mode — upload both files fresh
-    if (!fileA || !fileB) {
-      return { ok: false, error: 'Upload both schedules' }
-    }
-    setProgressLabel('Uploading baseline to storage...')
-    setProgress(15)
-    const aResult = await uploadTiaCompareFile(fileA, 'baseline')
+    setProgressLabel('Fetching un-impacted schedule from storage...')
+    const aResult = await getSavedVersionXerSignedUrl(unimpactedId)
     if (!aResult.ok || !aResult.signedUrl) {
-      return { ok: false, error: aResult.error || 'Failed to upload baseline' }
+      return { ok: false, error: aResult.error || 'Failed to get un-impacted URL' }
     }
-    if (aResult.path) tempPathsRef.current.push(aResult.path)
-
-    setProgressLabel('Uploading impacted schedule to storage...')
-    setProgress(35)
-    const bResult = await uploadTiaCompareFile(fileB, 'fragnet')
+    setProgress(30)
+    setProgressLabel('Fetching fragnet schedule from storage...')
+    const bResult = await getSavedVersionXerSignedUrl(fragnetId)
     if (!bResult.ok || !bResult.signedUrl) {
-      return { ok: false, error: bResult.error || 'Failed to upload impacted schedule' }
+      return { ok: false, error: bResult.error || 'Failed to get fragnet URL' }
     }
-    if (bResult.path) tempPathsRef.current.push(bResult.path)
-
     return { ok: true, aUrl: aResult.signedUrl, bUrl: bResult.signedUrl }
   }
 
@@ -147,18 +107,16 @@ export default function TIAPage() {
     setProgressLabel('Preparing files...')
 
     try {
-      // Step 1: Get signed URLs (uploads if needed, fetches from saved if not)
       const urls = await resolveSignedUrls()
       if (!urls.ok) {
         alert(urls.error)
-        setStep('upload')
+        setStep('pick')
         return
       }
       signedUrlsRef.current = { a: urls.aUrl, b: urls.bUrl }
-      setProgress(55)
+      setProgress(50)
       setProgressLabel('Comparing schedules (this can take 30-60 seconds for large files)...')
 
-      // Step 2: Call API with URLs (tiny payload, no 413)
       const fd = new FormData()
       fd.append('fileAUrl', urls.aUrl)
       fd.append('fileBUrl', urls.bUrl)
@@ -189,7 +147,7 @@ export default function TIAPage() {
     } catch (err: any) {
       console.error('[TIA] compare failed:', err)
       alert('Comparison failed: ' + (err?.message || 'Unknown error'))
-      setStep('upload')
+      setStep('pick')
     }
   }
 
@@ -198,20 +156,12 @@ export default function TIAPage() {
     setStep('generating')
 
     try {
-      // Reuse the signed URLs from runComparison if still valid (they last 30 min)
       let aUrl = signedUrlsRef.current.a
       let bUrl = signedUrlsRef.current.b
-
-      // If we don't have them (shouldn't happen but defensive), get fresh ones
       if (!aUrl || !bUrl) {
         const urls = await resolveSignedUrls()
-        if (!urls.ok) {
-          alert(urls.error)
-          setStep('categorize')
-          return
-        }
-        aUrl = urls.aUrl
-        bUrl = urls.bUrl
+        if (!urls.ok) { alert(urls.error); setStep('categorize'); return }
+        aUrl = urls.aUrl; bUrl = urls.bUrl
       }
 
       const fd = new FormData()
@@ -240,32 +190,6 @@ export default function TIAPage() {
       a.click()
       a.remove()
       URL.revokeObjectURL(url)
-
-      // Save the fragnet as a new version in project history (Project mode only)
-      if (mode === 'project' && activeProject && fragnetFile) {
-        try {
-          const rawXER = await fragnetFile.text()
-          const fragnetVersion: ScheduleVersion = {
-            id: 'ver_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
-            uploadedAt: new Date().toISOString(),
-            fileName: fragnetFile.name,
-            analysis: comparison.analysisB || {},
-            context: ctx,
-            rawXER,
-            versionLabel: `TIA Fragnet: ${delayDescription || 'delay event'}`,
-          }
-          addVersionToProject(activeProject.id, fragnetVersion)
-        } catch (e) {
-          console.warn('Could not save fragnet to project:', e)
-        }
-      }
-
-      // Best-effort cleanup of temp Storage files
-      for (const path of tempPathsRef.current) {
-        cleanupTiaTempFile(path).catch(() => {})
-      }
-      tempPathsRef.current = []
-
       setStep('review')
     } catch (err: any) {
       console.error('[TIA] report failed:', err)
@@ -292,218 +216,149 @@ export default function TIAPage() {
     )
   }
 
-  if (step === 'mode-select') {
+  // No active project
+  if (!activeProject) {
+    return (
+      <div className="flex flex-col h-full bg-slate-50 items-center justify-center p-6">
+        <div className="max-w-md bg-white border border-slate-200 rounded-xl shadow-sm p-8 text-center">
+          <div className="text-4xl mb-3">📁</div>
+          <div className="text-lg font-bold text-slate-900 mb-2">No active project</div>
+          <div className="text-sm text-slate-600 mb-6 leading-relaxed">
+            TIA is run inside a project. Open a project first, then come back to compare an un-impacted version against a fragnet schedule.
+          </div>
+          <Link href="/dashboard/projects" className="inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-5 py-2.5 rounded-lg">
+            Go to Projects
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
+  // Active project versions (filter out soft-deleted)
+  const activeVersions = activeProject.versions.filter(v => !v.deletedAt)
+  const fragnetVersions = activeVersions.filter(v => v.scheduleType === 'fragnet')
+  const unimpactedVersions = activeVersions.filter(v => v.scheduleType !== 'fragnet')
+
+  // No fragnets yet
+  if (step === 'pick' && fragnetVersions.length === 0) {
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center">
           <span className="font-bold text-slate-900 text-base">TIA Comparison <span className="text-slate-400 text-xs font-normal">— Time Impact Analysis</span></span>
-          <span className="text-slate-400 text-sm ml-2">· Choose TIA mode</span>
+          <span className="text-slate-400 text-sm ml-2">· {activeProject.name}</span>
         </div>
-        <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
-          <div className="max-w-4xl mx-auto">
-            <h2 className="text-xl font-extrabold text-slate-900 mb-1">How do you want to run this TIA?</h2>
-            <p className="text-slate-500 text-sm mb-6">Pick the mode that matches your situation.</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              <button
-                onClick={() => { setMode('project'); setStep('upload') }}
-                disabled={!activeProject}
-                className={`text-left p-5 rounded-2xl border-2 transition-all ${activeProject ? 'bg-white border-blue-300 hover:border-blue-500 hover:shadow-lg cursor-pointer' : 'bg-slate-100 border-slate-200 opacity-50 cursor-not-allowed'}`}>
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-2xl">📁</span>
-                  <span className="text-xs font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full uppercase tracking-wider">Recommended</span>
-                </div>
-                <div className="font-bold text-slate-900 text-base mb-1">Project TIA</div>
-                <div className="text-xs text-slate-600 mb-3 leading-relaxed">
-                  Use a saved version as your un-impacted baseline. Upload only the fragnet XER (impacted schedule). Fragnet auto-saves to project history.
-                </div>
-                {activeProject ? (
-                  <div className="text-[10px] text-blue-700 font-semibold">
-                    Active project: {activeProject.name} ({activeProject.versions.length} version{activeProject.versions.length !== 1 ? 's' : ''})
-                  </div>
-                ) : (
-                  <div className="text-[10px] text-slate-500">No active project — select one first</div>
-                )}
-              </button>
-              <button
-                onClick={() => { setMode('quick'); setStep('upload') }}
-                className="text-left p-5 rounded-2xl border-2 border-slate-300 bg-white hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-2xl">⚡</span>
-                  <span className="text-xs font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full uppercase tracking-wider">One-off</span>
-                </div>
-                <div className="font-bold text-slate-900 text-base mb-1">Quick TIA</div>
-                <div className="text-xs text-slate-600 mb-3 leading-relaxed">
-                  Compare any TWO XER files. Upload un-impacted and impacted schedules. Not saved to project history. Use for one-time comparisons.
-                </div>
-                <div className="text-[10px] text-slate-500">No project context required</div>
-              </button>
+        <div className="flex-1 flex items-center justify-center p-6 bg-slate-50">
+          <div className="max-w-lg bg-white border border-amber-200 rounded-2xl shadow-sm p-8 text-center">
+            <div className="text-5xl mb-4">⚠️</div>
+            <div className="text-xl font-extrabold text-slate-900 mb-3">No fragnet schedule uploaded yet</div>
+            <div className="text-sm text-slate-600 leading-relaxed mb-6">
+              TIA compares an un-impacted schedule against an impacted (<strong>Fragnet</strong>) schedule.
+              You need to upload at least one Fragnet version to this project first.
             </div>
-            {!activeProject && (
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-900">
-                💡 <strong>Tip:</strong> Open a project from the Projects page to enable Project TIA mode.
-                Project TIA pulls your un-impacted baseline from saved versions — you only upload the fragnet.
-              </div>
-            )}
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-left text-xs text-blue-900 mb-6 leading-relaxed">
+              <div className="font-bold mb-2">How to add a fragnet:</div>
+              <ol className="list-decimal ml-4 space-y-1">
+                <li>Go to the <strong>Upload</strong> page</li>
+                <li>Pick this project</li>
+                <li>Schedule Type → choose <strong>Fragnet ⚠️</strong></li>
+                <li>Upload your impacted XER (the one with fragmentary network activities added to the critical path)</li>
+                <li>Come back here — TIA will be ready to run</li>
+              </ol>
+            </div>
+            <Link href="/dashboard/upload" className="inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-5 py-2.5 rounded-lg">
+              Go to Upload →
+            </Link>
           </div>
         </div>
       </div>
     )
   }
 
-  if (step === 'upload') {
-    const isProjectMode = mode === 'project'
-    const canRun = isProjectMode
-      ? !!(activeProject && selectedBaselineId && fragnetFile)
-      : !!(fileA && fileB)
-
+  if (step === 'pick') {
+    const canRun = !!(unimpactedId && fragnetId && unimpactedId !== fragnetId)
     return (
       <div className="flex flex-col h-full">
-        <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4">
-          <button onClick={() => setStep('mode-select')} className="text-xs text-slate-500 hover:text-blue-600 font-semibold">
-            ← Change mode
-          </button>
+        <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center">
           <span className="font-bold text-slate-900 text-base">TIA Comparison</span>
-          <span className="text-slate-400 text-sm ml-2">
-            · {isProjectMode ? `Project TIA · ${activeProject?.name || ''}` : 'Quick TIA · One-off comparison'}
-          </span>
+          <span className="text-slate-400 text-sm ml-2">· {activeProject.name}</span>
         </div>
-        <div className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-4xl mx-auto">
-            {isProjectMode ? (
-              <>
-                <h2 className="text-xl font-extrabold text-slate-900 mb-1">Project TIA: {activeProject?.name}</h2>
-                <p className="text-slate-500 text-sm mb-6">
-                  Pick the un-impacted baseline from saved versions, then upload your fragnet XER (the impacted schedule).
-                </p>
-                <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
-                  <div className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-2">Step 1 — Un-Impacted Baseline</div>
-                  <div className="text-xs text-slate-500 mb-3">
-                    Pick the saved version that was current BEFORE the delay event (Method 4 TIA standard).
-                    Defaults to latest version. Baseline is fetched from secure storage — no re-upload needed.
-                  </div>
-                  <select
-                    value={selectedBaselineId}
-                    onChange={e => setSelectedBaselineId(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-500">
-                    {activeProject?.versions.map((v, i) => {
-                      const versionNum = (activeProject?.versions.length || 1) - i
-                      return (
-                        <option key={v.id} value={v.id}>
-                          v{versionNum} · {v.fileName} · {shortDate(v.uploadedAt)}
-                        </option>
-                      )
-                    })}
-                  </select>
-                </div>
-                <div className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-6 mb-4 hover:border-blue-400 transition-colors">
-                  <div className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-2">Step 2 — Fragnet XER (Impacted)</div>
-                  <div className="text-xs text-slate-500 mb-3">
-                    Upload the impacted schedule — un-impacted with the fragnet (delay event) inserted.
-                  </div>
-                  <input ref={fragnetRef} type="file" accept=".xer" className="hidden"
-                    onChange={e => setFragnetFile(e.target.files?.[0] || null)} />
-                  <div onClick={() => fragnetRef.current?.click()} className="text-center cursor-pointer py-4">
-                    <div className="text-3xl mb-2">📊</div>
-                    {fragnetFile ? (
-                      <div className="text-xs bg-green-50 text-green-700 px-3 py-2 rounded-lg font-semibold inline-block">
-                        ✓ {fragnetFile.name} ({(fragnetFile.size / 1024 / 1024).toFixed(1)} MB)
-                      </div>
-                    ) : (
-                      <div className="text-xs text-slate-400">Click to upload fragnet .xer file</div>
-                    )}
-                  </div>
-                </div>
-                <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
-                  <div className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-2">Step 3 — Delay Event Description</div>
-                  <input
-                    value={delayDescription}
-                    onChange={e => setDelayDescription(e.target.value)}
-                    placeholder='e.g. "HVAC owner directive change" or "Differing site conditions"'
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
-                  <div className="text-[10px] text-slate-400 mt-1">
-                    The fragnet will be saved to project history with this label.
-                  </div>
-                </div>
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
-                  <div className="text-xs font-bold text-slate-600 mb-3">PROJECT INFORMATION (for the TIA report)</div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Project Name"
-                      value={ctx.projectName} onChange={e => setCtx({...ctx, projectName: e.target.value})} />
-                    <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Project / Contract Number"
-                      value={ctx.projectNumber} onChange={e => setCtx({...ctx, projectNumber: e.target.value})} />
-                    <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Owner (e.g. USACE, DGS, GSA)"
-                      value={ctx.owner} onChange={e => setCtx({...ctx, owner: e.target.value})} />
-                    <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Prepared By (your name)"
-                      value={ctx.preparedBy} onChange={e => setCtx({...ctx, preparedBy: e.target.value})} />
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <h2 className="text-xl font-extrabold text-slate-900 mb-1">Quick TIA — Compare Two Schedules</h2>
-                <p className="text-slate-500 text-sm mb-6">
-                  Upload an un-impacted current schedule and an impacted current schedule (with fragnet WBS inserted).
-                  This mode does not save to project history.
-                </p>
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                  <div className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-6 hover:border-blue-400 transition-colors cursor-pointer"
-                    onClick={() => fileARef.current?.click()}>
-                    <input ref={fileARef} type="file" accept=".xer" className="hidden"
-                      onChange={e => setFileA(e.target.files?.[0] || null)} />
-                    <div className="text-center">
-                      <div className="text-3xl mb-2">📋</div>
-                      <div className="font-bold text-slate-700 text-sm">Schedule A</div>
-                      <div className="text-xs text-slate-500 mb-3">Un-Impacted Current Schedule</div>
-                      {fileA ? (
-                        <div className="text-xs bg-green-50 text-green-700 px-3 py-2 rounded-lg font-semibold">
-                          ✓ {fileA.name} ({(fileA.size / 1024 / 1024).toFixed(1)} MB)
-                        </div>
-                      ) : (
-                        <div className="text-xs text-slate-400">Click to upload .xer file</div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-6 hover:border-blue-400 transition-colors cursor-pointer"
-                    onClick={() => fileBRef.current?.click()}>
-                    <input ref={fileBRef} type="file" accept=".xer" className="hidden"
-                      onChange={e => setFileB(e.target.files?.[0] || null)} />
-                    <div className="text-center">
-                      <div className="text-3xl mb-2">📊</div>
-                      <div className="font-bold text-slate-700 text-sm">Schedule B</div>
-                      <div className="text-xs text-slate-500 mb-3">Impacted Current Schedule (with Fragnet)</div>
-                      {fileB ? (
-                        <div className="text-xs bg-green-50 text-green-700 px-3 py-2 rounded-lg font-semibold">
-                          ✓ {fileB.name} ({(fileB.size / 1024 / 1024).toFixed(1)} MB)
-                        </div>
-                      ) : (
-                        <div className="text-xs text-slate-400">Click to upload .xer file</div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
-                  <div className="text-xs font-bold text-slate-600 mb-3">PROJECT INFORMATION (for the TIA report)</div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Project Name"
-                      value={ctx.projectName} onChange={e => setCtx({...ctx, projectName: e.target.value})} />
-                    <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Project / Contract Number"
-                      value={ctx.projectNumber} onChange={e => setCtx({...ctx, projectNumber: e.target.value})} />
-                    <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Owner (e.g. USACE, DGS, GSA)"
-                      value={ctx.owner} onChange={e => setCtx({...ctx, owner: e.target.value})} />
-                    <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Prepared By (your name)"
-                      value={ctx.preparedBy} onChange={e => setCtx({...ctx, preparedBy: e.target.value})} />
-                  </div>
-                </div>
-              </>
-            )}
+        <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
+          <div className="max-w-3xl mx-auto">
+            <h2 className="text-xl font-extrabold text-slate-900 mb-1">Pick the schedules to compare</h2>
+            <p className="text-slate-500 text-sm mb-6">
+              TIA shows the time impact between an un-impacted schedule and a fragnet (impacted) schedule. Both must already be uploaded to this project.
+            </p>
+
+            {/* Un-impacted */}
+            <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
+              <div className="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-2">Un-Impacted Schedule</div>
+              <div className="text-xs text-slate-500 mb-3">
+                The schedule as it stood BEFORE the impact. Pick the most recent baseline or update that doesn't yet include the fragnet activities.
+              </div>
+              <select
+                value={unimpactedId}
+                onChange={e => setUnimpactedId(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-500">
+                <option value="">— Pick a version —</option>
+                {unimpactedVersions.map(v => (
+                  <option key={v.id} value={v.id}>
+                    {v.versionLabel || v.fileName} · data date {shortDate(v.dataDate)}
+                  </option>
+                ))}
+              </select>
+              {unimpactedVersions.length === 0 && (
+                <div className="mt-2 text-xs text-amber-700">No non-fragnet versions in this project yet.</div>
+              )}
+            </div>
+
+            {/* Fragnet */}
+            <div className="bg-white border border-amber-300 rounded-xl p-5 mb-4">
+              <div className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-2">⚠️ Fragnet (Impacted) Schedule</div>
+              <div className="text-xs text-slate-500 mb-3">
+                The schedule WITH fragmentary network activities added to model the delay event (RFI, bulletin, unforeseen condition).
+              </div>
+              <select
+                value={fragnetId}
+                onChange={e => setFragnetId(e.target.value)}
+                className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm focus:outline-none focus:border-amber-500 bg-amber-50">
+                <option value="">— Pick a fragnet —</option>
+                {fragnetVersions.map(v => (
+                  <option key={v.id} value={v.id}>
+                    {v.versionLabel || v.fileName} · data date {shortDate(v.dataDate)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Project info for the report */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
+              <div className="text-xs font-bold text-slate-600 mb-3">PROJECT INFORMATION (for the TIA report)</div>
+              <div className="grid grid-cols-2 gap-3">
+                <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Project Name"
+                  value={ctx.projectName} onChange={e => setCtx({...ctx, projectName: e.target.value})} />
+                <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Project / Contract Number"
+                  value={ctx.projectNumber} onChange={e => setCtx({...ctx, projectNumber: e.target.value})} />
+                <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Owner (e.g. USACE, DGS, GSA)"
+                  value={ctx.owner} onChange={e => setCtx({...ctx, owner: e.target.value})} />
+                <input className="px-3 py-2 border border-slate-200 rounded-lg text-sm" placeholder="Prepared By (your name)"
+                  value={ctx.preparedBy} onChange={e => setCtx({...ctx, preparedBy: e.target.value})} />
+              </div>
+            </div>
+
             <button
               disabled={!canRun}
               onClick={runComparison}
               className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold disabled:bg-slate-200 disabled:text-slate-400 hover:bg-blue-700 transition-colors">
               🔍 Compare Schedules →
             </button>
+            {unimpactedId && fragnetId && unimpactedId === fragnetId && (
+              <div className="mt-3 text-xs text-red-600 text-center font-semibold">
+                Un-impacted and fragnet must be different versions.
+              </div>
+            )}
+
             <div className="mt-6 p-4 bg-blue-50 border-l-4 border-blue-500 rounded-r-lg text-xs text-blue-900 leading-relaxed">
-              <strong>How ControlLens detects fragnets:</strong> The system looks for activities and WBS sections containing keywords like "Frag", "Schedule Issue", "TIA", or "Delay Event" in the impacted schedule. Make sure your fragnet WBS uses one of these naming conventions in P6.
+              <strong>How ControlLens detects fragnets:</strong> It looks for activities and WBS sections in the impacted schedule containing keywords like "Frag", "Schedule Issue", "TIA", or "Delay Event". Make sure your fragnet WBS uses one of these naming conventions in P6.
             </div>
           </div>
         </div>
@@ -535,9 +390,9 @@ export default function TIAPage() {
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4">
           <span className="font-bold text-slate-900 text-base">Comparison Results</span>
           <div className="ml-auto flex gap-2">
-            <button onClick={() => { setStep('upload'); setFileA(null); setFileB(null); setComparison(null); signedUrlsRef.current = {}; tempPathsRef.current = [] }}
+            <button onClick={() => { setStep('pick'); setComparison(null); signedUrlsRef.current = {} }}
               className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400">
-              ← Compare Other Files
+              ← Pick different versions
             </button>
             <button onClick={() => setStep('categorize')}
               className="text-xs bg-blue-600 text-white px-4 py-1.5 rounded-lg font-bold hover:bg-blue-700">
@@ -677,7 +532,7 @@ export default function TIAPage() {
                   <h3 className="text-sm font-bold mb-3">Fragnet activities detected ({comparison.fragnetActivities?.length || 0})</h3>
                   {(comparison.fragnetActivities || []).length === 0 ? (
                     <div className="text-sm text-slate-500 py-6 text-center">
-                      No fragnet activities detected. To use the TIA workflow, ensure your impacted schedule contains activities with "Frag" or "Schedule Issue" in their name or WBS.
+                      No fragnet activities detected. Make sure your fragnet schedule has activities with "Frag" or "Schedule Issue" in their name or WBS.
                     </div>
                   ) : (
                     <div className="space-y-3">

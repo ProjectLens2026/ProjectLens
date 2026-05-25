@@ -1662,40 +1662,39 @@ export async function createCompanyAsPlatformOwner(opts: {
 // processes. Works for files of any size.
 // =============================================================================
 
-const TIA_TEMP_FOLDER_PREFIX = '00000000-0000-4000-8000-000000000000'  // reserved UUID for temp files
 const SIGNED_URL_TTL_SECONDS = 30 * 60  // 30 minutes — plenty for compare + report
 
 /**
- * uploadTiaCompareFile — uploads a fresh XER file to a temp location in
- * Storage and returns a signed URL the API can fetch server-side.
- * Used for the Quick TIA mode (both files) and the impacted fragnet upload
- * in Project TIA mode.
+ * uploadTiaCompareFile — uploads a fresh XER file to Storage under the
+ * actual project folder so the bucket's RLS policy (which checks the second
+ * path segment matches a project the user has access to) is satisfied.
  *
- * Storage path: {orgId}/{TIA_TEMP_FOLDER_PREFIX}/{label}_{uuid}.xer
- * The second segment is a UUID (reserved magic value) because Supabase RLS
- * on the schedule-artifacts bucket expects path segment 2 to be a project
- * UUID. Using a fixed sentinel UUID for temp files satisfies that constraint.
+ * Storage path: {orgId}/{projectUuid}/_tia_{uuid}.xer
  *
  * @param file - the File object from the upload input
+ * @param projectIdLocal - local 'proj_xxx' id (translated to UUID internally)
  * @param label - 'baseline' or 'fragnet' (used in the filename for clarity)
  * @returns { signedUrl, path } - signedUrl is what /api/compare fetches;
  *          path is retained so we can clean up afterwards.
  */
 export async function uploadTiaCompareFile(
   file: File,
+  projectIdLocal: string,
   label: 'baseline' | 'fragnet',
 ): Promise<{ ok: boolean; signedUrl?: string; path?: string; error?: string }> {
   const supabase = createClient()
   const orgId = await ensureUserHasOrg()
   if (!orgId) return { ok: false, error: 'No active org' }
 
-  // Unique filename per upload — avoids collisions when comparing multiple times
+  const projectUuid = toUuid(projectIdLocal)
+
+  // Unique filename per upload — prefix with _tia_ to differentiate from
+  // saved versions (which use {uuid}.xer). Avoids collisions between
+  // multiple TIA runs.
   const uniqueId = typeof crypto !== 'undefined' && (crypto as any).randomUUID
     ? (crypto as any).randomUUID()
     : Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
-  // Path: orgId / sentinel-uuid / label_uniqueId.xer
-  // Second segment must be a UUID for RLS policy compliance.
-  const path = `${orgId}/${TIA_TEMP_FOLDER_PREFIX}/${label}_${uniqueId}.xer`
+  const path = `${orgId}/${projectUuid}/_tia_${label}_${uniqueId}.xer`
 
   const { error: upErr } = await supabase.storage
     .from(BUCKET)

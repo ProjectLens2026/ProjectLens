@@ -1,20 +1,22 @@
 // =============================================================================
-// Version Labeler — Day 6, v14
+// Version Labeler — Day 6 v14, Day 10 fragnet addition
 //
 // Generates and validates structured version IDs:
 //   {projectId}-BL-{NTP}-00      ← initial baseline (only ever -00)
 //   {projectId}-BL-{NTP}-NN      ← rebaselines, NN = 01..99
 //   {projectId}-CU-{NTP}-NN      ← updates, NN = 01..99
+//   {projectId}-FRAG-{DATA}-NN   ← fragnets, NN = 01..99 (Day 10)
 //
-// Where {NTP} is the project's manual NTP date as YYYYMMDD.
+// Where {NTP} is the project's manual NTP date as YYYYMMDD, and {DATA} is
+// the data date from the XER. Fragnets use data date because they're tied
+// to when the impact was applied, not the project's original NTP.
 //
-// Encodes the dropdown state machine + duplicate detection. Used by:
-//   - Upload form    (dropdown disable state, label preview)
-//   - projectStore   (label assigned at upload, migration of legacy versions)
-//   - Sidebar        (duplicate flag rendering)
+// Fragnet = impacted schedule with fragmentary network activities added to
+// the critical path to model a delay event (RFI, bulletin, unforeseen).
+// Compared in TIA against an un-impacted baseline or update.
 // =============================================================================
 
-export type ScheduleType = 'baseline' | 'rebaseline' | 'update'
+export type ScheduleType = 'baseline' | 'rebaseline' | 'update' | 'fragnet'
 
 // Subset of ScheduleVersion fields we need for label logic. Keeps this module
 // independent of the larger Project type so it can be unit-tested in isolation.
@@ -44,22 +46,36 @@ export function formatNtpForLabel(ntp: string | undefined): string {
 // Format the version label given all the pieces. Sequence number is padded
 // to two digits ('01', '02', ..., '99'). NN above 99 throws — caller should
 // have checked canUploadType first.
+//
+// For fragnets, the date in the label comes from the XER data date (not NTP)
+// because fragnets are tied to when the impact happened. Pass dataDate via
+// the opts.dataDate field; the helper falls back to ntp if dataDate missing.
 export function generateVersionLabel(opts: {
   projectId: string
   ntp: string
   type: ScheduleType
   sequenceNumber: number
+  dataDate?: string  // required for fragnet, ignored for BL/CU
 }): string {
-  const { projectId, ntp, type, sequenceNumber } = opts
+  const { projectId, ntp, type, sequenceNumber, dataDate } = opts
   if (sequenceNumber < 0 || sequenceNumber > 99) {
     throw new Error(`Sequence number ${sequenceNumber} out of range (0-99)`)
   }
-  // Baseline is always 00; rebaselines start at 01. Update starts at 01.
-  // We don't enforce that here (caller controls it) but we WARN in dev.
-  const prefix = type === 'update' ? 'CU' : 'BL'
-  const ntpStr = formatNtpForLabel(ntp) || 'NODATE'
+  let prefix: string
+  let datePart: string
+  if (type === 'fragnet') {
+    prefix = 'FRAG'
+    // Fragnet uses data date — more meaningful for impact analysis
+    datePart = formatNtpForLabel(dataDate) || formatNtpForLabel(ntp) || 'NODATE'
+  } else if (type === 'update') {
+    prefix = 'CU'
+    datePart = formatNtpForLabel(ntp) || 'NODATE'
+  } else {
+    prefix = 'BL'
+    datePart = formatNtpForLabel(ntp) || 'NODATE'
+  }
   const nn = String(sequenceNumber).padStart(2, '0')
-  return `${projectId}-${prefix}-${ntpStr}-${nn}`
+  return `${projectId}-${prefix}-${datePart}-${nn}`
 }
 
 // ----- State queries -------------------------------------------------------
@@ -71,6 +87,7 @@ export function generateVersionLabel(opts: {
 //   baseline:   always 00. Returns null if a baseline already exists.
 //   rebaseline: starts at 01, increments. Returns null at 99.
 //   update:     starts at 01, increments. Returns null at 99.
+//   fragnet:    starts at 01, increments. Returns null at 99.
 export function getNextSequenceNumber(
   versions: VersionLabelInput[],
   type: ScheduleType,
@@ -79,8 +96,8 @@ export function getNextSequenceNumber(
     const hasBaseline = versions.some(v => v.scheduleType === 'baseline')
     return hasBaseline ? null : 0
   }
-  // For rebaseline + update, find the highest existing sequenceNumber of
-  // that type and add 1. Cap at 99.
+  // For rebaseline + update + fragnet, find the highest existing sequenceNumber
+  // of that type and add 1. Cap at 99.
   let max = 0
   for (const v of versions) {
     if (v.scheduleType === type) {
@@ -95,8 +112,8 @@ export function getNextSequenceNumber(
 // Returns whether the given schedule type CAN be uploaded right now.
 // Drives the dropdown enable/disable state.
 //
-//   nothing uploaded yet     → baseline available, rebaseline/update disabled
-//   has baseline             → rebaseline + update available, baseline disabled
+//   nothing uploaded yet     → baseline available, others disabled
+//   has baseline             → rebaseline + update + fragnet available, baseline disabled
 //   baseline deleted         → baseline available again, others disabled
 export function canUploadType(
   versions: VersionLabelInput[],
@@ -111,7 +128,7 @@ export function canUploadType(
     return { allowed: true }
   }
 
-  // rebaseline + update both require a baseline first
+  // rebaseline + update + fragnet all require a baseline first
   if (!hasBaseline) {
     return { allowed: false, reason: 'Upload a baseline first' }
   }

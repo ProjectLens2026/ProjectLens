@@ -256,6 +256,7 @@ export default function UploadPage() {
       baseline: canUploadType(labelerVersions, 'baseline'),
       rebaseline: canUploadType(labelerVersions, 'rebaseline'),
       update: canUploadType(labelerVersions, 'update'),
+      fragnet: canUploadType(labelerVersions, 'fragnet'),
     }
   }, [projectMode, selectedProjectId, existingProjects])
 
@@ -289,6 +290,7 @@ export default function UploadPage() {
       ntp: project.contractDates?.ntp || cd.ntp,
       type: scheduleType,
       sequenceNumber: next,
+      dataDate: cd.dataDate,
     })
   }, [scheduleType, projectMode, newProjectId, selectedProjectId, existingProjects, cd.ntp])
 
@@ -452,6 +454,7 @@ export default function UploadPage() {
             ntp: updatedProject.contractDates?.ntp || cd.ntp,
             type: scheduleType,
             sequenceNumber: nextSeq,
+            dataDate,
           })
           const snapshot = buildDateSnapshot(updatedProject.contractDates || projectContractDates, dataDate)
 
@@ -585,7 +588,8 @@ export default function UploadPage() {
           {isDisabled ? state.reason : (
             type === 'baseline' ? 'The approved schedule of record' :
             type === 'rebaseline' ? 'New approved baseline replacing prior plan' :
-            'Monthly progress update against current baseline'
+            type === 'update' ? 'Monthly progress update against current baseline' :
+            'Impacted schedule with fragmentary network activities for TIA'
           )}
         </div>
       </button>
@@ -776,10 +780,11 @@ export default function UploadPage() {
               <div className="text-xs font-bold text-amber-900 uppercase tracking-wider mb-3">
                 Schedule Type <span className="text-red-600">*</span>
               </div>
-              <div className="grid grid-cols-3 gap-2 mb-3">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
                 {renderTypeButton('baseline', '📍', 'Baseline')}
                 {renderTypeButton('rebaseline', '🔄', 'Rebaseline')}
                 {renderTypeButton('update', '📈', 'Update')}
+                {renderTypeButton('fragnet', '⚠️', 'Fragnet')}
               </div>
               {labelPreview ? (
                 <div className="bg-white border border-amber-200 rounded-lg px-3 py-2 flex items-center gap-2">
