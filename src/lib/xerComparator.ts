@@ -235,13 +235,17 @@ export function compareXER(parsedA: ParsedXER, parsedB: ParsedXER): XERCompariso
   }
 
   // Detect fragnet activities — look for activities with specific fragnet keywords
-  // AND verify they are NEW in fileB (not present in fileA)
-  // Use word-boundary matching to avoid false positives like "SubsTanTIAl"
+  // in either the task_name OR task_code. Verifies they are NEW in fileB.
+  //
+  // Day 10 fix: original \bFRAG(NET)?\b regex missed task codes like FRAG01,
+  // FRAG-01, FRAG.01 because the digit/separator after FRAG isn't a word boundary.
+  // New pattern catches: FRAG, FRAGNET, FRAG01, FRAG-01, FRAG_01, FRAG.01.
+  // Avoids false positives: FRAGILE, FRAGRANCE, FRAGMENT (FRAG followed by letters).
   const fragnetKeywordRegexes = [
-    /\bFRAG(NET)?\b/,           // FRAG or FRAGNET as whole word
+    /\bFRAG(NET\b|\d|[-_.]\d|\s|$)/,  // FRAG, FRAGNET, FRAG01, FRAG-01 — not FRAGILE
     /\bSCHEDULE\s+ISSUE\b/,     // SCHEDULE ISSUE
     /\bSCHEDULE-ISSUE\b/,
-    /\bTIA\b/,                  // TIA as whole word (won't match "Substantial")
+    /\bTIA\b/,                  // TIA as whole word
     /\bDELAY\s+EVENT\b/,        // DELAY EVENT
     /\bCHANGE\s+ORDER\b/,       // CHANGE ORDER
     /\bCO[-\s]\d+\b/,           // CO-1, CO 2, etc.
@@ -265,8 +269,8 @@ export function compareXER(parsedA: ParsedXER, parsedB: ParsedXER): XERCompariso
     // OR existing activities with their description changed (low chance, but allow)
     const isNew = !codesInA.has(t.task_code)
 
-    // Only include if it's new OR explicitly contains a strong fragnet keyword
-    const hasStrongKeyword = /\bFRAGNET\b|\bSCHEDULE\s+ISSUE\b|\bDELAY\s+EVENT\b/.test(upper)
+    // Day 10 fix: matching strong-keyword pattern also widened for FRAG01-style codes
+    const hasStrongKeyword = /\bFRAG(NET\b|\d|[-_.]\d|\s|$)|\bSCHEDULE\s+ISSUE\b|\bDELAY\s+EVENT\b/.test(upper)
     if (isNew || hasStrongKeyword) {
       detectedFragnetTasks.push(t)
     }
