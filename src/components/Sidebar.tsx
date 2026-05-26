@@ -236,7 +236,11 @@ export default function Sidebar({ user }: SidebarProps) {
     setActiveProjectId(projectId)
     setActiveVersionId(versionId)
     refresh()
-    maybeNavigateToDashboard()
+    // Day 10 — clicking a version ALWAYS jumps to Overview. The PM can then
+    // manually click into EVM/Trend/TIA/etc. for that version. Stops the
+    // "wait, which version am I looking at?" confusion when switching versions
+    // while staying on a sub-view like EVM or Lens.
+    router.push('/dashboard')
   }
   function openProjectLatest(projectId: string) {
     const project = projects.find(p => p.id === projectId)
