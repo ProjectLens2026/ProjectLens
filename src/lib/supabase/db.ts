@@ -1650,6 +1650,48 @@ export async function createCompanyAsPlatformOwner(opts: {
 }
 
 // =============================================================================
+// Day 11 — Platform Owner: Delete Customer Company
+//
+// Cascades through projects, schedule_versions, project_access, invitations,
+// and organization_members before deleting the organization. Storage files
+// (.xer uploads) become orphaned — non-critical, can be cleaned separately.
+//
+// Safety: SQL function enforces platform-owner-only check server-side.
+// =============================================================================
+export interface DeleteCompanySummary {
+  org_name: string
+  org_id: string
+  member_count: number
+  invitation_count: number
+  project_count: number
+  version_count: number
+}
+
+export async function deleteCompanyAsPlatformOwner(orgId: string): Promise<{
+  ok: boolean
+  summary?: DeleteCompanySummary
+  error?: string
+}> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user?.email) return { ok: false, error: 'Not signed in' }
+
+  const PLATFORM_OWNER_EMAILS = ['support@nobelpm.org', 'support@control-lens.com']
+  if (!PLATFORM_OWNER_EMAILS.includes(user.email.toLowerCase())) {
+    return { ok: false, error: 'Platform owners only' }
+  }
+
+  if (!orgId) return { ok: false, error: 'Missing org id' }
+
+  const { data, error } = await supabase.rpc('platform_delete_company', { p_org_id: orgId })
+  if (error) {
+    console.error('[db.deleteCompanyAsPlatformOwner] failed:', error)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true, summary: data as DeleteCompanySummary }
+}
+
+// =============================================================================
 // Day 10 — TIA Compare via Supabase Storage
 //
 // PROBLEM: Vercel API routes have a ~4.5MB body size limit. Large XER files

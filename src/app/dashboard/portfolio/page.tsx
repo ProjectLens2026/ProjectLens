@@ -21,7 +21,7 @@ import Link from 'next/link'
 import { usePermissions } from '@/lib/usePermissions'
 import {
   loadPortfolio, loadOrgMembersForPlatformOwner, loadOrgProjectsForPlatformOwner,
-  createCompanyAsPlatformOwner,
+  createCompanyAsPlatformOwner, deleteCompanyAsPlatformOwner,
   PortfolioOrg, PortfolioMember, PortfolioProject,
 } from '@/lib/supabase/db'
 
@@ -45,6 +45,12 @@ export default function PortfolioPage() {
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
   const [createSuccess, setCreateSuccess] = useState<{ companyName: string; ownerEmail: string; acceptUrl: string } | null>(null)
+
+  // Day 11 — Delete Company modal state
+  const [showDeleteCompany, setShowDeleteCompany] = useState(false)
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   useEffect(() => {
     if (perms.loading) return
@@ -122,6 +128,32 @@ export default function PortfolioPage() {
       ownerEmail: newOwnerEmail.trim(),
       acceptUrl: result.acceptUrl || '',
     })
+  }
+
+  async function handleDeleteCompany() {
+    if (!selectedOrg) return
+    setDeleteError('')
+
+    // Safety: require exact company-name match
+    if (deleteConfirmText.trim() !== selectedOrg.org_name) {
+      setDeleteError(`Type the company name exactly: ${selectedOrg.org_name}`)
+      return
+    }
+
+    setDeleting(true)
+    const result = await deleteCompanyAsPlatformOwner(selectedOrg.org_id)
+    setDeleting(false)
+
+    if (!result.ok) {
+      setDeleteError(result.error || 'Failed to delete company')
+      return
+    }
+
+    // Success: close everything, refresh
+    setShowDeleteCompany(false)
+    setDeleteConfirmText('')
+    setSelectedOrgId(null)
+    loadPortfolio().then(setOrgs)
   }
 
   return (
@@ -254,8 +286,16 @@ export default function PortfolioPage() {
                   <div className="font-bold text-slate-900 text-base">{selectedOrg.org_name}</div>
                   <div className="text-xs text-slate-500">{selectedOrg.total_members} members · {selectedOrg.project_count} projects · {selectedOrg.version_count} versions uploaded</div>
                 </div>
-                <button onClick={() => setSelectedOrgId(null)}
-                  className="text-slate-400 hover:text-slate-700 text-xl leading-none">×</button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { setShowDeleteCompany(true); setDeleteConfirmText(''); setDeleteError('') }}
+                    className="text-xs font-semibold text-red-600 hover:text-white hover:bg-red-600 border border-red-200 hover:border-red-600 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+                    title="Delete this company permanently">
+                    🗑 Delete Company
+                  </button>
+                  <button onClick={() => setSelectedOrgId(null)}
+                    className="text-slate-400 hover:text-slate-700 text-xl leading-none px-1">×</button>
+                </div>
               </div>
 
               {drillLoading ? (
@@ -467,6 +507,80 @@ export default function PortfolioPage() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ============================================================
+          Delete Company modal — Day 11
+          Requires typing the exact company name as confirmation.
+          Cascades through projects, versions, members, invitations.
+          IRREVERSIBLE.
+          ============================================================ */}
+      {showDeleteCompany && selectedOrg && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+          onClick={() => !deleting && setShowDeleteCompany(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-red-200 flex items-center justify-between bg-red-50 rounded-t-2xl">
+              <div>
+                <div className="font-bold text-red-900 text-base">🗑 Delete Company</div>
+                <div className="text-[11px] text-red-700 mt-0.5">This action cannot be undone</div>
+              </div>
+              <button onClick={() => setShowDeleteCompany(false)} disabled={deleting}
+                className="text-red-400 hover:text-red-700 text-2xl leading-none">×</button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-900 leading-relaxed">
+                You are about to permanently delete <strong>{selectedOrg.org_name}</strong> and everything inside it. This will remove:
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-700 space-y-1.5">
+                <div className="flex justify-between"><span>👥 Members</span><strong>{selectedOrg.total_members}</strong></div>
+                <div className="flex justify-between"><span>📁 Projects</span><strong>{selectedOrg.project_count}</strong></div>
+                <div className="flex justify-between"><span>📄 Schedule versions</span><strong>{selectedOrg.version_count}</strong></div>
+                <div className="flex justify-between"><span>✉ Pending invitations</span><strong>—</strong></div>
+                <div className="flex justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-200 italic">All deletions cascade. User accounts (profiles) remain in the system.</div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Type the company name to confirm
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={e => { setDeleteConfirmText(e.target.value); setDeleteError('') }}
+                  placeholder={selectedOrg.org_name}
+                  disabled={deleting}
+                  className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:outline-none focus:border-red-500 font-mono"
+                  autoFocus
+                />
+                <div className="text-[10px] text-slate-500 mt-1">
+                  Must match exactly: <span className="font-mono font-bold text-slate-700">{selectedOrg.org_name}</span>
+                </div>
+              </div>
+
+              {deleteError && (
+                <div className="bg-red-50 border border-red-200 text-red-800 text-xs px-3 py-2 rounded font-semibold">
+                  ⚠ {deleteError}
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={handleDeleteCompany}
+                  disabled={deleting || deleteConfirmText.trim() !== selectedOrg.org_name}
+                  className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-bold py-2.5 rounded-lg">
+                  {deleting ? 'Deleting...' : `Delete ${selectedOrg.org_name}`}
+                </button>
+                <button
+                  onClick={() => setShowDeleteCompany(false)}
+                  disabled={deleting}
+                  className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:text-slate-900">
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
         </div>
