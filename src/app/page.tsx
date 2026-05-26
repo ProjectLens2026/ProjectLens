@@ -36,7 +36,7 @@ export default function LandingPage() {
             {/* Left: copy */}
             <div>
               <div className="inline-flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-full px-3 py-1 mb-6 text-xs font-bold text-blue-700 uppercase tracking-wider">
-                <span>★</span> Schedule intelligence for the whole project team
+                <span>★</span> Construction project scheduling for the whole jobsite team
               </div>
               <h1 className="text-4xl md:text-5xl xl:text-6xl font-extrabold tracking-tight text-slate-900 leading-tight mb-6">
                 Your schedule, <span className="text-blue-600">explained</span>.
@@ -140,18 +140,20 @@ export default function LandingPage() {
           <div className="text-center mb-14">
             <div className="text-xs font-bold uppercase tracking-widest text-blue-600 mb-2">Who it's for</div>
             <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-4">
-              Built for the whole project team — not just the scheduler.
+              Built for the people on the jobsite — not just the scheduler.
             </h2>
-            <p className="text-slate-600 max-w-2xl mx-auto">
-              Other tools are built for schedulers, by schedulers. ControlLens makes schedule intelligence
-              readable for everyone on the project.
+            <p className="text-slate-600 max-w-3xl mx-auto leading-relaxed">
+              ControlLens is <strong className="text-slate-900">construction project scheduling for PMs, superintendents, and owners</strong>.
+              It doesn't just flag errors — it tells your team where to focus today, and why.
+              One project or one thousand, even when the XER has missing logic ties or wrong relationships,
+              ControlLens reads through the noise and points to what actually matters this week.
             </p>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
-            <PersonaCard icon="🏗️" title="Project Managers" body="PMP-level analysis without learning P6. Read your schedule like a 20-year scheduler would." />
+            <PersonaCard icon="🏗️" title="Project Managers" body="Know what to focus on this week, even when the schedule isn't perfect. Plain-language answers, no P6 expertise required." />
+            <PersonaCard icon="👷" title="Superintendents" body="Get the field's view of the schedule — what's at risk, what's blocking what, and which calls to make today." />
             <PersonaCard icon="🏛️" title="Owners & Federal Agencies" body="Executive summaries in plain language. Know project health without digging through bar charts." />
-            <PersonaCard icon="📅" title="Schedulers" body="Logic check, fragnet detection, and full TIA reports in 30 seconds. Free up your week for real work." />
-            <PersonaCard icon="⚖️" title="Claims Consultants" body="TIA comparison + Word report drafting. Get a defensible first draft in minutes, not days." />
+            <PersonaCard icon="📅" title="Schedulers & Claims Consultants" body="Logic check, fragnet detection, full TIA reports, and defensible Word drafts in 30 seconds." />
           </div>
         </div>
       </section>
