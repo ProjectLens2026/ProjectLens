@@ -61,6 +61,7 @@ export interface XERAnalysis {
   finishedActivities?: Task[]
   longestPathActivities?: Task[]
   submittals?: Task[]
+  allTasksForPaths?: Task[]  // Day 10 — Multiple Float Paths source data
   healthScore: number
   condition: string
   delayDays: number

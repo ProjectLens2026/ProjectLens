@@ -235,7 +235,7 @@ export default function ControlLensAnalysisPage() {
         <div className="bg-white border border-slate-200 rounded-xl">
           <div className="tab-bar flex gap-0 border-b border-slate-100 overflow-x-auto no-print">
             {[
-              { id: 'schedule-filter', label: 'Schedule Filter', icon: '🔎' },
+              { id: 'schedule-filter', label: 'Schedule Filters (Primavera)', icon: '🔎' },
               { id: 'logic', label: 'Sequence Problems', icon: '🔧' },
               { id: 'noties', label: 'No Logic Ties', icon: '⛓️' },
               { id: 'longlead', label: 'Long Lead Items', icon: '📦' },
@@ -253,14 +253,14 @@ export default function ControlLensAnalysisPage() {
           <div className="p-5">
             {activeTab === 'schedule-filter' && (
               <div className="tab-pane">
-                <h3 className="text-sm font-bold mb-1">Schedule Filter</h3>
+                <h3 className="text-sm font-bold mb-1">Schedule Filters <span className="text-slate-400 font-normal">(Primavera)</span></h3>
                 <p className="text-[11px] text-slate-500 mb-3 italic">P6 filters read directly from your XER file.</p>
 
                 <div className="flex flex-wrap gap-2 mb-5">
                   {[
                     { id: 'critical',    label: 'Critical Path',          icon: '🎯' },
                     { id: 'longest',     label: 'Longest Path',           icon: '📏' },
-                    { id: 'multi-paths', label: 'Multiple Float Paths',   icon: '🛤️', isNew: true },
+                    { id: 'multi-paths', label: 'Multiple Float Paths (ControlLens)',   icon: '🛤️', isNew: true },
                     { id: 'lookahead',   label: '2 Week Lookahead',       icon: '📅' },
                     { id: 'not-started', label: 'Activities Not Started', icon: '⏸️' },
                     { id: 'finished',    label: 'Activities Finished',    icon: '✅' },
@@ -303,7 +303,8 @@ export default function ControlLensAnalysisPage() {
                 {scheduleFilter === 'multi-paths' && (
                   <div>
                     <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                      Multiple Float Paths uses total float to rank the top driving chains of activities. <strong>Path 1 is the critical path</strong> (zero or negative float). <strong>Paths 2-5 are near-critical</strong> — today's near-critical becomes tomorrow's critical after one slip. All paths run to the final completion milestone.
+                      <div className="font-bold mb-1">ControlLens Multiple Float Paths analysis</div>
+                      ControlLens ranks the top driving chains of activities by total float — beyond just the single critical path that P6 shows. <strong>Path 1 is the critical path</strong> (zero or negative float). <strong>Paths 2-5 are near-critical</strong> — today's near-critical becomes tomorrow's critical after one slip. All paths run to the final completion milestone. This is the proper Multiple Float Paths method that federal claim analysts and PM teams use for delay analysis.
                     </div>
 
                     {/* Threshold + summary control */}
