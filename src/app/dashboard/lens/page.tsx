@@ -136,6 +136,19 @@ export default function ControlLensAnalysisPage() {
     if (isNaN(h)) return '—'
     return Math.round(h / 8) + 'd'
   }
+  // Day 10 — format dates as "Jan 06, 2026" / "Feb 06, 2026" everywhere on this page.
+  // Accepts the various forms P6 XER hands us ('2026-01-06 00:00', '2026-01-06', etc.)
+  function fmtDate(d?: string | null): string {
+    if (!d) return '—'
+    const iso = d.slice(0, 10)  // "2026-01-06"
+    const parts = iso.split('-')
+    if (parts.length !== 3) return d
+    const [y, m, day] = parts
+    const mIdx = parseInt(m, 10) - 1
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    if (mIdx < 0 || mIdx > 11) return d
+    return `${monthNames[mIdx]} ${day}, ${y}`
+  }
   function conditionColor(cond: string) {
     if (cond === 'Recovery Required') return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-900' }
     if (cond === 'Attention Needed') return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-900' }
@@ -196,11 +209,11 @@ export default function ControlLensAnalysisPage() {
             <div>
               <div className="text-base font-bold text-slate-900">{project.name}</div>
               {project.projectId && <div className="text-[10px] font-mono text-blue-600 mt-0.5">{project.projectId}</div>}
-              <div className="text-xs text-slate-500 mt-0.5">{a.fileType || 'Primavera P6 XER'} · Data date: {a.dataDate?.slice(0,10) || 'N/A'}</div>
+              <div className="text-xs text-slate-500 mt-0.5">{a.fileType || 'Primavera P6 XER'} · Data date: {fmtDate(a.dataDate) || 'N/A'}</div>
             </div>
             <div className="text-right">
               <div className="text-xs text-slate-500">Contract completion</div>
-              <div className="text-sm font-bold text-red-600">{a.contractEnd?.slice(0,10) || 'N/A'} <span className="text-xs font-normal text-slate-500">· Projected {a.projectedEnd?.slice(0,10) || 'N/A'}</span></div>
+              <div className="text-sm font-bold text-red-600">{fmtDate(a.contractEnd) || 'N/A'} <span className="text-xs font-normal text-slate-500">· Projected {fmtDate(a.projectedEnd) || 'N/A'}</span></div>
             </div>
           </div>
         </div>
@@ -378,8 +391,8 @@ export default function ControlLensAnalysisPage() {
                               <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 last:border-0 text-xs items-center">
                                 <div className="col-span-1 font-mono font-semibold text-slate-800 truncate">{t.task_code}</div>
                                 <div className="col-span-5 text-slate-700 truncate">{t.task_name}</div>
-                                <div className="col-span-2 text-right text-slate-600">{(t.early_start_date || t.target_start_date || t.act_start_date || '').slice(0,10)}</div>
-                                <div className="col-span-2 text-right text-slate-600 font-semibold">{(t.early_end_date || t.target_end_date || t.act_end_date || '').slice(0,10)}</div>
+                                <div className="col-span-2 text-right text-slate-600">{fmtDate((t.early_start_date || t.target_start_date || t.act_start_date || ''))}</div>
+                                <div className="col-span-2 text-right text-slate-600 font-semibold">{fmtDate((t.early_end_date || t.target_end_date || t.act_end_date || ''))}</div>
                                 <div className={`col-span-1 text-right font-bold ${fl < 0 ? 'text-red-600' : fl === 0 ? 'text-amber-600' : 'text-green-600'}`}>{fl}d</div>
                                 <div className="col-span-1 text-right">
                                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${t.status_code === 'TK_Complete' ? 'bg-green-100 text-green-700' : t.status_code === 'TK_Active' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>{t.status_code === 'TK_Complete' ? 'Done' : t.status_code === 'TK_Active' ? `${pct}%` : 'Not started'}</span>
@@ -417,7 +430,7 @@ export default function ControlLensAnalysisPage() {
                 {scheduleFilter === 'lookahead' && (
                   <div>
                     <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                      Activities scheduled to start or finish within 14 calendar days after the data date ({a.dataDate?.slice(0,10) || 'N/A'}).
+                      Activities scheduled to start or finish within 14 calendar days after the data date ({fmtDate(a.dataDate) || 'N/A'}).
                     </div>
                     {(!a.twoWeekLookahead || a.twoWeekLookahead.length === 0) ? (
                       <div className="text-center py-8 text-slate-400 text-xs">No activities scheduled in next 14 days.</div>
@@ -433,8 +446,8 @@ export default function ControlLensAnalysisPage() {
                             <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 last:border-0 text-xs items-center">
                               <div className="col-span-1 font-mono font-semibold text-slate-800 truncate">{t.task_code}</div>
                               <div className="col-span-5 text-slate-700 truncate">{t.task_name}</div>
-                              <div className="col-span-2 text-right text-slate-600">{(t.early_start_date || t.target_start_date || '').slice(0,10)}</div>
-                              <div className="col-span-2 text-right text-slate-600 font-semibold">{(t.early_end_date || t.target_end_date || '').slice(0,10)}</div>
+                              <div className="col-span-2 text-right text-slate-600">{fmtDate((t.early_start_date || t.target_start_date || ''))}</div>
+                              <div className="col-span-2 text-right text-slate-600 font-semibold">{fmtDate((t.early_end_date || t.target_end_date || ''))}</div>
                               <div className="col-span-1 text-right text-slate-600">{pct}%</div>
                               <div className={`col-span-1 text-right font-bold ${fl < 0 ? 'text-red-600' : fl <= 14 ? 'text-amber-600' : 'text-green-600'}`}>{fl}d</div>
                             </div>
@@ -465,8 +478,8 @@ export default function ControlLensAnalysisPage() {
                             <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 last:border-0 text-xs items-center">
                               <div className="col-span-1 font-mono font-semibold text-slate-800 truncate">{t.task_code}</div>
                               <div className="col-span-5 text-slate-700 truncate">{t.task_name}</div>
-                              <div className="col-span-2 text-right text-slate-600">{(t.early_start_date || t.target_start_date || '').slice(0,10) || '—'}</div>
-                              <div className="col-span-2 text-right text-slate-600">{(t.early_end_date || t.target_end_date || '').slice(0,10) || '—'}</div>
+                              <div className="col-span-2 text-right text-slate-600">{fmtDate((t.early_start_date || t.target_start_date || '')) || '—'}</div>
+                              <div className="col-span-2 text-right text-slate-600">{fmtDate((t.early_end_date || t.target_end_date || '')) || '—'}</div>
                               <div className="col-span-1 text-right text-slate-600">{dur}d</div>
                               <div className={`col-span-1 text-right font-bold ${fl < 0 ? 'text-red-600' : fl <= 14 ? 'text-amber-600' : 'text-green-600'}`}>{fl}d</div>
                             </div>
@@ -513,8 +526,8 @@ export default function ControlLensAnalysisPage() {
                             <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 last:border-0 text-xs items-center">
                               <div className="col-span-1 font-mono font-semibold text-slate-800 truncate">{t.task_code}</div>
                               <div className="col-span-5 text-slate-700 truncate">{t.task_name}</div>
-                              <div className="col-span-2 text-right text-slate-600">{(t.act_start_date || '').slice(0,10) || '—'}</div>
-                              <div className="col-span-2 text-right text-slate-600 font-semibold">{(t.act_end_date || '').slice(0,10) || '—'}</div>
+                              <div className="col-span-2 text-right text-slate-600">{fmtDate((t.act_start_date || '')) || '—'}</div>
+                              <div className="col-span-2 text-right text-slate-600 font-semibold">{fmtDate((t.act_end_date || '')) || '—'}</div>
                               <div className="col-span-1 text-right text-slate-600">{actualDuration}d</div>
                               <div className={`col-span-1 text-right font-bold ${variance === null ? 'text-slate-400' : variance > 0 ? 'text-red-600' : variance < 0 ? 'text-green-600' : 'text-slate-600'}`}>
                                 {variance === null ? '—' : variance > 0 ? `+${variance}d` : `${variance}d`}
@@ -666,7 +679,7 @@ export default function ControlLensAnalysisPage() {
                       <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">🚨</div>
                       <div>
                         <div className="font-bold text-slate-900">The project is {a.delayDays} days behind contract</div>
-                        <div className="text-slate-600 mt-1 leading-relaxed">Contract completion was {a.contractEnd?.slice(0,10)}. Projected completion is now {a.projectedEnd?.slice(0,10)}.</div>
+                        <div className="text-slate-600 mt-1 leading-relaxed">Contract completion was {fmtDate(a.contractEnd)}. Projected completion is now {fmtDate(a.projectedEnd)}.</div>
                       </div>
                     </div>
                   )}
@@ -860,7 +873,7 @@ function PathCard({ path, expanded, onToggle, projectStart, projectEnd }: {
                         <div
                           className={`absolute top-0.5 bottom-0.5 rounded ${barColor}`}
                           style={{ left: `${range.leftPct}%`, width: `${range.widthPct}%`, minWidth: '4px' }}
-                          title={`${t.early_start_date?.slice(0, 10) || ''} → ${t.early_end_date?.slice(0, 10) || ''}`}
+                          title={`${fmtDate(t.early_start_date) || ''} → ${fmtDate(t.early_end_date) || ''}`}
                         />
                       )}
                     </div>
@@ -876,8 +889,8 @@ function PathCard({ path, expanded, onToggle, projectStart, projectEnd }: {
             <div className="flex items-center mt-2 pt-2 border-t border-slate-200">
               <div className="w-48 text-[10px] text-slate-400 italic">Timeline →</div>
               <div className="flex-1 flex justify-between text-[10px] text-slate-500">
-                <span>{projectStart?.slice(0, 10) || ''}</span>
-                <span>{projectEnd?.slice(0, 10) || ''}</span>
+                <span>{fmtDate(projectStart) || ''}</span>
+                <span>{fmtDate(projectEnd) || ''}</span>
               </div>
             </div>
           </div>
@@ -897,8 +910,8 @@ function PathCard({ path, expanded, onToggle, projectStart, projectEnd }: {
                 <div key={i} className="grid grid-cols-12 gap-2 py-1.5 border-b border-slate-100 text-xs items-center last:border-0">
                   <div className="col-span-2 font-mono font-semibold text-slate-800 truncate">{t.task_code}</div>
                   <div className="col-span-5 text-slate-700 truncate">{t.task_name}</div>
-                  <div className="col-span-2 text-right text-slate-600">{(t.early_start_date || t.target_start_date || '').slice(0, 10)}</div>
-                  <div className="col-span-2 text-right text-slate-600">{(t.early_end_date || t.target_end_date || '').slice(0, 10)}</div>
+                  <div className="col-span-2 text-right text-slate-600">{fmtDate((t.early_start_date || t.target_start_date || ''))}</div>
+                  <div className="col-span-2 text-right text-slate-600">{fmtDate((t.early_end_date || t.target_end_date || ''))}</div>
                   <div className={`col-span-1 text-right font-bold ${fl < 0 ? 'text-red-600' : fl === 0 ? 'text-amber-700' : 'text-emerald-600'}`}>{fl}d</div>
                 </div>
               )
@@ -929,8 +942,9 @@ function buildMonthTicks(
     if (total <= 0) return []
 
     const months = total / (1000 * 60 * 60 * 24 * 30.44)
-    // Pick interval: monthly if ≤12 months, every 2 months if ≤24, every 3 if ≤36, else 6
-    const intervalMonths = months <= 12 ? 1 : months <= 24 ? 2 : months <= 36 ? 3 : 6
+    // Pick interval based on total months. "Jan 06, 2026" labels are ~12 chars
+    // so we space them out more aggressively than for shorter labels.
+    const intervalMonths = months <= 4 ? 1 : months <= 8 ? 2 : months <= 18 ? 3 : months <= 36 ? 6 : 12
 
     const ticks: { leftPct: number; label: string }[] = []
     const startDate = new Date(start)
@@ -939,15 +953,15 @@ function buildMonthTicks(
     while (cursor.getTime() < start) {
       cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1)
     }
-    const monthLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
     let safety = 0
     while (cursor.getTime() <= end && safety < 60) {
       safety++
       const leftPct = ((cursor.getTime() - start) / total) * 100
-      const m = cursor.getMonth()
       const y = cursor.getFullYear()
-      // Show year on Jan and on the very first tick; otherwise just month
-      const label = (m === 0 || ticks.length === 0) ? `${monthLabels[m]} '${String(y).slice(-2)}` : monthLabels[m]
+      const m = monthNames[cursor.getMonth()]
+      const d = String(cursor.getDate()).padStart(2, '0')
+      const label = `${m} ${d}, ${y}`
       ticks.push({ leftPct, label })
       cursor = new Date(cursor.getFullYear(), cursor.getMonth() + intervalMonths, 1)
     }
