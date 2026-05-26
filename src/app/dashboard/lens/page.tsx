@@ -801,37 +801,65 @@ function PathCard({ path, expanded, onToggle, projectStart, projectEnd }: {
       : `${path.floatDays} day${path.floatDays === 1 ? '' : 's'} float`
 
   return (
-    <div className="border border-slate-200 rounded-lg p-3 mb-3 bg-white">
+    <div className="border border-slate-200 rounded-lg p-4 mb-3 bg-white">
       <button onClick={onToggle} className="w-full text-left flex items-center gap-2 mb-1">
-        <span className={`${tagColor} text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded`}>
+        <span className={`${tagColor} text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded`}>
           {tagLabel}
         </span>
-        <span className="text-sm font-semibold text-slate-900 flex-1 truncate">{path.pathName}</span>
-        <span className="text-[11px] text-slate-500">
+        <span className="text-base font-semibold text-slate-900 flex-1 truncate">{path.pathName}</span>
+        <span className="text-xs text-slate-600">
           {path.activities.length} activities · {floatLabel} · drives to <span className="font-semibold">FINAL COMPLETION</span>
         </span>
-        <span className="text-slate-400 ml-1">{expanded ? '▾' : '▸'}</span>
+        <span className="text-slate-400 ml-1 text-sm">{expanded ? '▾' : '▸'}</span>
       </button>
 
       {expanded && (
         <>
-          <p className="text-[11px] text-slate-600 leading-relaxed mb-3 pl-1">{path.plainExplanation}</p>
+          <p className="text-xs text-slate-600 leading-relaxed mb-3 mt-2 pl-1">{path.plainExplanation}</p>
 
-          {/* Gantt strip */}
-          <div className="bg-slate-50 border border-slate-200 rounded p-2 mb-2 text-[10px]">
-            <div className="space-y-1">
+          {/* Gantt strip with time axis */}
+          <div className="bg-slate-50 border border-slate-200 rounded p-3 mb-3">
+            {/* Time axis — month tick marks */}
+            {(() => {
+              const ticks = buildMonthTicks(projectStart, projectEnd)
+              return (
+                <div className="flex items-end mb-2 pb-1 border-b border-slate-300">
+                  <div className="w-48 text-[11px] font-bold uppercase tracking-wider text-slate-500">Activity</div>
+                  <div className="flex-1 relative h-5">
+                    {ticks.map((tick, i) => (
+                      <div key={i} className="absolute top-0 flex flex-col items-center"
+                        style={{ left: `${tick.leftPct}%`, transform: 'translateX(-50%)' }}>
+                        <div className="text-[10px] font-semibold text-slate-600">{tick.label}</div>
+                        <div className="w-px h-2 bg-slate-400 mt-0.5"></div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* Gantt bars */}
+            <div className="space-y-1.5">
               {path.activities.slice(0, 12).map((t, i) => {
                 const range = activityToGanttRange(t, projectStart, projectEnd)
                 return (
                   <div key={i} className="flex items-center gap-2">
-                    <div className="w-40 font-mono text-[9px] text-slate-700 truncate" title={`${t.task_code} · ${t.task_name}`}>
-                      {t.task_code} · {(t.task_name || '').slice(0, 22)}
+                    <div className="w-48 font-mono text-[11px] text-slate-700 truncate" title={`${t.task_code} · ${t.task_name}`}>
+                      <span className="font-bold">{t.task_code}</span> · {(t.task_name || '').slice(0, 26)}
                     </div>
-                    <div className="flex-1 h-2.5 bg-white border border-slate-200 rounded relative">
+                    <div className="flex-1 h-4 bg-white border border-slate-200 rounded relative">
+                      {/* Subtle month grid lines */}
+                      {(() => {
+                        const ticks = buildMonthTicks(projectStart, projectEnd)
+                        return ticks.map((tick, ti) => (
+                          <div key={ti} className="absolute top-0 bottom-0 w-px bg-slate-200"
+                            style={{ left: `${tick.leftPct}%` }} />
+                        ))
+                      })()}
                       {range && (
                         <div
-                          className={`absolute top-0 h-full rounded ${barColor}`}
-                          style={{ left: `${range.leftPct}%`, width: `${range.widthPct}%` }}
+                          className={`absolute top-0.5 bottom-0.5 rounded ${barColor}`}
+                          style={{ left: `${range.leftPct}%`, width: `${range.widthPct}%`, minWidth: '4px' }}
                           title={`${t.early_start_date?.slice(0, 10) || ''} → ${t.early_end_date?.slice(0, 10) || ''}`}
                         />
                       )}
@@ -840,14 +868,23 @@ function PathCard({ path, expanded, onToggle, projectStart, projectEnd }: {
                 )
               })}
               {path.activities.length > 12 && (
-                <div className="text-center text-[9px] text-slate-400 pt-1">Showing first 12 of {path.activities.length} activities</div>
+                <div className="text-center text-[11px] text-slate-500 pt-2">Showing first 12 of {path.activities.length} activities · scroll the table below for full list</div>
               )}
+            </div>
+
+            {/* Project start / end date labels */}
+            <div className="flex items-center mt-2 pt-2 border-t border-slate-200">
+              <div className="w-48 text-[10px] text-slate-400 italic">Timeline →</div>
+              <div className="flex-1 flex justify-between text-[10px] text-slate-500">
+                <span>{projectStart?.slice(0, 10) || ''}</span>
+                <span>{projectEnd?.slice(0, 10) || ''}</span>
+              </div>
             </div>
           </div>
 
-          {/* Activity table */}
+          {/* Activity table — slightly bigger fonts */}
           <div className="space-y-1">
-            <div className="grid grid-cols-12 gap-2 text-[9px] font-bold text-slate-500 uppercase border-b border-slate-200 pb-1">
+            <div className="grid grid-cols-12 gap-2 text-[11px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200 pb-2">
               <div className="col-span-2">Code</div>
               <div className="col-span-5">Activity</div>
               <div className="col-span-2 text-right">Start</div>
@@ -857,7 +894,7 @@ function PathCard({ path, expanded, onToggle, projectStart, projectEnd }: {
             {path.activities.slice(0, 30).map((t, i) => {
               const fl = Math.round(parseFloat(t.total_float_hr_cnt || '0') / 8)
               return (
-                <div key={i} className="grid grid-cols-12 gap-2 py-1 border-b border-slate-100 text-[10px] items-center last:border-0">
+                <div key={i} className="grid grid-cols-12 gap-2 py-1.5 border-b border-slate-100 text-xs items-center last:border-0">
                   <div className="col-span-2 font-mono font-semibold text-slate-800 truncate">{t.task_code}</div>
                   <div className="col-span-5 text-slate-700 truncate">{t.task_name}</div>
                   <div className="col-span-2 text-right text-slate-600">{(t.early_start_date || t.target_start_date || '').slice(0, 10)}</div>
@@ -871,4 +908,51 @@ function PathCard({ path, expanded, onToggle, projectStart, projectEnd }: {
       )}
     </div>
   )
+}
+
+// =============================================================================
+// buildMonthTicks — produce time-axis tick marks for the Gantt strip.
+//
+// Returns array of { leftPct, label } where leftPct is the horizontal position
+// (0-100) along the project timeline and label is the month/year string. Spaces
+// ticks at sensible monthly/quarterly intervals depending on the total range.
+// =============================================================================
+function buildMonthTicks(
+  projectStart: string,
+  projectEnd: string,
+): { leftPct: number; label: string }[] {
+  if (!projectStart || !projectEnd) return []
+  try {
+    const start = new Date(projectStart.replace(' ', 'T')).getTime()
+    const end = new Date(projectEnd.replace(' ', 'T')).getTime()
+    const total = end - start
+    if (total <= 0) return []
+
+    const months = total / (1000 * 60 * 60 * 24 * 30.44)
+    // Pick interval: monthly if ≤12 months, every 2 months if ≤24, every 3 if ≤36, else 6
+    const intervalMonths = months <= 12 ? 1 : months <= 24 ? 2 : months <= 36 ? 3 : 6
+
+    const ticks: { leftPct: number; label: string }[] = []
+    const startDate = new Date(start)
+    let cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1)
+    // Bump to first interval-aligned month at or after the start
+    while (cursor.getTime() < start) {
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1)
+    }
+    const monthLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    let safety = 0
+    while (cursor.getTime() <= end && safety < 60) {
+      safety++
+      const leftPct = ((cursor.getTime() - start) / total) * 100
+      const m = cursor.getMonth()
+      const y = cursor.getFullYear()
+      // Show year on Jan and on the very first tick; otherwise just month
+      const label = (m === 0 || ticks.length === 0) ? `${monthLabels[m]} '${String(y).slice(-2)}` : monthLabels[m]
+      ticks.push({ leftPct, label })
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth() + intervalMonths, 1)
+    }
+    return ticks
+  } catch {
+    return []
+  }
 }
