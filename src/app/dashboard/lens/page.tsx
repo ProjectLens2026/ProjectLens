@@ -136,19 +136,6 @@ export default function ControlLensAnalysisPage() {
     if (isNaN(h)) return '—'
     return Math.round(h / 8) + 'd'
   }
-  // Day 10 — format dates as "Jan 06, 2026" / "Feb 06, 2026" everywhere on this page.
-  // Accepts the various forms P6 XER hands us ('2026-01-06 00:00', '2026-01-06', etc.)
-  function fmtDate(d?: string | null): string {
-    if (!d) return '—'
-    const iso = d.slice(0, 10)  // "2026-01-06"
-    const parts = iso.split('-')
-    if (parts.length !== 3) return d
-    const [y, m, day] = parts
-    const mIdx = parseInt(m, 10) - 1
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-    if (mIdx < 0 || mIdx > 11) return d
-    return `${monthNames[mIdx]} ${day}, ${y}`
-  }
   function conditionColor(cond: string) {
     if (cond === 'Recovery Required') return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-900' }
     if (cond === 'Attention Needed') return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-900' }
@@ -776,6 +763,23 @@ export default function ControlLensAnalysisPage() {
       </div>
     </div>
   )
+}
+
+// =============================================================================
+// fmtDate — format dates as "Jan 06, 2026" everywhere on this page.
+// Module-scope so both the main component and the PathCard sub-component use it.
+// Accepts the various forms P6 XER hands us ('2026-01-06 00:00', '2026-01-06', etc.)
+// =============================================================================
+function fmtDate(d?: string | null): string {
+  if (!d) return '—'
+  const iso = d.slice(0, 10)  // "2026-01-06"
+  const parts = iso.split('-')
+  if (parts.length !== 3) return d
+  const [y, m, day] = parts
+  const mIdx = parseInt(m, 10) - 1
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  if (mIdx < 0 || mIdx > 11) return d
+  return `${monthNames[mIdx]} ${day}, ${y}`
 }
 
 // =============================================================================
