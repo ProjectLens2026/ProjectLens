@@ -681,6 +681,34 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   const risksDetected = risksCritical + risksHigh + risksMedium
   const criticalRisks = risksCritical
 
+  // Day 10 — Multiple Float Paths needs all activities with their float
+  // values to compute multiple ranked paths client-side. Include all
+  // non-complete activities with float ≤ 30 days (covers any threshold up
+  // to 30). Lightweight subset of Task fields only.
+  const allTasksForPaths: any[] = taskArr
+    .filter(t => t.status_code !== 'TK_Complete')
+    .filter(t => {
+      const f = parseFloat(t.total_float_hr_cnt || '999')
+      return f <= 30 * 8  // ≤ 30 days
+    })
+    .map(t => ({
+      task_id: t.task_id,
+      task_code: t.task_code,
+      task_name: t.task_name,
+      status_code: t.status_code,
+      task_type: t.task_type,
+      phys_complete_pct: t.phys_complete_pct,
+      total_float_hr_cnt: t.total_float_hr_cnt,
+      remain_drtn_hr_cnt: t.remain_drtn_hr_cnt,
+      target_drtn_hr_cnt: t.target_drtn_hr_cnt,
+      early_start_date: t.early_start_date,
+      early_end_date: t.early_end_date,
+      target_start_date: t.target_start_date,
+      target_end_date: t.target_end_date,
+      act_start_date: t.act_start_date,
+      act_end_date: t.act_end_date,
+    }))
+
   return {
     totalActivities: taskArr.length,
     complete, inProgress, notStarted, negativeFloat,
@@ -693,6 +721,7 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     finishedActivities,
     longestPathActivities,
     submittals,
+    allTasksForPaths,  // Day 10
     healthScore, condition, delayDays,
     dataDate: parsed.dataDate,
     projectStartDate, projectStartSource,

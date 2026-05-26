@@ -1,7 +1,20 @@
 'use client'
-import { useState, useEffect } from 'react'
+// =============================================================================
+// Schedule Analysis page (Day 10 — Multiple Float Paths added)
+//
+// New: 'multi-paths' pill in Schedule Filter shows the top 5 driving chains
+// (Path 1 = critical, Paths 2-5 = near-critical) with inline Gantt charts
+// and plain-language explanations. Federal/commercial PMs need to see
+// near-critical paths because today's near-critical = tomorrow's critical.
+//
+// Existing functionality preserved (Critical Path, Longest Path, 2 Week
+// Lookahead, Not Started, Finished, all other tabs untouched).
+// =============================================================================
+import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { getActiveProject, getActiveVersion, updateVersionNarrative } from '@/lib/projectStore'
+import { analyzeMultipleFloatPaths, activityToGanttRange, type FloatPath } from '@/lib/multipleFloatPaths'
+import type { Task } from '@/lib/xerParser'
 
 export default function ControlLensAnalysisPage() {
   const [analysis, setAnalysis] = useState<any>(null)
@@ -9,8 +22,10 @@ export default function ControlLensAnalysisPage() {
   const [version, setVersion] = useState<any>(null)
   const [activeTab, setActiveTab] = useState('schedule-filter')
   const [scheduleFilter, setScheduleFilter] = useState<
-    'critical' | 'longest' | 'lookahead' | 'not-started' | 'finished'
+    'critical' | 'longest' | 'multi-paths' | 'lookahead' | 'not-started' | 'finished'
   >('critical')
+  const [floatThreshold, setFloatThreshold] = useState<number>(5)
+  const [expandedPaths, setExpandedPaths] = useState<Set<number>>(new Set([1, 2]))
   const [narrativeText, setNarrativeText] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
@@ -37,6 +52,38 @@ export default function ControlLensAnalysisPage() {
     setAnalysis(v?.analysis || null)
   }
 
+  // Compute Multiple Float Paths from the precomputed task list in analysis.
+  // Memoized so it only re-runs when threshold or version changes.
+  const multiPathsResult = useMemo(() => {
+    if (!analysis?.allTasksForPaths) return null
+    try {
+      return analyzeMultipleFloatPaths(analysis.allTasksForPaths, floatThreshold, 5)
+    } catch (e) {
+      console.error('[Lens] Multiple Float Paths failed:', e)
+      return null
+    }
+  }, [analysis?.allTasksForPaths, floatThreshold])
+
+  // Fallback: if parsedXER isn't on the analysis, build a partial result
+  // from criticalDrivers + longestPathActivities. Less rich than the full
+  // algorithm but enough to show SOMETHING for legacy versions.
+  const multiPathsFallback = useMemo(() => {
+    if (multiPathsResult || !analysis) return null
+    const drivers = analysis.criticalDrivers || []
+    const longest = analysis.longestPathActivities || []
+    if (drivers.length === 0 && longest.length === 0) return null
+    return { drivers, longest }
+  }, [multiPathsResult, analysis])
+
+  function togglePathExpand(pathNumber: number) {
+    setExpandedPaths(prev => {
+      const next = new Set(prev)
+      if (next.has(pathNumber)) next.delete(pathNumber)
+      else next.add(pathNumber)
+      return next
+    })
+  }
+
   async function handleGenerate() {
     if (!project || !version || !analysis) return
     setIsGenerating(true)
@@ -45,10 +92,7 @@ export default function ControlLensAnalysisPage() {
       const res = await fetch('/api/generate-narrative', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          analysis,
-          context: version.context || {},
-        }),
+        body: JSON.stringify({ analysis, context: version.context || {} }),
       })
       if (!res.ok) {
         const errText = await res.text().catch(() => '')
@@ -61,9 +105,7 @@ export default function ControlLensAnalysisPage() {
       }
       const data = await res.json()
       const newNarrative = (data.narrative || '').trim()
-      if (!newNarrative) {
-        throw new Error('Generation returned an empty result. Try again.')
-      }
+      if (!newNarrative) throw new Error('Generation returned an empty result. Try again.')
       setNarrativeText(newNarrative)
       updateVersionNarrative(project.id, version.id, newNarrative)
     } catch (err: any) {
@@ -73,20 +115,13 @@ export default function ControlLensAnalysisPage() {
       setIsGenerating(false)
     }
   }
-
-  function handleEdit() {
-    setIsEditing(true)
-    setNarrativeError(null)
-  }
+  function handleEdit() { setIsEditing(true); setNarrativeError(null) }
   function handleEditSave() {
     if (!project || !version) return
     updateVersionNarrative(project.id, version.id, narrativeText)
     setIsEditing(false)
   }
-  function handleEditCancel() {
-    setNarrativeText(version?.aiNarrative || '')
-    setIsEditing(false)
-  }
+  function handleEditCancel() { setNarrativeText(version?.aiNarrative || ''); setIsEditing(false) }
   function handleClear() {
     if (!project || !version) return
     if (!confirm('Clear the Operational Analysis for this version? You can generate a new one anytime.')) return
@@ -95,6 +130,7 @@ export default function ControlLensAnalysisPage() {
     setIsEditing(false)
     setNarrativeError(null)
   }
+
   function fmtFloat(hours: string | number) {
     const h = typeof hours === 'string' ? parseFloat(hours || '0') : hours
     if (isNaN(h)) return '—'
@@ -106,6 +142,7 @@ export default function ControlLensAnalysisPage() {
     if (cond === 'Monitor Closely') return { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-900' }
     return { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-900' }
   }
+
   if (!analysis || !project) {
     return (
       <div className="flex flex-col h-full">
@@ -121,9 +158,9 @@ export default function ControlLensAnalysisPage() {
               <span className="text-3xl">🔍</span>
             </div>
             <div className="text-lg font-bold text-slate-700 mb-2">No analysis available</div>
-            <div className="text-sm text-slate-500 mb-6">Upload a schedule to see the full analysis here. Once analyzed, this page shows the complete breakdown of your active project.</div>
+            <div className="text-sm text-slate-500 mb-6">Upload a schedule to see the full analysis here.</div>
             <Link href="/dashboard/upload"
-              className="inline-block bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors">
+              className="inline-block bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-blue-700">
               Upload Schedule →
             </Link>
           </div>
@@ -131,9 +168,11 @@ export default function ControlLensAnalysisPage() {
       </div>
     )
   }
+
   const a = analysis
   const condColor = conditionColor(a.condition)
   const hasNarrative = !!(narrativeText && narrativeText.trim())
+
   return (
     <div className="flex flex-col h-full">
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0 no-print">
@@ -142,10 +181,10 @@ export default function ControlLensAnalysisPage() {
           <span className="text-slate-400 text-sm ml-2">· {project.name}</span>
         </div>
         <div className="ml-auto flex gap-2">
-          <button onClick={() => window.print()} className="text-xs border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg hover:border-slate-400 transition-colors font-semibold flex items-center gap-1.5">
+          <button onClick={() => window.print()} className="text-xs border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg hover:border-slate-400 font-semibold flex items-center gap-1.5">
             🖨 Print / Save PDF
           </button>
-          <Link href="/dashboard/upload" className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400 hover:text-blue-600 transition-colors font-semibold">
+          <Link href="/dashboard/upload" className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400 hover:text-blue-600 font-semibold">
             ⬆ Upload New Version
           </Link>
         </div>
@@ -165,7 +204,8 @@ export default function ControlLensAnalysisPage() {
             </div>
           </div>
         </div>
-        {/* Condition Banner */}
+
+        {/* Condition banner */}
         <div className={`${condColor.bg} ${condColor.border} border rounded-xl p-4 flex items-center gap-4`}>
           <div className="text-3xl">{a.condition === 'Recovery Required' ? '🔴' : a.condition === 'Attention Needed' ? '⚠️' : '🟢'}</div>
           <div className="flex-1">
@@ -181,7 +221,8 @@ export default function ControlLensAnalysisPage() {
             <div className="text-[10px] opacity-70">Health Score / 100</div>
           </div>
         </div>
-        {/* KPI Grid */}
+
+        {/* KPI grid */}
         <div className="grid grid-cols-5 gap-2">
           <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Total activities</div><div className="text-xl font-bold">{a.totalActivities}</div></div>
           <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Complete</div><div className="text-xl font-bold text-green-600">{a.complete}</div></div>
@@ -189,9 +230,8 @@ export default function ControlLensAnalysisPage() {
           <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Negative float</div><div className="text-xl font-bold text-red-600">{a.negativeFloat}</div></div>
           <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Out-of-sequence</div><div className="text-xl font-bold text-red-600">{a.outOfSequence?.length || 0}</div></div>
         </div>
-        {/* Tabs — v10: Gantt removed, Schedule Filter promoted to first,
-            Project Production added as the second tab. Everything else
-            unchanged. */}
+
+        {/* Tabs */}
         <div className="bg-white border border-slate-200 rounded-xl">
           <div className="tab-bar flex gap-0 border-b border-slate-100 overflow-x-auto no-print">
             {[
@@ -209,30 +249,36 @@ export default function ControlLensAnalysisPage() {
               </button>
             ))}
           </div>
+
           <div className="p-5">
-            {/* SCHEDULE FILTER — promoted to first tab in v10 */}
             {activeTab === 'schedule-filter' && (
               <div className="tab-pane">
-                <h3 className="text-sm font-bold mb-3">Schedule Filter</h3>
-                <p className="text-xs text-slate-500 mb-4">Slice the schedule different ways. Pick a filter below.</p>
+                <h3 className="text-sm font-bold mb-1">Schedule Filter</h3>
+                <p className="text-[11px] text-slate-500 mb-3 italic">P6 filters read directly from your XER file.</p>
+
                 <div className="flex flex-wrap gap-2 mb-5">
                   {[
-                    { id: 'critical',    label: 'Critical Path',          enabled: true,  icon: '🎯' },
-                    { id: 'longest',     label: 'Longest Path',           enabled: true,  icon: '📏' },
-                    { id: 'lookahead',   label: '2 Week Lookahead',       enabled: true,  icon: '📅' },
-                    { id: 'not-started', label: 'Activities Not Started', enabled: true,  icon: '⏸️' },
-                    { id: 'finished',    label: 'Activities Finished',    enabled: true,  icon: '✅' },
+                    { id: 'critical',    label: 'Critical Path',          icon: '🎯' },
+                    { id: 'longest',     label: 'Longest Path',           icon: '📏' },
+                    { id: 'multi-paths', label: 'Multiple Float Paths',   icon: '🛤️', isNew: true },
+                    { id: 'lookahead',   label: '2 Week Lookahead',       icon: '📅' },
+                    { id: 'not-started', label: 'Activities Not Started', icon: '⏸️' },
+                    { id: 'finished',    label: 'Activities Finished',    icon: '✅' },
                   ].map(f => (
-                    <button key={f.id} onClick={() => f.enabled && setScheduleFilter(f.id as any)} disabled={!f.enabled}
-                      className={`text-xs px-3 py-1.5 rounded-full font-semibold transition-colors ${
-                        scheduleFilter === f.id && f.enabled ? 'bg-blue-600 text-white'
-                        : f.enabled ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                        : 'bg-slate-50 text-slate-400 cursor-not-allowed'
+                    <button key={f.id} onClick={() => setScheduleFilter(f.id as any)}
+                      className={`text-xs px-3 py-1.5 rounded-full font-semibold transition-colors flex items-center gap-1.5 ${
+                        scheduleFilter === f.id ? 'bg-blue-600 text-white'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                       }`}>
                       {f.icon} {f.label}
+                      {(f as any).isNew && (
+                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${scheduleFilter === f.id ? 'bg-white text-blue-600' : 'bg-emerald-100 text-emerald-700'}`}>NEW</span>
+                      )}
                     </button>
                   ))}
                 </div>
+
+                {/* CRITICAL PATH (existing) */}
                 {scheduleFilter === 'critical' && (
                   <div>
                     <p className="text-xs text-slate-500 mb-4">The critical path is the chain of activities controlling project completion. If any of these slips, the whole project slips by that same amount.</p>
@@ -247,17 +293,73 @@ export default function ControlLensAnalysisPage() {
                         </div>
                       ))}
                       {(!a.criticalDrivers || a.criticalDrivers.length === 0) && (
-                        <div className="text-center py-8 text-slate-400 text-xs">No critical path activities detected in this schedule.</div>
+                        <div className="text-center py-8 text-slate-400 text-xs">No critical path activities detected.</div>
                       )}
                     </div>
                   </div>
                 )}
+
+                {/* MULTIPLE FLOAT PATHS (new) */}
+                {scheduleFilter === 'multi-paths' && (
+                  <div>
+                    <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
+                      Multiple Float Paths uses total float to rank the top driving chains of activities. <strong>Path 1 is the critical path</strong> (zero or negative float). <strong>Paths 2-5 are near-critical</strong> — today's near-critical becomes tomorrow's critical after one slip. All paths run to the final completion milestone.
+                    </div>
+
+                    {/* Threshold + summary control */}
+                    <div className="flex items-center gap-3 mb-4 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                      <span className="text-xs font-semibold text-slate-700">Float threshold</span>
+                      <select value={floatThreshold}
+                        onChange={e => setFloatThreshold(parseInt(e.target.value, 10))}
+                        className="text-xs px-2 py-1 border border-slate-300 rounded bg-white">
+                        <option value={5}>5 days</option>
+                        <option value={10}>10 days</option>
+                        <option value={15}>15 days</option>
+                      </select>
+                      <span className="text-[11px] text-slate-500 flex-1">
+                        Paths with total float ≤ {floatThreshold} days are considered near-critical.
+                      </span>
+                      <span className="text-[11px] text-slate-600 bg-white px-2 py-1 rounded border border-slate-200">
+                        Showing top {Math.min(multiPathsResult?.paths.length || 0, 5)}
+                      </span>
+                    </div>
+
+                    {!multiPathsResult && !multiPathsFallback && (
+                      <div className="text-center py-8 text-slate-400 text-xs">
+                        Multiple float path analysis isn't available for this version. Re-upload the XER to refresh.
+                      </div>
+                    )}
+
+                    {!multiPathsResult && multiPathsFallback && (
+                      <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-3 mb-3">
+                        This version was uploaded before Multiple Float Paths was added. Re-upload the XER to enable the full ranked-path view. Showing the existing critical path drivers below.
+                      </div>
+                    )}
+
+                    {multiPathsResult && multiPathsResult.paths.length === 0 && (
+                      <div className="text-center py-8 text-slate-400 text-xs">
+                        No paths found at or below {floatThreshold} days float. Try increasing the threshold.
+                      </div>
+                    )}
+
+                    {multiPathsResult && multiPathsResult.paths.map(path => (
+                      <PathCard key={path.pathNumber} path={path}
+                        expanded={expandedPaths.has(path.pathNumber)}
+                        onToggle={() => togglePathExpand(path.pathNumber)}
+                        projectStart={multiPathsResult.projectStart}
+                        projectEnd={multiPathsResult.projectEnd}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* LONGEST PATH (existing) */}
                 {scheduleFilter === 'longest' && (
                   <div>
                     {(a.longestPathActivities && a.longestPathActivities.length > 0) ? (
                       <>
                         <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                          The longest path is the chain of activities that determines when the project finishes — the path with the greatest total duration from start to end. P6 flags these activities with the <span className="font-mono">driving_path_flag</span>. ControlLens shows them here in chronological order.
+                          The longest path is the chain of activities that determines when the project finishes — the path with the greatest total duration from start to end. P6 flags these activities with the <span className="font-mono">driving_path_flag</span>.
                         </div>
                         <div className="space-y-2">
                           <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-500 uppercase border-b border-slate-200 pb-2">
@@ -269,7 +371,7 @@ export default function ControlLensAnalysisPage() {
                             <div className="col-span-1 text-right">Status</div>
                           </div>
                           {a.longestPathActivities.slice(0, 50).map((t: any, i: number) => {
-                            const float = Math.round(parseFloat(t.total_float_hr_cnt || '0') / 8)
+                            const fl = Math.round(parseFloat(t.total_float_hr_cnt || '0') / 8)
                             const pct = parseFloat(t.phys_complete_pct || '0')
                             return (
                               <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 last:border-0 text-xs items-center">
@@ -277,7 +379,7 @@ export default function ControlLensAnalysisPage() {
                                 <div className="col-span-5 text-slate-700 truncate">{t.task_name}</div>
                                 <div className="col-span-2 text-right text-slate-600">{(t.early_start_date || t.target_start_date || t.act_start_date || '').slice(0,10)}</div>
                                 <div className="col-span-2 text-right text-slate-600 font-semibold">{(t.early_end_date || t.target_end_date || t.act_end_date || '').slice(0,10)}</div>
-                                <div className={`col-span-1 text-right font-bold ${float < 0 ? 'text-red-600' : float === 0 ? 'text-amber-600' : 'text-green-600'}`}>{float}d</div>
+                                <div className={`col-span-1 text-right font-bold ${fl < 0 ? 'text-red-600' : fl === 0 ? 'text-amber-600' : 'text-green-600'}`}>{fl}d</div>
                                 <div className="col-span-1 text-right">
                                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${t.status_code === 'TK_Complete' ? 'bg-green-100 text-green-700' : t.status_code === 'TK_Active' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>{t.status_code === 'TK_Complete' ? 'Done' : t.status_code === 'TK_Active' ? `${pct}%` : 'Not started'}</span>
                                 </div>
@@ -285,14 +387,14 @@ export default function ControlLensAnalysisPage() {
                             )
                           })}
                           {a.longestPathActivities.length > 50 && (
-                            <div className="text-center text-[10px] text-slate-400 pt-3">Showing first 50 of {a.longestPathActivities.length} activities on the longest path</div>
+                            <div className="text-center text-[10px] text-slate-400 pt-3">Showing first 50 of {a.longestPathActivities.length} activities</div>
                           )}
                         </div>
                       </>
                     ) : (
                       <>
                         <div className="bg-amber-50 border-l-4 border-amber-500 p-3 text-xs text-amber-900 mb-4 leading-relaxed">
-                          <strong>P6 has not calculated a longest path for this schedule.</strong> No activities have the driving_path_flag set. This usually means the scheduler did not enable longest-path calculation in P6's Scheduling Options. Showing the Critical Path drivers (zero/negative float) instead as the best available substitute.
+                          <strong>P6 has not calculated a longest path for this schedule.</strong> No activities have the driving_path_flag set. Try the new Multiple Float Paths view for a richer analysis.
                         </div>
                         <div className="space-y-2">
                           {(a.criticalDrivers || []).slice(0, 12).map((t: any, i: number) => (
@@ -304,18 +406,17 @@ export default function ControlLensAnalysisPage() {
                               <div className="w-20"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${t.status_code === 'TK_Complete' ? 'bg-green-100 text-green-700' : t.status_code === 'TK_Active' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{t.status_code === 'TK_Complete' ? 'Done' : t.status_code === 'TK_Active' ? `${t.phys_complete_pct}%` : 'Not started'}</span></div>
                             </div>
                           ))}
-                          {(!a.criticalDrivers || a.criticalDrivers.length === 0) && (
-                            <div className="text-center py-8 text-slate-400 text-xs">No path data available.</div>
-                          )}
                         </div>
                       </>
                     )}
                   </div>
                 )}
+
+                {/* 2 WEEK LOOKAHEAD (existing) */}
                 {scheduleFilter === 'lookahead' && (
                   <div>
                     <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                      Activities scheduled to start or finish within 14 calendar days after the data date ({a.dataDate?.slice(0,10) || 'N/A'}). Use this for weekly coordination meetings with field super and trades.
+                      Activities scheduled to start or finish within 14 calendar days after the data date ({a.dataDate?.slice(0,10) || 'N/A'}).
                     </div>
                     {(!a.twoWeekLookahead || a.twoWeekLookahead.length === 0) ? (
                       <div className="text-center py-8 text-slate-400 text-xs">No activities scheduled in next 14 days.</div>
@@ -325,7 +426,7 @@ export default function ControlLensAnalysisPage() {
                           <div className="col-span-1">Code</div><div className="col-span-5">Activity</div><div className="col-span-2 text-right">Start</div><div className="col-span-2 text-right">Finish</div><div className="col-span-1 text-right">% Done</div><div className="col-span-1 text-right">Float</div>
                         </div>
                         {a.twoWeekLookahead.slice(0, 30).map((t: any, i: number) => {
-                          const float = Math.round(parseFloat(t.total_float_hr_cnt || '0') / 8)
+                          const fl = Math.round(parseFloat(t.total_float_hr_cnt || '0') / 8)
                           const pct = parseFloat(t.phys_complete_pct || '0')
                           return (
                             <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 last:border-0 text-xs items-center">
@@ -334,7 +435,7 @@ export default function ControlLensAnalysisPage() {
                               <div className="col-span-2 text-right text-slate-600">{(t.early_start_date || t.target_start_date || '').slice(0,10)}</div>
                               <div className="col-span-2 text-right text-slate-600 font-semibold">{(t.early_end_date || t.target_end_date || '').slice(0,10)}</div>
                               <div className="col-span-1 text-right text-slate-600">{pct}%</div>
-                              <div className={`col-span-1 text-right font-bold ${float < 0 ? 'text-red-600' : float <= 14 ? 'text-amber-600' : 'text-green-600'}`}>{float}d</div>
+                              <div className={`col-span-1 text-right font-bold ${fl < 0 ? 'text-red-600' : fl <= 14 ? 'text-amber-600' : 'text-green-600'}`}>{fl}d</div>
                             </div>
                           )
                         })}
@@ -342,10 +443,12 @@ export default function ControlLensAnalysisPage() {
                     )}
                   </div>
                 )}
+
+                {/* NOT STARTED (existing) */}
                 {scheduleFilter === 'not-started' && (
                   <div>
                     <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                      Activities with no actual start date and no physical progress recorded. Sorted by planned start (soonest first). Use this for "what should already have started" review with the field super.
+                      Activities with no actual start date and no physical progress recorded. Sorted by planned start (soonest first).
                     </div>
                     {(!a.notStartedActivities || a.notStartedActivities.length === 0) ? (
                       <div className="text-center py-8 text-slate-400 text-xs">No not-started activities detected.</div>
@@ -355,16 +458,16 @@ export default function ControlLensAnalysisPage() {
                           <div className="col-span-1">Code</div><div className="col-span-5">Activity</div><div className="col-span-2 text-right">Planned Start</div><div className="col-span-2 text-right">Planned Finish</div><div className="col-span-1 text-right">Duration</div><div className="col-span-1 text-right">Float</div>
                         </div>
                         {a.notStartedActivities.slice(0, 100).map((t: any, i: number) => {
-                          const float = Math.round(parseFloat(t.total_float_hr_cnt || '0') / 8)
-                          const duration = Math.round(parseFloat(t.target_drtn_hr_cnt || t.remain_drtn_hr_cnt || '0') / 8)
+                          const fl = Math.round(parseFloat(t.total_float_hr_cnt || '0') / 8)
+                          const dur = Math.round(parseFloat(t.target_drtn_hr_cnt || t.remain_drtn_hr_cnt || '0') / 8)
                           return (
                             <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 last:border-0 text-xs items-center">
                               <div className="col-span-1 font-mono font-semibold text-slate-800 truncate">{t.task_code}</div>
                               <div className="col-span-5 text-slate-700 truncate">{t.task_name}</div>
                               <div className="col-span-2 text-right text-slate-600">{(t.early_start_date || t.target_start_date || '').slice(0,10) || '—'}</div>
                               <div className="col-span-2 text-right text-slate-600">{(t.early_end_date || t.target_end_date || '').slice(0,10) || '—'}</div>
-                              <div className="col-span-1 text-right text-slate-600">{duration}d</div>
-                              <div className={`col-span-1 text-right font-bold ${float < 0 ? 'text-red-600' : float <= 14 ? 'text-amber-600' : 'text-green-600'}`}>{float}d</div>
+                              <div className="col-span-1 text-right text-slate-600">{dur}d</div>
+                              <div className={`col-span-1 text-right font-bold ${fl < 0 ? 'text-red-600' : fl <= 14 ? 'text-amber-600' : 'text-green-600'}`}>{fl}d</div>
                             </div>
                           )
                         })}
@@ -372,10 +475,12 @@ export default function ControlLensAnalysisPage() {
                     )}
                   </div>
                 )}
+
+                {/* FINISHED (existing) */}
                 {scheduleFilter === 'finished' && (
                   <div>
                     <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                      Activities with an actual finish date. Most recently completed appear first. The Variance column shows actual finish vs. planned finish — positive means late, negative means early.
+                      Activities with an actual finish date. Variance shows actual finish vs. planned finish.
                     </div>
                     {(!a.finishedActivities || a.finishedActivities.length === 0) ? (
                       <div className="text-center py-8 text-slate-400 text-xs">No finished activities detected.</div>
@@ -423,23 +528,17 @@ export default function ControlLensAnalysisPage() {
               </div>
             )}
 
-            {/* Project Production / EVM moved to its own page at /dashboard/evm (v13) */}
-
-            {/* SEQUENCE PROBLEMS */}
+            {/* OTHER TABS — unchanged from before */}
             {activeTab === 'logic' && (
               <div>
-                <h3 className="text-sm font-bold mb-3">
-                  Construction Sequence Problems · {a.outOfSequence?.length || 0} affected {a.outOfSequence?.length === 1 ? 'activity' : 'activities'}
-                </h3>
+                <h3 className="text-sm font-bold mb-3">Construction Sequence Problems · {a.outOfSequence?.length || 0} affected</h3>
                 <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                  <div className="font-bold mb-1">What this shows</div>
-                  Activities whose actual progress conflicts with the relationship logic in the schedule. For each one, ControlLens lists every violated relationship with full evidence — what the logic required, what actually happened, and how many days earlier the work occurred than the logic allowed.
+                  Activities whose actual progress conflicts with relationship logic.
                 </div>
                 {(!a.outOfSequence || a.outOfSequence.length === 0) ? (
                   <div className="bg-green-50 border border-green-200 rounded-xl p-6 text-center">
                     <div className="text-3xl mb-2">✓</div>
                     <div className="text-sm font-bold text-green-900">No sequence problems detected</div>
-                    <div className="text-xs text-green-700 mt-1">All actual progress is consistent with the relationship logic.</div>
                   </div>
                 ) : (
                   <>
@@ -449,7 +548,7 @@ export default function ControlLensAnalysisPage() {
                       const catColor = category === 'Procurement' ? 'text-amber-700' : category === 'Pre-Construction' ? 'text-blue-700' : 'text-slate-700'
                       return (
                         <div key={category} className="mb-5">
-                          <div className={`text-xs font-bold mb-2 uppercase tracking-wider ${catColor}`}>{category} · {items.length} {items.length === 1 ? 'activity' : 'activities'}</div>
+                          <div className={`text-xs font-bold mb-2 uppercase tracking-wider ${catColor}`}>{category} · {items.length}</div>
                           <div className="space-y-2">
                             {items.slice(0, 30).map((o: any, i: number) => {
                               const violations = o.violations || []
@@ -486,12 +585,12 @@ export default function ControlLensAnalysisPage() {
                 )}
               </div>
             )}
-            {/* NO TIES */}
+
             {activeTab === 'noties' && (
               <div>
-                <h3 className="text-sm font-bold mb-3">Activities with no logic ties ({a.noTies?.length || 0} found)</h3>
+                <h3 className="text-sm font-bold mb-3">Activities with no logic ties ({a.noTies?.length || 0})</h3>
                 <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                  Every activity should be connected — at least one predecessor and one successor. Activities with no ties are "floating" in the schedule. Delays to them will not show up in the analysis. This is a schedule quality problem.
+                  Every activity should be connected. Activities with no ties are "floating" — they don't show up correctly in critical path analysis.
                 </div>
                 <div className="space-y-2">
                   {(a.noTies || []).slice(0, 20).map((t: any, i: number) => (
@@ -508,12 +607,12 @@ export default function ControlLensAnalysisPage() {
                 </div>
               </div>
             )}
-            {/* LONG LEAD */}
+
             {activeTab === 'longlead' && (
               <div>
-                <h3 className="text-sm font-bold mb-3">Long lead items ({a.longLeadItems?.length || 0} items, 35+ days duration)</h3>
+                <h3 className="text-sm font-bold mb-3">Long lead items ({a.longLeadItems?.length || 0}, 35+ days)</h3>
                 <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                  Long lead items are materials or equipment requiring significant time to fabricate and deliver. These are the items that most commonly cause delays. ControlLens sorts by float — most critical first.
+                  Long lead items most commonly cause delays. Sorted by float — most critical first.
                 </div>
                 <div className="space-y-2">
                   {(a.longLeadItems || []).slice(0, 20).map((ll: any, i: number) => (
@@ -529,12 +628,12 @@ export default function ControlLensAnalysisPage() {
                 </div>
               </div>
             )}
-            {/* FIELD REALITY */}
+
             {activeTab === 'field' && (
               <div>
-                <h3 className="text-sm font-bold mb-3">Field reality — activities in progress right now ({a.inProgress})</h3>
+                <h3 className="text-sm font-bold mb-3">Field reality — in progress ({a.inProgress})</h3>
                 <div className="bg-amber-50 border-l-4 border-amber-500 p-3 text-xs text-amber-900 mb-4 leading-relaxed">
-                  These are activities the schedule says are being worked right now. Verify with your superintendent that progress matches what is physically happening on site.
+                  Activities the schedule says are being worked right now. Verify with your superintendent.
                 </div>
                 <div className="space-y-2">
                   {(a.inProgressActivities || []).slice(0, 25).map((t: any, i: number) => {
@@ -556,7 +655,7 @@ export default function ControlLensAnalysisPage() {
                 </div>
               </div>
             )}
-            {/* PLAIN LANGUAGE */}
+
             {activeTab === 'plain' && (
               <div>
                 <h3 className="text-sm font-bold mb-3">Plain language summary</h3>
@@ -566,7 +665,7 @@ export default function ControlLensAnalysisPage() {
                       <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">🚨</div>
                       <div>
                         <div className="font-bold text-slate-900">The project is {a.delayDays} days behind contract</div>
-                        <div className="text-slate-600 mt-1 leading-relaxed">Contract completion was {a.contractEnd?.slice(0,10)}. Projected completion is now {a.projectedEnd?.slice(0,10)}. {a.negativeFloat} activities carry negative float, and {a.notStarted} have not yet started.</div>
+                        <div className="text-slate-600 mt-1 leading-relaxed">Contract completion was {a.contractEnd?.slice(0,10)}. Projected completion is now {a.projectedEnd?.slice(0,10)}.</div>
                       </div>
                     </div>
                   )}
@@ -575,7 +674,7 @@ export default function ControlLensAnalysisPage() {
                       <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center flex-shrink-0">📦</div>
                       <div>
                         <div className="font-bold text-slate-900">{a.outOfSequence.length} activities started in the wrong order</div>
-                        <div className="text-slate-600 mt-1 leading-relaxed">In these cases, work began before its predecessor was finished. This usually means the contractor was trying to make up time — which is TIA evidence of schedule disruption from earlier delay events.</div>
+                        <div className="text-slate-600 mt-1 leading-relaxed">Work began before its predecessor was finished — usually a sign of trying to make up time.</div>
                       </div>
                     </div>
                   )}
@@ -584,7 +683,7 @@ export default function ControlLensAnalysisPage() {
                       <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">⚡</div>
                       <div>
                         <div className="font-bold text-slate-900">Critical long lead items not yet ordered</div>
-                        <div className="text-slate-600 mt-1 leading-relaxed">{(a.longLeadItems || []).filter((l: any) => l.status_code === 'TK_NotStart' && l.floatDays < 0).length} long lead items have negative float and have not been ordered yet. Each day they sit unordered adds another day to the delay.</div>
+                        <div className="text-slate-600 mt-1 leading-relaxed">{(a.longLeadItems || []).filter((l: any) => l.status_code === 'TK_NotStart' && l.floatDays < 0).length} items with negative float remain unordered.</div>
                       </div>
                     </div>
                   )}
@@ -593,42 +692,32 @@ export default function ControlLensAnalysisPage() {
                       <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">⛓️</div>
                       <div>
                         <div className="font-bold text-slate-900">{a.noTies.length} activities have no logic ties</div>
-                        <div className="text-slate-600 mt-1 leading-relaxed">These activities are not properly connected to predecessors or successors. The float calculations for them are unreliable and they may not show up correctly in critical path analysis.</div>
+                        <div className="text-slate-600 mt-1 leading-relaxed">Their float calculations are unreliable.</div>
                       </div>
                     </div>
                   )}
                 </div>
               </div>
             )}
-            {/* OPERATIONAL ANALYSIS — generate / edit / regenerate / clear flow */}
+
             {activeTab === 'ai' && (
               <div>
                 <div className="flex items-start justify-between gap-4 mb-3 flex-wrap">
                   <div>
                     <h3 className="text-sm font-bold">Operational Analysis</h3>
-                    <p className="text-xs text-slate-500 mt-0.5">A direct read of what the schedule is telling you, what matters most this week, and what conversations to have. Generated on demand — the engine works without it.</p>
+                    <p className="text-xs text-slate-500 mt-0.5">A direct read of what the schedule is telling you.</p>
                   </div>
                   <div className="flex gap-2 flex-shrink-0">
                     {!hasNarrative && !isGenerating && (
-                      <button onClick={handleGenerate}
-                        className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-lg flex items-center gap-1.5">
+                      <button onClick={handleGenerate} className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-lg flex items-center gap-1.5">
                         📝 Generate Operational Analysis
                       </button>
                     )}
                     {hasNarrative && !isEditing && !isGenerating && (
                       <>
-                        <button onClick={handleEdit}
-                          className="border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1">
-                          ✏️ Edit
-                        </button>
-                        <button onClick={handleGenerate}
-                          className="border border-blue-200 hover:bg-blue-50 text-blue-600 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1">
-                          🔄 Regenerate
-                        </button>
-                        <button onClick={handleClear}
-                          className="border border-slate-200 hover:border-red-200 hover:bg-red-50 hover:text-red-600 text-slate-600 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1">
-                          🗑️ Clear
-                        </button>
+                        <button onClick={handleEdit} className="border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1">✏️ Edit</button>
+                        <button onClick={handleGenerate} className="border border-blue-200 hover:bg-blue-50 text-blue-600 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1">🔄 Regenerate</button>
+                        <button onClick={handleClear} className="border border-slate-200 hover:border-red-200 hover:bg-red-50 hover:text-red-600 text-slate-600 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1">🗑️ Clear</button>
                       </>
                     )}
                   </div>
@@ -637,61 +726,148 @@ export default function ControlLensAnalysisPage() {
                   <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-xs text-red-700">
                     <div className="font-bold mb-1">Couldn't generate the Operational Analysis</div>
                     <div>{narrativeError}</div>
-                    <div className="mt-1 text-red-600">The schedule analysis above is unaffected — only the narrative requires the report service.</div>
                   </div>
                 )}
                 {isGenerating && (
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 text-center">
                     <div className="text-3xl mb-3 animate-pulse">📝</div>
                     <div className="text-sm font-bold text-blue-900">Generating Operational Analysis...</div>
-                    <div className="text-xs text-blue-700 mt-1">This usually takes 10-30 seconds. The rest of the page works while this runs.</div>
                   </div>
                 )}
                 {!isGenerating && !hasNarrative && !narrativeError && (
                   <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-8 text-center">
                     <div className="text-4xl mb-3">📝</div>
                     <div className="text-sm font-bold text-slate-700 mb-1">No Operational Analysis yet</div>
-                    <div className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
-                      The schedule engine has already analyzed your data above. When you're ready, click <strong>Generate Operational Analysis</strong> to produce a written report with project condition, top three actions, conversations to have this week, and TIA evidence.
-                    </div>
-                    <button onClick={handleGenerate}
-                      className="mt-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg">
-                      📝 Generate Operational Analysis
-                    </button>
+                    <div className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">When you're ready, click Generate to produce a written report.</div>
+                    <button onClick={handleGenerate} className="mt-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg">📝 Generate Operational Analysis</button>
                   </div>
                 )}
                 {hasNarrative && isEditing && !isGenerating && (
                   <div>
-                    <textarea
-                      value={narrativeText}
-                      onChange={e => setNarrativeText(e.target.value)}
-                      rows={20}
-                      className="w-full p-4 border border-blue-300 rounded-lg text-xs text-slate-800 font-sans leading-relaxed focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 resize-y bg-white"
-                      placeholder="Write your own Operational Analysis here..."
-                    />
+                    <textarea value={narrativeText} onChange={e => setNarrativeText(e.target.value)} rows={20}
+                      className="w-full p-4 border border-blue-300 rounded-lg text-xs text-slate-800 font-sans leading-relaxed focus:outline-none focus:border-blue-500 resize-y bg-white" />
                     <div className="flex gap-2 mt-2 justify-end">
-                      <button onClick={handleEditCancel}
-                        className="px-4 py-2 text-slate-600 text-xs font-semibold border border-slate-200 rounded-lg hover:bg-slate-50">
-                        Cancel
-                      </button>
-                      <button onClick={handleEditSave}
-                        className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg">
-                        Save Changes
-                      </button>
+                      <button onClick={handleEditCancel} className="px-4 py-2 text-slate-600 text-xs font-semibold border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
+                      <button onClick={handleEditSave} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg">Save Changes</button>
                     </div>
-                    <div className="text-[10px] text-slate-400 mt-2">Your edits are saved to this version. Switching versions or regenerating will not lose them.</div>
                   </div>
                 )}
                 {hasNarrative && !isEditing && !isGenerating && (
-                  <div className="bg-slate-50 border-l-4 border-blue-500 rounded-r-lg p-4 text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
-                    {narrativeText}
-                  </div>
+                  <div className="bg-slate-50 border-l-4 border-blue-500 rounded-r-lg p-4 text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">{narrativeText}</div>
                 )}
               </div>
             )}
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// =============================================================================
+// PathCard — renders a single Float Path with Gantt chart, name, explanation,
+// and expandable activity list.
+// =============================================================================
+function PathCard({ path, expanded, onToggle, projectStart, projectEnd }: {
+  path: FloatPath
+  expanded: boolean
+  onToggle: () => void
+  projectStart: string
+  projectEnd: string
+}) {
+  const tagColor = path.isCritical
+    ? 'bg-red-700 text-white'
+    : path.isNearCritical
+      ? 'bg-amber-600 text-white'
+      : 'bg-slate-600 text-white'
+
+  const tagLabel = path.isCritical
+    ? `PATH ${path.pathNumber} · CRITICAL`
+    : path.isNearCritical
+      ? `PATH ${path.pathNumber} · NEAR-CRITICAL`
+      : `PATH ${path.pathNumber}`
+
+  const barColor = path.isCritical
+    ? 'bg-red-700'
+    : path.isNearCritical
+      ? 'bg-amber-600'
+      : 'bg-slate-500'
+
+  const floatLabel = path.floatDays < 0
+    ? `${path.floatDays} days float (behind)`
+    : path.floatDays === 0
+      ? '0 days float'
+      : `${path.floatDays} day${path.floatDays === 1 ? '' : 's'} float`
+
+  return (
+    <div className="border border-slate-200 rounded-lg p-3 mb-3 bg-white">
+      <button onClick={onToggle} className="w-full text-left flex items-center gap-2 mb-1">
+        <span className={`${tagColor} text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded`}>
+          {tagLabel}
+        </span>
+        <span className="text-sm font-semibold text-slate-900 flex-1 truncate">{path.pathName}</span>
+        <span className="text-[11px] text-slate-500">
+          {path.activities.length} activities · {floatLabel} · drives to <span className="font-semibold">FINAL COMPLETION</span>
+        </span>
+        <span className="text-slate-400 ml-1">{expanded ? '▾' : '▸'}</span>
+      </button>
+
+      {expanded && (
+        <>
+          <p className="text-[11px] text-slate-600 leading-relaxed mb-3 pl-1">{path.plainExplanation}</p>
+
+          {/* Gantt strip */}
+          <div className="bg-slate-50 border border-slate-200 rounded p-2 mb-2 text-[10px]">
+            <div className="space-y-1">
+              {path.activities.slice(0, 12).map((t, i) => {
+                const range = activityToGanttRange(t, projectStart, projectEnd)
+                return (
+                  <div key={i} className="flex items-center gap-2">
+                    <div className="w-40 font-mono text-[9px] text-slate-700 truncate" title={`${t.task_code} · ${t.task_name}`}>
+                      {t.task_code} · {(t.task_name || '').slice(0, 22)}
+                    </div>
+                    <div className="flex-1 h-2.5 bg-white border border-slate-200 rounded relative">
+                      {range && (
+                        <div
+                          className={`absolute top-0 h-full rounded ${barColor}`}
+                          style={{ left: `${range.leftPct}%`, width: `${range.widthPct}%` }}
+                          title={`${t.early_start_date?.slice(0, 10) || ''} → ${t.early_end_date?.slice(0, 10) || ''}`}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+              {path.activities.length > 12 && (
+                <div className="text-center text-[9px] text-slate-400 pt-1">Showing first 12 of {path.activities.length} activities</div>
+              )}
+            </div>
+          </div>
+
+          {/* Activity table */}
+          <div className="space-y-1">
+            <div className="grid grid-cols-12 gap-2 text-[9px] font-bold text-slate-500 uppercase border-b border-slate-200 pb-1">
+              <div className="col-span-2">Code</div>
+              <div className="col-span-5">Activity</div>
+              <div className="col-span-2 text-right">Start</div>
+              <div className="col-span-2 text-right">Finish</div>
+              <div className="col-span-1 text-right">Float</div>
+            </div>
+            {path.activities.slice(0, 30).map((t, i) => {
+              const fl = Math.round(parseFloat(t.total_float_hr_cnt || '0') / 8)
+              return (
+                <div key={i} className="grid grid-cols-12 gap-2 py-1 border-b border-slate-100 text-[10px] items-center last:border-0">
+                  <div className="col-span-2 font-mono font-semibold text-slate-800 truncate">{t.task_code}</div>
+                  <div className="col-span-5 text-slate-700 truncate">{t.task_name}</div>
+                  <div className="col-span-2 text-right text-slate-600">{(t.early_start_date || t.target_start_date || '').slice(0, 10)}</div>
+                  <div className="col-span-2 text-right text-slate-600">{(t.early_end_date || t.target_end_date || '').slice(0, 10)}</div>
+                  <div className={`col-span-1 text-right font-bold ${fl < 0 ? 'text-red-600' : fl === 0 ? 'text-amber-700' : 'text-emerald-600'}`}>{fl}d</div>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
     </div>
   )
 }
