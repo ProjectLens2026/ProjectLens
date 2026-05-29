@@ -23,7 +23,7 @@ export default function LandingPage() {
             <Link href="/login" className="text-sm text-slate-600 hover:text-slate-900 font-semibold">Sign in</Link>
             <Link href="/login"
               className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-4 py-2 rounded-lg">
-              Start 14-day trial
+              Start free
             </Link>
           </div>
         </div>
@@ -42,14 +42,14 @@ export default function LandingPage() {
                 Your schedule, <span className="text-blue-600">explained</span>.
               </h1>
               <p className="text-lg text-slate-600 mb-7 leading-relaxed">
-                Upload your Primavera P6 schedule. ControlLens analyzes critical paths, logic violations,
-                delays, and RFIs — and explains everything in <strong>plain language</strong> anyone on
-                your team can read. PMs, owners, executives. Not just schedulers.
+                Upload your Primavera P6 schedule. ControlLens shows your critical path, near-critical paths,
+                logic gaps, and long-lead risks — all in <strong>plain language</strong> the whole jobsite team
+                can read. PMs, superintendents, owners. Not just schedulers.
               </p>
               <div className="flex flex-col md:flex-row items-start md:items-center gap-3 mb-5">
                 <Link href="/login"
                   className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-7 py-3.5 rounded-xl shadow-lg shadow-blue-600/20 transition-all hover:shadow-xl hover:shadow-blue-600/30">
-                  Start 14-day Pro Trial →
+                  Start free — no credit card →
                 </Link>
                 <a href="#how"
                   className="text-slate-700 hover:text-slate-900 font-semibold px-5 py-3 rounded-xl transition-colors">
@@ -57,14 +57,14 @@ export default function LandingPage() {
                 </a>
               </div>
               <div className="text-xs text-slate-500 italic">
-                No credit card required · 14 days, full access · Cancel anytime
+                Free forever for your first project · $99/month when you're ready for more
               </div>
 
               {/* Trust strip */}
               <div className="mt-10 grid grid-cols-4 gap-4 max-w-md">
                 <TrustItem value="<30s" label="To analyze" />
                 <TrustItem value="500+" label="Activities" />
-                <TrustItem value="7" label="Dimensions" />
+                <TrustItem value="$99" label="Per month" />
                 <TrustItem value="1-click" label="Reports" />
               </div>
             </div>
@@ -112,24 +112,24 @@ export default function LandingPage() {
           </div>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-            <FeatureCard icon="🎯" title="Critical Path Analysis"
-              body="See exactly what's driving project completion. Driving activities, float condition, where the path can break." />
+            <FeatureCard icon="🛤️" title="Multiple Float Paths" badge="NEW"
+              body="Beyond the single critical path. ControlLens ranks the top 5 driving chains by total float — Path 1 critical, Paths 2-5 near-critical. Today's near-critical is tomorrow's critical after one slip." />
+            <FeatureCard icon="🎯" title="Critical & Longest Path"
+              body="The full Primavera filter set: critical path, longest path, 2-week lookahead, activities not started, finished activities. Read directly from your XER." />
             <FeatureCard icon="🔧" title="Schedule Logic Check"
-              body="Catches out-of-sequence work, fabrication-before-approval, review-before-submit. TIA evidence ready." />
+              body="Catches out-of-sequence work, fabrication-before-approval, review-before-submit. Every violation listed with evidence — ready for TIA." />
             <FeatureCard icon="📦" title="Long Lead Item Tracker"
               body="Every 20+ day procurement item sorted by float. Know which vendor calls to make today vs next week." />
-            <FeatureCard icon="📋" title="Automatic RFI Evaluation" badge="NEW"
-              body="Upload an RFI PDF. ControlLens classifies it as informational, potentially impacting, or schedule impacting — with fragnet recommendations." />
-            <FeatureCard icon="📊" title="EVM + Trend Analysis"
-              body="Earned value, BEI, schedule performance over time. Watch your project drift before it becomes a claim." />
-            <FeatureCard icon="📑" title="TIA Comparison + Word Report"
-              body="Upload un-impacted and impacted schedules. ControlLens detects fragnets, runs trend analysis, generates the full Word document." />
-            <FeatureCard icon="👥" title="Team Collaboration" badge="NEW"
-              body="Invite your PMs, schedulers, and executives. Role-based access (Owner / Admin / PM / Viewer). Each person sees what they need." />
-            <FeatureCard icon="🗂️" title="Multi-Project Workspace" badge="NEW"
-              body="Manage all your projects in one place. Per-project teams, version history, soft-delete trash with restore." />
+            <FeatureCard icon="📑" title="Time Impact Analysis" badge="PRO"
+              body="Upload un-impacted and impacted (fragnet) schedules. ControlLens computes the time impact, ranks affected paths, and generates the full Word TIA report." />
+            <FeatureCard icon="📊" title="Earned Value Management" badge="PRO"
+              body="Full EVM with BCWP, BCWS, ACWP, SPI, CPI. Watch your project drift before it becomes a claim." />
+            <FeatureCard icon="📈" title="Trend Analysis" badge="PRO"
+              body="Compare versions side-by-side. See what changed, what slipped, and what's pacing. Monthly schedule reviews in one screen." />
+            <FeatureCard icon="👥" title="Team Collaboration"
+              body="Invite your PMs, schedulers, supers, and execs. Role-based access (Owner / Admin / PM / Viewer). Unlimited members on every plan." />
             <FeatureCard icon="💬" title="Plain-Language Summaries"
-              body="Every analysis comes with a clear explanation anyone can read. No more 'BEI 0.78' — ControlLens tells you exactly what's happening and what to do." />
+              body="Every analysis comes with a clear explanation anyone can read. No more 'BEI 0.78' — ControlLens tells you what's happening, what's driving it, and what to do this week." />
           </div>
         </div>
       </section>
@@ -164,85 +164,86 @@ export default function LandingPage() {
           <div className="text-center mb-14">
             <div className="text-xs font-bold uppercase tracking-widest text-blue-600 mb-2">Pricing</div>
             <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-4">
-              Simple pricing. Real value.
+              Free to start. $99/month when you're running real projects.
             </h2>
             <p className="text-slate-600 max-w-2xl mx-auto">
-              Start with a 14-day free trial of Professional. No credit card required.
-              Upgrade or cancel anytime.
+              No credit card to start. Unlimited team members on every plan.
+              One simple price for everyone running multiple projects.
             </p>
           </div>
 
           <div className="grid md:grid-cols-3 gap-5 max-w-5xl mx-auto">
             <PricingCard
-              tier="Professional"
-              priceMonthly="$49"
-              priceAnnual="$490"
-              annualSaveLabel="Save $98"
-              tagline="For solo PMs and small consultancies"
-              cta="Start 14-day trial"
+              tier="Free"
+              priceMonthly="$0"
+              priceAnnual="Free forever"
+              tagline="See your schedule clearly. Forever free."
+              cta="Start free"
               ctaHref="/login"
-              ctaStyle="primary"
+              ctaStyle="outline"
               features={[
-                { label: 'Up to 3 active projects', included: true },
-                { label: 'Schedule validation + CPM diagnostics', included: true },
-                { label: 'EVM, Trend, and TIA analysis', included: true },
-                { label: 'Automatic RFI evaluation', included: true },
-                { label: 'PDF + Word reports', included: true },
-                { label: 'Plain-language summaries', included: true },
-                { label: 'Up to 3 users (Owner + 2)', included: true },
-                { label: 'Email support', included: true },
+                { label: '1 active project', included: true, strong: true },
+                { label: 'Up to 3 schedule versions per project', included: true },
+                { label: 'Unlimited team members', included: true },
+                { label: 'Multiple Float Paths (ControlLens)', included: true },
+                { label: 'Schedule Filters (Primavera)', included: true },
+                { label: 'Sequence problems + logic checks', included: true },
+                { label: 'Long lead items, plain-language summary', included: true },
+                { label: 'Complete Report PDF (watermarked)', included: true },
               ]}
-              note="14-day free trial · No credit card to start"
+              note="No credit card. No time limit."
             />
 
             <PricingCard
-              tier="Business"
+              tier="Pro"
               priceMonthly="$99"
               priceAnnual="$990"
               annualSaveLabel="Save $198"
-              tagline="For growing teams managing portfolios"
-              cta="Start 14-day trial"
+              tagline="For firms running real projects. One price, no per-user surprises."
+              cta="Start free, upgrade anytime"
               ctaHref="/login"
               ctaStyle="featured"
               badge="Most Popular"
               features={[
-                { label: 'Everything in Professional', included: true, strong: true },
+                { label: 'Everything in Free', included: true, strong: true },
                 { label: 'Unlimited active projects', included: true },
-                { label: 'Up to 10 users with role-based access', included: true },
-                { label: 'Per-project team management', included: true },
-                { label: 'Custom logo on reports', included: true },
-                { label: 'Audit log (who did what)', included: true },
-                { label: 'Cross-project portfolio dashboard', included: true },
+                { label: 'Unlimited schedule versions', included: true },
+                { label: 'Time Impact Analysis (TIA) + Word report', included: true },
+                { label: 'Trend Analysis (version-over-version)', included: true },
+                { label: 'Earned Value Management (EVM)', included: true },
+                { label: 'Portfolio dashboard across all projects', included: true },
+                { label: 'White-label reports (no watermark)', included: true },
                 { label: 'Priority email support', included: true },
               ]}
-              note="14-day free trial · For teams of 4-10"
+              note="One simple price. Solo PM or 50-project firm — same $99."
             />
 
             <PricingCard
               tier="Enterprise"
-              priceMonthly="Contact"
-              priceAnnual="Custom pricing"
-              tagline="For federal, GCs, and 10+ user teams"
+              priceMonthly="Custom"
+              priceAnnual="Volume pricing"
+              tagline="For federal teams, large GCs, and consulting firms"
               cta="Talk to sales"
               ctaHref="mailto:sales@control-lens.com?subject=ControlLens%20Enterprise%20Inquiry"
               ctaStyle="outline"
               features={[
-                { label: 'Everything in Business', included: true, strong: true },
-                { label: 'Unlimited users', included: true },
-                { label: 'Single Sign-On (SSO)', included: true },
-                { label: 'Full white-label branding', included: true },
-                { label: 'API access', included: true },
-                { label: 'Dedicated customer success manager', included: true },
+                { label: 'Everything in Pro', included: true, strong: true },
+                { label: 'Single Sign-On (SSO / SAML)', included: true },
+                { label: 'Audit log (who did what, when)', included: true },
+                { label: 'Custom company logo on reports', included: true },
+                { label: 'Consultant mode (manage multiple client orgs)', included: true },
+                { label: 'Dedicated onboarding + SLA', included: true },
                 { label: 'SOC 2 documentation + MSA', included: true },
-                { label: 'Multi-year discount', included: true },
+                { label: 'Volume / multi-year discounts', included: true },
               ]}
-              note="Custom contract · Volume discounts available"
+              note="Custom contract · Federal and GC procurement-friendly"
             />
           </div>
 
           <p className="text-center text-xs text-slate-500 mt-8 max-w-3xl mx-auto leading-relaxed">
-            All plans include unlimited XER uploads, all 7 analysis dimensions, and Word report generation.
-            Annual pricing saves you 17%. Trial converts to paid only if you choose to continue.
+            All plans include unlimited team members and all schedule analysis features.
+            <br />
+            <strong>Free</strong> covers your first project end-to-end. <strong>Pro</strong> unlocks TIA, Trend, EVM, Portfolio, and unlimited projects.
           </p>
         </div>
       </section>
@@ -259,10 +260,10 @@ export default function LandingPage() {
           </p>
           <Link href="/login"
             className="inline-block bg-white hover:bg-slate-100 text-blue-700 font-bold px-8 py-4 rounded-xl shadow-2xl text-lg transition-transform hover:scale-[1.02]">
-            Try ControlLens Free →
+            Start free — no credit card
           </Link>
           <div className="text-xs text-slate-400 mt-4 italic">
-            14-day free trial · No credit card required
+            Free forever for your first project · No credit card required
           </div>
         </div>
       </section>
