@@ -23,7 +23,7 @@ export default function LandingPage() {
             <Link href="/login" className="text-sm text-slate-600 hover:text-slate-900 font-semibold">Sign in</Link>
             <Link href="/login"
               className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-4 py-2 rounded-lg">
-              Start free
+              Start 15-day trial
             </Link>
           </div>
         </div>
@@ -49,7 +49,7 @@ export default function LandingPage() {
               <div className="flex flex-col md:flex-row items-start md:items-center gap-3 mb-5">
                 <Link href="/login"
                   className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-7 py-3.5 rounded-xl shadow-lg shadow-blue-600/20 transition-all hover:shadow-xl hover:shadow-blue-600/30">
-                  Start free — no credit card →
+                  Start 15-day free trial →
                 </Link>
                 <a href="#how"
                   className="text-slate-700 hover:text-slate-900 font-semibold px-5 py-3 rounded-xl transition-colors">
@@ -57,15 +57,15 @@ export default function LandingPage() {
                 </a>
               </div>
               <div className="text-xs text-slate-500 italic">
-                Free forever for your first project · $99/month when you're ready for more
+                15 days free · Then 50% off for 2 months · Card required at signup, no charge for 15 days
               </div>
 
               {/* Trust strip */}
               <div className="mt-10 grid grid-cols-4 gap-4 max-w-md">
-                <TrustItem value="<30s" label="To analyze" />
-                <TrustItem value="500+" label="Activities" />
-                <TrustItem value="$99" label="Per month" />
-                <TrustItem value="1-click" label="Reports" />
+                <TrustItem value="15 days" label="Free trial" />
+                <TrustItem value="5" label="Projects on Pro" />
+                <TrustItem value="$49.50" label="First 2 months" />
+                <TrustItem value="56" label="Users on Pro" />
               </div>
             </div>
 
@@ -164,74 +164,76 @@ export default function LandingPage() {
           <div className="text-center mb-14">
             <div className="text-xs font-bold uppercase tracking-widest text-blue-600 mb-2">Pricing</div>
             <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-4">
-              Free to start. $99/month when you're running real projects.
+              $99 a month. 5 projects. The whole jobsite team.
             </h2>
             <p className="text-slate-600 max-w-2xl mx-auto">
-              No credit card to start. Unlimited team members on every plan.
-              One simple price for everyone running multiple projects.
+              One plan. One price. 15 days free to start.
+              Running more than 5 projects? Talk to us.
             </p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-5 max-w-5xl mx-auto">
-            <PricingCard
-              tier="Free"
-              priceMonthly="$0"
-              priceAnnual="Free forever"
-              tagline="See your schedule clearly. Forever free."
-              cta="Start free"
-              ctaHref="/login"
-              ctaStyle="outline"
-              features={[
-                { label: '1 active project', included: true, strong: true },
-                { label: 'Up to 3 schedule versions per project', included: true },
-                { label: 'Unlimited team members', included: true },
-                { label: 'Multiple Float Paths (ControlLens)', included: true },
-                { label: 'Schedule Filters (Primavera)', included: true },
-                { label: 'Sequence problems + logic checks', included: true },
-                { label: 'Long lead items, plain-language summary', included: true },
-                { label: 'Complete Report PDF (watermarked)', included: true },
-              ]}
-              note="No credit card. No time limit."
-            />
+          {/* Three-step trial ramp visualization */}
+          <div className="max-w-3xl mx-auto mb-10 grid grid-cols-3 gap-3">
+            <div className="bg-white border border-slate-200 rounded-xl p-4 text-center">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-blue-600 mb-1">Days 1-15</div>
+              <div className="text-2xl font-extrabold text-emerald-600">FREE</div>
+              <div className="text-[11px] text-slate-500 mt-1">Card required, no charge</div>
+            </div>
+            <div className="bg-white border border-slate-200 rounded-xl p-4 text-center">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-amber-600 mb-1">Next 60 days</div>
+              <div className="text-2xl font-extrabold text-slate-900">$49.50</div>
+              <div className="text-[11px] text-slate-500 mt-1">/month · 50% off</div>
+            </div>
+            <div className="bg-white border border-slate-200 rounded-xl p-4 text-center">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Day 76 onwards</div>
+              <div className="text-2xl font-extrabold text-slate-900">$99</div>
+              <div className="text-[11px] text-slate-500 mt-1">/month · Standard</div>
+            </div>
+          </div>
 
+          <div className="grid md:grid-cols-2 gap-5 max-w-4xl mx-auto">
             <PricingCard
               tier="Pro"
               priceMonthly="$99"
-              priceAnnual="$990"
-              annualSaveLabel="Save $198"
-              tagline="For firms running real projects. One price, no per-user surprises."
-              cta="Start free, upgrade anytime"
+              priceAnnual="per month"
+              tagline="For firms running real jobs. One price for the whole team."
+              cta="Start 15-day free trial"
               ctaHref="/login"
               ctaStyle="featured"
               badge="Most Popular"
               features={[
-                { label: 'Everything in Free', included: true, strong: true },
-                { label: 'Unlimited active projects', included: true },
-                { label: 'Unlimited schedule versions', included: true },
-                { label: 'Time Impact Analysis (TIA) + Word report', included: true },
+                { label: '15 days free trial · No charge', included: true, strong: true },
+                { label: 'Then $49.50/month for 2 months (50% off)', included: true },
+                { label: 'Then $99/month standard', included: true },
+                { label: '5 active projects', included: true, strong: true },
+                { label: 'Unlimited XERs per project', included: true },
+                { label: '1 Admin + 5 PMs + 10 Viewers per project', included: true },
+                { label: 'Up to 56 users total on your team', included: true },
+                { label: 'Time Impact Analysis + Word report', included: true },
                 { label: 'Trend Analysis (version-over-version)', included: true },
-                { label: 'Earned Value Management (EVM)', included: true },
-                { label: 'Portfolio dashboard across all projects', included: true },
-                { label: 'White-label reports (no watermark)', included: true },
+                { label: 'Earned Value Management', included: true },
+                { label: 'Portfolio dashboard', included: true },
+                { label: 'White-label reports', included: true },
                 { label: 'Priority email support', included: true },
               ]}
-              note="One simple price. Solo PM or 50-project firm — same $99."
+              note="Card required at signup · No charge for 15 days · Cancel anytime"
             />
 
             <PricingCard
-              tier="Enterprise"
+              tier="Business"
               priceMonthly="Custom"
-              priceAnnual="Volume pricing"
-              tagline="For federal teams, large GCs, and consulting firms"
+              priceAnnual="Talk to sales"
+              tagline="More than 5 projects? Federal? GC? Consulting firm?"
               cta="Talk to sales"
-              ctaHref="mailto:sales@control-lens.com?subject=ControlLens%20Enterprise%20Inquiry"
+              ctaHref="mailto:sales@control-lens.com?subject=ControlLens%20Business%20Inquiry"
               ctaStyle="outline"
               features={[
                 { label: 'Everything in Pro', included: true, strong: true },
+                { label: 'Unlimited projects + users', included: true },
                 { label: 'Single Sign-On (SSO / SAML)', included: true },
                 { label: 'Audit log (who did what, when)', included: true },
                 { label: 'Custom company logo on reports', included: true },
-                { label: 'Consultant mode (manage multiple client orgs)', included: true },
+                { label: 'Consultant mode (multiple client orgs)', included: true },
                 { label: 'Dedicated onboarding + SLA', included: true },
                 { label: 'SOC 2 documentation + MSA', included: true },
                 { label: 'Volume / multi-year discounts', included: true },
@@ -241,9 +243,9 @@ export default function LandingPage() {
           </div>
 
           <p className="text-center text-xs text-slate-500 mt-8 max-w-3xl mx-auto leading-relaxed">
-            All plans include unlimited team members and all schedule analysis features.
+            All plans include all schedule analysis features and unlimited XER uploads.
             <br />
-            <strong>Free</strong> covers your first project end-to-end. <strong>Pro</strong> unlocks TIA, Trend, EVM, Portfolio, and unlimited projects.
+            Your card is charged on day 16 ($49.50), and on the same day each following month. Billing window is the 1st–5th of each month. See <Link href="/terms" className="text-blue-600 hover:underline">Terms</Link> for late-payment policy.
           </p>
         </div>
       </section>
@@ -260,10 +262,10 @@ export default function LandingPage() {
           </p>
           <Link href="/login"
             className="inline-block bg-white hover:bg-slate-100 text-blue-700 font-bold px-8 py-4 rounded-xl shadow-2xl text-lg transition-transform hover:scale-[1.02]">
-            Start free — no credit card
+            Start 15-day free trial
           </Link>
           <div className="text-xs text-slate-400 mt-4 italic">
-            Free forever for your first project · No credit card required
+            Card required at signup · No charge for 15 days · 50% off for 2 months after
           </div>
         </div>
       </section>
@@ -604,3 +606,4 @@ function PricingCard({
     </div>
   )
 }
+
