@@ -43,6 +43,7 @@ import {
 // body limit (which was truncating large XER files like the 620 KB DCDGS
 // file from 1,048 activities down to 557). See runAnalysis() below.
 import { parseXER, analyzeXER } from '@/lib/xerParser'
+import { getOrgPlanInfo, OrgPlanInfo } from '@/lib/supabase/db'
 
 type Step = 'upload' | 'context' | 'analyzing' | 'done'
 
@@ -114,8 +115,12 @@ export default function UploadPage() {
   const [scheduleType, setScheduleType] = useState<ScheduleType | null>(null)
   const [projectIdError, setProjectIdError] = useState<string>('')
 
+  // Phase A.1 — Pro plan project limit info (loaded on mount)
+  const [planInfo, setPlanInfo] = useState<OrgPlanInfo | null>(null)
+
   useEffect(() => {
     refreshProjectsList()
+    getOrgPlanInfo().then(setPlanInfo)
     const unsubscribe = subscribeToProjects(refreshProjectsList)
     return unsubscribe
   }, [])
@@ -131,6 +136,17 @@ export default function UploadPage() {
       if (activeId && all.find(p => p.id === activeId)) {
         setSelectedProjectId(activeId)
       } else if (all.length > 0) {
+        setSelectedProjectId(all[0].id)
+      }
+      return
+    }
+    // Phase A.1 — if org is at plan limit, force existing mode so they can't
+    // start a new project. The upgrade banner above will explain why.
+    if (planInfo && planInfo.atLimit && all.length > 0) {
+      setProjectMode('existing')
+      if (activeId && all.find(p => p.id === activeId)) {
+        setSelectedProjectId(activeId)
+      } else {
         setSelectedProjectId(all[0].id)
       }
       return
@@ -690,6 +706,30 @@ export default function UploadPage() {
             <h2 className="text-xl font-extrabold text-slate-900 mb-1">Tell us about your project</h2>
             <p className="text-slate-500 text-sm mb-5">Project ID and Name lock once set. Contract dates feed into the dashboard. On future uploads, fields auto-fill — edit only what changed.</p>
 
+            {/* Phase A.1 — Project limit banner.
+                Shown when org has hit its plan limit. Owners/Admins see an
+                upgrade prompt; "+ New Project" becomes disabled. */}
+            {planInfo && planInfo.atLimit && perms.can.createProject && (
+              <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 mb-5">
+                <div className="flex items-start gap-3">
+                  <div className="text-2xl flex-shrink-0">🔒</div>
+                  <div className="flex-1">
+                    <div className="font-bold text-amber-900 text-sm mb-1">
+                      You've reached your project limit ({planInfo.currentCount} / {planInfo.projectLimit})
+                    </div>
+                    <div className="text-xs text-amber-800 mb-3 leading-relaxed">
+                      Your Pro plan covers up to {planInfo.projectLimit} active projects. You can keep uploading new versions to existing projects, but creating a new project is locked until you upgrade.
+                    </div>
+                    <a
+                      href={`mailto:sales@control-lens.com?subject=Upgrade%20request%20-%20more%20than%20${planInfo.projectLimit}%20projects&body=Hi%2C%20we%27ve%20reached%20our%20${planInfo.projectLimit}-project%20limit%20on%20ControlLens%20Pro.%20Please%20upgrade%20us%20to%20a%20higher%20tier.%0A%0AOrg%20ID%3A%20${planInfo.orgId}%0ACurrent%20projects%3A%20${planInfo.currentCount}%0A%0AThanks.`}
+                      className="inline-block bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors">
+                      📧 Email sales to upgrade →
+                    </a>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Project assignment */}
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5">
               <div className="text-xs font-bold text-blue-900 uppercase tracking-wider mb-3">Assign this schedule to:</div>
@@ -701,15 +741,29 @@ export default function UploadPage() {
                 {perms.can.createProject && (
                   <button
                     type="button"
-                    onClick={() => setProjectMode('new')}
-                    className={`text-left p-3 rounded-lg border-2 transition-all ${projectMode === 'new' ? 'border-blue-500 bg-white' : 'border-slate-200 bg-white/50 hover:border-blue-300'}`}>
+                    onClick={() => { if (!(planInfo?.atLimit)) setProjectMode('new') }}
+                    disabled={planInfo?.atLimit}
+                    title={planInfo?.atLimit ? 'You\'ve reached your project limit. Upgrade to add more.' : undefined}
+                    className={`text-left p-3 rounded-lg border-2 transition-all ${
+                      planInfo?.atLimit
+                        ? 'opacity-40 cursor-not-allowed border-slate-200 bg-slate-50'
+                        : projectMode === 'new'
+                          ? 'border-blue-500 bg-white'
+                          : 'border-slate-200 bg-white/50 hover:border-blue-300'
+                    }`}>
                     <div className="flex items-center gap-2 mb-1">
-                      <div className={`w-4 h-4 rounded-full border-2 ${projectMode === 'new' ? 'border-blue-500' : 'border-slate-300'} flex items-center justify-center`}>
-                        {projectMode === 'new' && <div className="w-2 h-2 rounded-full bg-blue-500" />}
+                      <div className={`w-4 h-4 rounded-full border-2 ${projectMode === 'new' && !planInfo?.atLimit ? 'border-blue-500' : 'border-slate-300'} flex items-center justify-center`}>
+                        {projectMode === 'new' && !planInfo?.atLimit && <div className="w-2 h-2 rounded-full bg-blue-500" />}
                       </div>
-                      <span className="font-bold text-xs text-slate-900">Create new project</span>
+                      <span className="font-bold text-xs text-slate-900">
+                        {planInfo?.atLimit ? '🔒 Create new project' : 'Create new project'}
+                      </span>
                     </div>
-                    <div className="text-[10px] text-slate-500 ml-6">First upload starts the project's baseline</div>
+                    <div className="text-[10px] text-slate-500 ml-6">
+                      {planInfo?.atLimit
+                        ? 'Plan limit reached — upgrade to add more'
+                        : "First upload starts the project's baseline"}
+                    </div>
                   </button>
                 )}
                 <button

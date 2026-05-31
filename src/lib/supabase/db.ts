@@ -289,12 +289,70 @@ function rowToVersion(row: any): ScheduleVersion {
 // WRITE — insert project (with first version) on createProject()
 // =============================================================================
 
+// Phase A.1 — Project limit enforcement
+// Returns the org's plan info: project_limit and how many active projects exist.
+export interface OrgPlanInfo {
+  orgId: string
+  projectLimit: number
+  currentCount: number
+  atLimit: boolean
+  remaining: number
+}
+
+export async function getOrgPlanInfo(): Promise<OrgPlanInfo | null> {
+  const supabase = createClient()
+  const orgId = await ensureUserHasOrg()
+  if (!orgId) return null
+
+  // Read project_limit from the org
+  const { data: orgRow, error: orgErr } = await supabase
+    .from('organizations')
+    .select('project_limit')
+    .eq('id', orgId)
+    .single()
+  if (orgErr || !orgRow) {
+    console.error('[db.getOrgPlanInfo] failed to read org:', orgErr)
+    return null
+  }
+  const projectLimit = orgRow.project_limit ?? 5
+
+  // Count active (non-deleted) projects in this org
+  const { count, error: countErr } = await supabase
+    .from('projects')
+    .select('id', { count: 'exact', head: true })
+    .eq('org_id', orgId)
+  if (countErr) {
+    console.error('[db.getOrgPlanInfo] failed to count projects:', countErr)
+    return null
+  }
+  const currentCount = count ?? 0
+
+  return {
+    orgId,
+    projectLimit,
+    currentCount,
+    atLimit: currentCount >= projectLimit,
+    remaining: Math.max(0, projectLimit - currentCount),
+  }
+}
+
 export async function insertProjectToSupabase(project: Project): Promise<boolean> {
   const supabase = createClient()
   const orgId = await ensureUserHasOrg()
   if (!orgId) return false
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return false
+
+  // Phase A.1 — plan limit check (server-side gate, defense in depth)
+  const plan = await getOrgPlanInfo()
+  if (plan && plan.atLimit) {
+    console.error('[db.insertProject] BLOCKED — org at project limit:', {
+      orgId,
+      projectLimit: plan.projectLimit,
+      currentCount: plan.currentCount,
+    })
+    return false
+  }
 
   // Pull GC name from the project's first version context (PM enters it in
   // the upload form; lives at the version level, not project level).
