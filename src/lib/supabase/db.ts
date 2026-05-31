@@ -289,14 +289,36 @@ function rowToVersion(row: any): ScheduleVersion {
 // WRITE — insert project (with first version) on createProject()
 // =============================================================================
 
-// Phase A.1 — Project limit enforcement
-// Returns the org's plan info: project_limit and how many active projects exist.
+// Phase A.1 + A.2 — Project limit + trial enforcement
+// Returns the org's plan info: project_limit, project count, and trial state.
+export type SubscriptionStatus =
+  | 'trial'
+  | 'active'
+  | 'past_due'
+  | 'canceled'
+  | 'lifetime'
+
 export interface OrgPlanInfo {
   orgId: string
+  // Project limit (Phase A.1)
   projectLimit: number
   currentCount: number
   atLimit: boolean
   remaining: number
+  // Trial / subscription (Phase A.2)
+  subscriptionStatus: SubscriptionStatus
+  trialEndsAt: Date | null
+  // Whole days remaining in the trial. Null if not on trial (lifetime/active/etc).
+  // Negative if trial has expired.
+  daysLeftInTrial: number | null
+  // True only if subscriptionStatus === 'trial' AND trial_ends_at < now()
+  trialExpired: boolean
+  // Convenience flag: can the user create a new project right now?
+  // False if at project limit OR trial expired.
+  canCreateProject: boolean
+  // Convenience flag: can the user use Pro features (TIA, Trend, EVM)?
+  // False if trial expired. True for trial-active, active, lifetime.
+  canUseProFeatures: boolean
 }
 
 export async function getOrgPlanInfo(): Promise<OrgPlanInfo | null> {
@@ -304,10 +326,10 @@ export async function getOrgPlanInfo(): Promise<OrgPlanInfo | null> {
   const orgId = await ensureUserHasOrg()
   if (!orgId) return null
 
-  // Read project_limit from the org
+  // Read project_limit + trial fields from the org
   const { data: orgRow, error: orgErr } = await supabase
     .from('organizations')
-    .select('project_limit')
+    .select('project_limit, subscription_status, trial_ends_at')
     .eq('id', orgId)
     .single()
   if (orgErr || !orgRow) {
@@ -315,6 +337,8 @@ export async function getOrgPlanInfo(): Promise<OrgPlanInfo | null> {
     return null
   }
   const projectLimit = orgRow.project_limit ?? 5
+  const subscriptionStatus = (orgRow.subscription_status ?? 'trial') as SubscriptionStatus
+  const trialEndsAt = orgRow.trial_ends_at ? new Date(orgRow.trial_ends_at) : null
 
   // Count active (non-deleted) projects in this org
   const { count, error: countErr } = await supabase
@@ -326,13 +350,34 @@ export async function getOrgPlanInfo(): Promise<OrgPlanInfo | null> {
     return null
   }
   const currentCount = count ?? 0
+  const atLimit = currentCount >= projectLimit
+
+  // Trial math. Days are calendar days, rounded UP (so "1 day left" until
+  // it really hits zero). Only meaningful when subscriptionStatus === 'trial'.
+  let daysLeftInTrial: number | null = null
+  let trialExpired = false
+  if (subscriptionStatus === 'trial' && trialEndsAt) {
+    const msLeft = trialEndsAt.getTime() - Date.now()
+    daysLeftInTrial = Math.ceil(msLeft / 86400000)
+    trialExpired = msLeft <= 0
+  }
+
+  // Convenience flags used by UI + server-side guards
+  const canUseProFeatures = !trialExpired   // expired trial loses Pro features
+  const canCreateProject = !atLimit && !trialExpired
 
   return {
     orgId,
     projectLimit,
     currentCount,
-    atLimit: currentCount >= projectLimit,
+    atLimit,
     remaining: Math.max(0, projectLimit - currentCount),
+    subscriptionStatus,
+    trialEndsAt,
+    daysLeftInTrial,
+    trialExpired,
+    canCreateProject,
+    canUseProFeatures,
   }
 }
 
@@ -343,8 +388,16 @@ export async function insertProjectToSupabase(project: Project): Promise<boolean
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return false
 
-  // Phase A.1 — plan limit check (server-side gate, defense in depth)
+  // Phase A.1 + A.2 — plan limit + trial check (server-side gate, defense in depth)
   const plan = await getOrgPlanInfo()
+  if (plan && plan.trialExpired) {
+    console.error('[db.insertProject] BLOCKED — trial expired:', {
+      orgId,
+      subscriptionStatus: plan.subscriptionStatus,
+      trialEndsAt: plan.trialEndsAt,
+    })
+    return false
+  }
   if (plan && plan.atLimit) {
     console.error('[db.insertProject] BLOCKED — org at project limit:', {
       orgId,

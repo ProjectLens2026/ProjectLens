@@ -140,9 +140,9 @@ export default function UploadPage() {
       }
       return
     }
-    // Phase A.1 — if org is at plan limit, force existing mode so they can't
-    // start a new project. The upgrade banner above will explain why.
-    if (planInfo && planInfo.atLimit && all.length > 0) {
+    // Phase A.1 + A.2 — if org is at plan limit OR trial expired, force existing
+    // mode so they can't start a new project. Banner above will explain why.
+    if (planInfo && (planInfo.atLimit || planInfo.trialExpired) && all.length > 0) {
       setProjectMode('existing')
       if (activeId && all.find(p => p.id === activeId)) {
         setSelectedProjectId(activeId)
@@ -706,6 +706,59 @@ export default function UploadPage() {
             <h2 className="text-xl font-extrabold text-slate-900 mb-1">Tell us about your project</h2>
             <p className="text-slate-500 text-sm mb-5">Project ID and Name lock once set. Contract dates feed into the dashboard. On future uploads, fields auto-fill — edit only what changed.</p>
 
+            {/* Phase A.2 — Trial expired banner (red, hard block).
+                Shown when subscription_status='trial' AND trial_ends_at < now.
+                Soft-block model: existing data + version uploads still work,
+                but no new projects, no Pro features. */}
+            {planInfo && planInfo.trialExpired && perms.can.createProject && (
+              <div className="bg-red-50 border-2 border-red-300 rounded-xl p-4 mb-5">
+                <div className="flex items-start gap-3">
+                  <div className="text-2xl flex-shrink-0">⏰</div>
+                  <div className="flex-1">
+                    <div className="font-bold text-red-900 text-sm mb-1">
+                      Your 15-day free trial has ended
+                    </div>
+                    <div className="text-xs text-red-800 mb-3 leading-relaxed">
+                      You can still view your existing projects and upload new versions, but creating new projects, Time Impact Analysis, Trend, and EVM are locked. Upgrade to keep building.
+                    </div>
+                    <a
+                      href={`mailto:sales@control-lens.com?subject=Upgrade%20after%20trial%20-%20activate%20ControlLens%20Pro&body=Hi%2C%20our%2015-day%20trial%20has%20ended%20and%20we%27d%20like%20to%20activate%20ControlLens%20Pro.%0A%0AOrg%20ID%3A%20${planInfo.orgId}%0A%0AThanks.`}
+                      className="inline-block bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors">
+                      📧 Email sales to activate Pro →
+                    </a>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Phase A.2 — Trial countdown banner (amber, last 7 days only).
+                Quiet during week one; urgent during week two. Never shown
+                to lifetime/active/canceled orgs. */}
+            {planInfo
+              && !planInfo.trialExpired
+              && planInfo.subscriptionStatus === 'trial'
+              && planInfo.daysLeftInTrial !== null
+              && planInfo.daysLeftInTrial <= 7
+              && planInfo.daysLeftInTrial > 0
+              && perms.can.createProject && (
+              <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-5">
+                <div className="flex items-center gap-3">
+                  <div className="text-xl flex-shrink-0">⏳</div>
+                  <div className="flex-1 text-xs text-amber-900">
+                    <span className="font-bold">
+                      {planInfo.daysLeftInTrial} day{planInfo.daysLeftInTrial === 1 ? '' : 's'} left in your free trial.
+                    </span>
+                    {' '}Upgrade to ControlLens Pro to keep new projects, TIA, Trend, and EVM after day 16.
+                  </div>
+                  <a
+                    href={`mailto:sales@control-lens.com?subject=Upgrade%20to%20ControlLens%20Pro&body=Hi%2C%20we%27d%20like%20to%20upgrade%20to%20ControlLens%20Pro%20before%20our%20trial%20ends.%0A%0AOrg%20ID%3A%20${planInfo.orgId}%0ADays%20left%3A%20${planInfo.daysLeftInTrial}%0A%0AThanks.`}
+                    className="flex-shrink-0 inline-block bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg transition-colors">
+                    Upgrade →
+                  </a>
+                </div>
+              </div>
+            )}
+
             {/* Phase A.1 — Project limit banner.
                 Shown when org has hit its plan limit. Owners/Admins see an
                 upgrade prompt; "+ New Project" becomes disabled. */}
@@ -741,28 +794,36 @@ export default function UploadPage() {
                 {perms.can.createProject && (
                   <button
                     type="button"
-                    onClick={() => { if (!(planInfo?.atLimit)) setProjectMode('new') }}
-                    disabled={planInfo?.atLimit}
-                    title={planInfo?.atLimit ? 'You\'ve reached your project limit. Upgrade to add more.' : undefined}
+                    onClick={() => { if (!(planInfo?.atLimit || planInfo?.trialExpired)) setProjectMode('new') }}
+                    disabled={planInfo?.atLimit || planInfo?.trialExpired}
+                    title={
+                      planInfo?.trialExpired
+                        ? 'Your free trial has ended. Upgrade to create new projects.'
+                        : planInfo?.atLimit
+                          ? 'You\'ve reached your project limit. Upgrade to add more.'
+                          : undefined
+                    }
                     className={`text-left p-3 rounded-lg border-2 transition-all ${
-                      planInfo?.atLimit
+                      (planInfo?.atLimit || planInfo?.trialExpired)
                         ? 'opacity-40 cursor-not-allowed border-slate-200 bg-slate-50'
                         : projectMode === 'new'
                           ? 'border-blue-500 bg-white'
                           : 'border-slate-200 bg-white/50 hover:border-blue-300'
                     }`}>
                     <div className="flex items-center gap-2 mb-1">
-                      <div className={`w-4 h-4 rounded-full border-2 ${projectMode === 'new' && !planInfo?.atLimit ? 'border-blue-500' : 'border-slate-300'} flex items-center justify-center`}>
-                        {projectMode === 'new' && !planInfo?.atLimit && <div className="w-2 h-2 rounded-full bg-blue-500" />}
+                      <div className={`w-4 h-4 rounded-full border-2 ${projectMode === 'new' && !planInfo?.atLimit && !planInfo?.trialExpired ? 'border-blue-500' : 'border-slate-300'} flex items-center justify-center`}>
+                        {projectMode === 'new' && !planInfo?.atLimit && !planInfo?.trialExpired && <div className="w-2 h-2 rounded-full bg-blue-500" />}
                       </div>
                       <span className="font-bold text-xs text-slate-900">
-                        {planInfo?.atLimit ? '🔒 Create new project' : 'Create new project'}
+                        {(planInfo?.atLimit || planInfo?.trialExpired) ? '🔒 Create new project' : 'Create new project'}
                       </span>
                     </div>
                     <div className="text-[10px] text-slate-500 ml-6">
-                      {planInfo?.atLimit
-                        ? 'Plan limit reached — upgrade to add more'
-                        : "First upload starts the project's baseline"}
+                      {planInfo?.trialExpired
+                        ? 'Trial ended — upgrade to create new projects'
+                        : planInfo?.atLimit
+                          ? 'Plan limit reached — upgrade to add more'
+                          : "First upload starts the project's baseline"}
                     </div>
                   </button>
                 )}
