@@ -136,7 +136,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-100">
-      <Sidebar user={user} />
+      {/* print:hidden — sidebar should not appear in printed pages.
+          Each page's main content prints on its own. */}
+      <div className="print:hidden">
+        <Sidebar user={user} />
+      </div>
       <div className="flex-1 overflow-hidden flex flex-col min-w-0">
         {showPaywall ? <PaywallScreen planInfo={planInfo!} /> : children}
       </div>
