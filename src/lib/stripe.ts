@@ -25,7 +25,7 @@ export function getStripeClient(): Stripe {
   stripeClient = new Stripe(key, {
     // Lock to a specific API version so Stripe upgrades don't break us silently.
     // Adjust this if you intentionally upgrade.
-    apiVersion: '2024-06-20' as Stripe.LatestApiVersion,
+    apiVersion: '2024-06-20' as any,
     typescript: true,
   })
   return stripeClient
