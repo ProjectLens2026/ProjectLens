@@ -410,11 +410,18 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
           <span className="font-bold text-slate-900 text-base">Executive Dashboard</span>
           <span className="text-slate-400 text-sm ml-2">· {project.name}{project.projectId ? ` · ${project.projectId}` : ''} · {xerFile}</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 print:hidden">
           <span className="text-xs text-slate-400">Last updated: {lastUpdated}</span>
           <Link href="/dashboard/lens" className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded-md flex items-center gap-1.5">
             🔍 Full Analysis
           </Link>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            title="Print or save as PDF"
+            className="bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 text-xs font-semibold px-3 py-1.5 rounded-md flex items-center gap-1.5">
+            🖨 Print / Save PDF
+          </button>
           <Link href="/dashboard/upload" className="bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 text-xs font-semibold px-3 py-1.5 rounded-md flex items-center gap-1.5">
             + Upload Schedule
           </Link>
