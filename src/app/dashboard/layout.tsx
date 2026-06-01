@@ -142,6 +142,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <Sidebar user={user} />
       </div>
       <div className="flex-1 overflow-hidden flex flex-col min-w-0">
+        {!showPaywall && <TrialBanner planInfo={planInfo} />}
         {showPaywall ? <PaywallScreen planInfo={planInfo!} /> : children}
       </div>
       <HelpWidget />
@@ -241,6 +242,131 @@ function PaywallScreen({ planInfo }: { planInfo: OrgPlanInfo }) {
             Need more than 5 projects? <a href="mailto:sales@control-lens.com" className="text-blue-600 hover:underline">Contact sales</a>
           </p>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// =============================================================================
+// TrialBanner — Day 12
+// =============================================================================
+// Persistent banner shown on every dashboard page during the 15-day trial.
+// Color escalates as the trial nears expiration:
+//   • Days 8-15 left  → blue, gentle reminder
+//   • Days 4-7 left   → amber, 50%-off CTA
+//   • Days 1-3 left   → red, urgent "subscribe today"
+// Customer can dismiss it for the current day (X button). It returns the
+// next calendar day. After day 0 the paywall takes over and the banner is
+// hidden.
+// =============================================================================
+
+function getTodayKey(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function TrialBanner({ planInfo }: { planInfo: OrgPlanInfo | null }) {
+  const [dismissed, setDismissed] = useState(false)
+  const [checkoutLoading, setCheckoutLoading] = useState(false)
+
+  // Read today's dismissal flag on mount. Hook lives at top so it runs
+  // even when later conditional returns short-circuit rendering.
+  useEffect(() => {
+    try {
+      const k = getTodayKey()
+      setDismissed(localStorage.getItem(`pl_trial_banner_dismissed_${k}`) === '1')
+    } catch {}
+  }, [])
+
+  // Show only during trial — skip for active/canceled/lifetime subscriptions.
+  if (!planInfo) return null
+  if (planInfo.subscriptionStatus !== 'trial') return null
+
+  // OrgPlanInfo may not expose trialEndsAt as a typed field on every build;
+  // fall back to (planInfo as any) for safety. The DB column is trial_ends_at.
+  const trialEndsAtRaw = (planInfo as any).trialEndsAt
+    || (planInfo as any).trial_ends_at
+    || null
+  if (!trialEndsAtRaw) return null
+
+  // Compute days left from now to trial end (rounded up so a partial day
+  // still counts as one).
+  const trialEndMs = new Date(trialEndsAtRaw).getTime()
+  if (isNaN(trialEndMs)) return null
+  const msPerDay = 1000 * 60 * 60 * 24
+  const daysLeft = Math.ceil((trialEndMs - Date.now()) / msPerDay)
+
+  // Trial expired — paywall handles the lockout, no banner needed.
+  if (daysLeft <= 0) return null
+
+  // User dismissed it for today — respect that.
+  if (dismissed) return null
+
+  // Style + text by urgency
+  let bgClass: string
+  let textClass: string
+  let buttonClass: string
+  let text: string
+  let icon: string
+
+  if (daysLeft >= 8) {
+    bgClass = 'bg-blue-50 border-blue-200'
+    textClass = 'text-blue-900'
+    buttonClass = 'text-blue-700 hover:text-blue-900'
+    icon = '⏰'
+    text = `${daysLeft} days left in your free trial`
+  } else if (daysLeft >= 4) {
+    bgClass = 'bg-amber-50 border-amber-200'
+    textClass = 'text-amber-900'
+    buttonClass = 'text-amber-700 hover:text-amber-900'
+    icon = '⚠️'
+    text = `${daysLeft} days left · Upgrade now to lock in 50% off`
+  } else {
+    bgClass = 'bg-red-50 border-red-200'
+    textClass = 'text-red-900'
+    buttonClass = 'text-red-700 hover:text-red-900'
+    icon = '🔴'
+    text = `${daysLeft} day${daysLeft === 1 ? '' : 's'} left — subscribe today to avoid losing access`
+  }
+
+  function handleDismiss() {
+    try {
+      localStorage.setItem(`pl_trial_banner_dismissed_${getTodayKey()}`, '1')
+    } catch {}
+    setDismissed(true)
+  }
+
+  async function handleSubscribe() {
+    setCheckoutLoading(true)
+    try {
+      const res = await fetch('/api/stripe/checkout', { method: 'POST' })
+      const data = await res.json()
+      if (data?.url) window.location.href = data.url
+      else setCheckoutLoading(false)
+    } catch {
+      setCheckoutLoading(false)
+    }
+  }
+
+  return (
+    <div className={`border-b ${bgClass} px-4 py-2 flex items-center justify-between text-xs ${textClass} print:hidden flex-shrink-0`}>
+      <div className="flex items-center gap-2 font-semibold">
+        <span>{icon}</span>
+        <span>{text}</span>
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handleSubscribe}
+          disabled={checkoutLoading}
+          className={`font-bold underline hover:no-underline disabled:opacity-50 ${buttonClass}`}>
+          {checkoutLoading ? 'Opening…' : 'Subscribe now'}
+        </button>
+        <button
+          onClick={handleDismiss}
+          title="Dismiss for today"
+          className={`text-lg leading-none hover:opacity-70 px-1 ${buttonClass}`}>
+          ×
+        </button>
       </div>
     </div>
   )

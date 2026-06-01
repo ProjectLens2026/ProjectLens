@@ -249,7 +249,14 @@ export default function Sidebar({ user }: SidebarProps) {
     Object.keys(localStorage).forEach(key => {
       if (key.startsWith('pl_')) localStorage.removeItem(key)
     })
-    router.push('/login')
+    // Day 12 — wipe IndexedDB so the next user signing in on this browser
+    // starts with a clean cache. Without this, the previous user's projects
+    // remain in IDB and bleed into the next session.
+    try { indexedDB.deleteDatabase('nobelpm') } catch {}
+    // Full page reload — Next.js client routing keeps JS module state in
+    // memory. window.location.href forces a fresh bundle load so the
+    // projectStore module re-initializes with the next user's auth.
+    window.location.href = '/login'
   }
   function maybeNavigateToDashboard() {
     if (!pathname.startsWith('/dashboard') || pathname === '/dashboard/projects') {
