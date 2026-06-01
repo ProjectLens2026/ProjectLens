@@ -706,10 +706,12 @@ export default function UploadPage() {
             <h2 className="text-xl font-extrabold text-slate-900 mb-1">Tell us about your project</h2>
             <p className="text-slate-500 text-sm mb-5">Project ID and Name lock once set. Contract dates feed into the dashboard. On future uploads, fields auto-fill — edit only what changed.</p>
 
-            {/* Phase A.2 — Trial expired banner (red, hard block).
+            {/* Phase A.2 + B.1 — Trial expired banner (red, hard block).
                 Shown when subscription_status='trial' AND trial_ends_at < now.
-                Soft-block model: existing data + version uploads still work,
-                but no new projects, no Pro features. */}
+                Note: the dashboard layout's paywall gate now hard-blocks this
+                user entirely — they'll only reach this page if they navigate
+                from Settings → Billing. So this banner is a fallback for
+                edge cases. Pay button opens Stripe Checkout. */}
             {planInfo && planInfo.trialExpired && perms.can.createProject && (
               <div className="bg-red-50 border-2 border-red-300 rounded-xl p-4 mb-5">
                 <div className="flex items-start gap-3">
@@ -719,13 +721,23 @@ export default function UploadPage() {
                       Your 15-day free trial has ended
                     </div>
                     <div className="text-xs text-red-800 mb-3 leading-relaxed">
-                      You can still view your existing projects and upload new versions, but creating new projects, Time Impact Analysis, Trend, and EVM are locked. Upgrade to keep building.
+                      Subscribe to ControlLens Pro to keep your projects, TIA, Trend, and EVM. First 2 months are $49.50/mo (50% off).
                     </div>
-                    <a
-                      href={`mailto:sales@control-lens.com?subject=Upgrade%20after%20trial%20-%20activate%20ControlLens%20Pro&body=Hi%2C%20our%2015-day%20trial%20has%20ended%20and%20we%27d%20like%20to%20activate%20ControlLens%20Pro.%0A%0AOrg%20ID%3A%20${planInfo.orgId}%0A%0AThanks.`}
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const res = await fetch('/api/stripe/checkout', { method: 'POST' })
+                          const data = await res.json()
+                          if (data.url) window.location.href = data.url
+                          else alert(data.error || 'Could not start checkout. Please try again.')
+                        } catch (err: any) {
+                          alert(err?.message || 'Network error.')
+                        }
+                      }}
                       className="inline-block bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors">
-                      📧 Email sales to activate Pro →
-                    </a>
+                      Subscribe to Pro — $49.50/mo →
+                    </button>
                   </div>
                 </div>
               </div>

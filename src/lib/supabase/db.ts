@@ -289,8 +289,8 @@ function rowToVersion(row: any): ScheduleVersion {
 // WRITE — insert project (with first version) on createProject()
 // =============================================================================
 
-// Phase A.1 + A.2 — Project limit + trial enforcement
-// Returns the org's plan info: project_limit, project count, and trial state.
+// Phase A.1 + A.2 + B.1 — Project limit + trial + Stripe billing
+// Returns the org's plan info: project_limit, project count, trial state, billing state.
 export type SubscriptionStatus =
   | 'trial'
   | 'active'
@@ -314,11 +314,21 @@ export interface OrgPlanInfo {
   // True only if subscriptionStatus === 'trial' AND trial_ends_at < now()
   trialExpired: boolean
   // Convenience flag: can the user create a new project right now?
-  // False if at project limit OR trial expired.
+  // False if at project limit OR trial expired OR canceled.
   canCreateProject: boolean
   // Convenience flag: can the user use Pro features (TIA, Trend, EVM)?
-  // False if trial expired. True for trial-active, active, lifetime.
+  // False if trial expired OR canceled. True for trial-active, active, past_due, lifetime.
   canUseProFeatures: boolean
+  // Phase B.1 — Stripe billing
+  stripeCustomerId: string | null
+  stripeSubscriptionId: string | null
+  // HARD-BLOCK flag — true if the user needs to pay before they can use ANY
+  // part of the dashboard. Used by the layout's paywall gate.
+  //   trial && trialExpired  → true
+  //   canceled               → true
+  //   past_due               → false (give Stripe's 1-2 day retry window)
+  //   active / lifetime      → false
+  requiresPayment: boolean
 }
 
 export async function getOrgPlanInfo(): Promise<OrgPlanInfo | null> {
@@ -326,10 +336,10 @@ export async function getOrgPlanInfo(): Promise<OrgPlanInfo | null> {
   const orgId = await ensureUserHasOrg()
   if (!orgId) return null
 
-  // Read project_limit + trial fields from the org
+  // Read project_limit + trial + Stripe fields from the org
   const { data: orgRow, error: orgErr } = await supabase
     .from('organizations')
-    .select('project_limit, subscription_status, trial_ends_at')
+    .select('project_limit, subscription_status, trial_ends_at, stripe_customer_id, stripe_subscription_id')
     .eq('id', orgId)
     .single()
   if (orgErr || !orgRow) {
@@ -339,6 +349,8 @@ export async function getOrgPlanInfo(): Promise<OrgPlanInfo | null> {
   const projectLimit = orgRow.project_limit ?? 5
   const subscriptionStatus = (orgRow.subscription_status ?? 'trial') as SubscriptionStatus
   const trialEndsAt = orgRow.trial_ends_at ? new Date(orgRow.trial_ends_at) : null
+  const stripeCustomerId = orgRow.stripe_customer_id ?? null
+  const stripeSubscriptionId = orgRow.stripe_subscription_id ?? null
 
   // Count active (non-deleted) projects in this org
   const { count, error: countErr } = await supabase
@@ -362,9 +374,16 @@ export async function getOrgPlanInfo(): Promise<OrgPlanInfo | null> {
     trialExpired = msLeft <= 0
   }
 
+  // Phase B.1 — hard-block flag. True when user needs to pay before they
+  // can use the dashboard at all. past_due is NOT hard-blocked (Stripe
+  // retries for 1-2 days first). Lifetime and active are never blocked.
+  const requiresPayment =
+    (subscriptionStatus === 'trial' && trialExpired) ||
+    subscriptionStatus === 'canceled'
+
   // Convenience flags used by UI + server-side guards
-  const canUseProFeatures = !trialExpired   // expired trial loses Pro features
-  const canCreateProject = !atLimit && !trialExpired
+  const canUseProFeatures = !requiresPayment
+  const canCreateProject = !atLimit && !requiresPayment
 
   return {
     orgId,
@@ -378,6 +397,9 @@ export async function getOrgPlanInfo(): Promise<OrgPlanInfo | null> {
     trialExpired,
     canCreateProject,
     canUseProFeatures,
+    stripeCustomerId,
+    stripeSubscriptionId,
+    requiresPayment,
   }
 }
 
@@ -388,10 +410,10 @@ export async function insertProjectToSupabase(project: Project): Promise<boolean
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return false
 
-  // Phase A.1 + A.2 — plan limit + trial check (server-side gate, defense in depth)
+  // Phase A.1 + A.2 + B.1 — plan limit + trial + Stripe guard (defense in depth)
   const plan = await getOrgPlanInfo()
-  if (plan && plan.trialExpired) {
-    console.error('[db.insertProject] BLOCKED — trial expired:', {
+  if (plan && plan.requiresPayment) {
+    console.error('[db.insertProject] BLOCKED — payment required:', {
       orgId,
       subscriptionStatus: plan.subscriptionStatus,
       trialEndsAt: plan.trialEndsAt,

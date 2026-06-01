@@ -32,6 +32,7 @@ import {
   createInvitation, revokeInvitation,
   updateOrgMemberRole, removeOrgMember,
   OrgMember, Invitation,
+  getOrgPlanInfo, OrgPlanInfo,
 } from '@/lib/supabase/db'
 
 type TabId = 'workspace' | 'members' | 'invitations' | 'notifications' | 'billing'
@@ -91,7 +92,7 @@ export default function SettingsPage() {
           {activeTab === 'members' && <MembersTab perms={perms} />}
           {activeTab === 'invitations' && <InvitationsTab perms={perms} />}
           {activeTab === 'notifications' && <ComingSoonTab title="Notifications" />}
-          {activeTab === 'billing' && <ComingSoonTab title="Billing" />}
+          {activeTab === 'billing' && <BillingTab perms={perms} />}
         </div>
       </div>
     </div>
@@ -652,4 +653,216 @@ function formatExpiresIn(iso: string): string {
   if (days > 0) return `In ${days} day${days !== 1 ? 's' : ''}`
   const hours = Math.floor(ms / (1000 * 60 * 60))
   return `In ${hours} hour${hours !== 1 ? 's' : ''}`
+}
+
+// =============================================================================
+// Billing Tab — Phase B.1
+// =============================================================================
+// Shows the org's current plan + subscription state. Three primary states:
+//   - trial (with N days left)   → "Subscribe to Pro" button → Stripe Checkout
+//   - active (paying)            → "Manage subscription" → Stripe Customer Portal
+//   - canceled (was paying, now ended) → "Re-subscribe" button → Stripe Checkout
+//   - past_due                   → warning banner + "Manage subscription"
+//   - lifetime                   → comp account, no actions needed
+//
+// Only org admins/owners see this tab fully. PMs / viewers see a read-only
+// "your admin manages billing" message.
+// =============================================================================
+
+function BillingTab({ perms }: { perms: ReturnType<typeof usePermissions> }) {
+  const [plan, setPlan] = useState<OrgPlanInfo | null>(null)
+  const [loadingPlan, setLoadingPlan] = useState(true)
+  const [checkoutLoading, setCheckoutLoading] = useState(false)
+  const [portalLoading, setPortalLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    getOrgPlanInfo()
+      .then(p => setPlan(p))
+      .catch(() => setPlan(null))
+      .finally(() => setLoadingPlan(false))
+  }, [])
+
+  // Only owners/admins can manage billing. (perms is from usePermissions hook.)
+  const isAdmin = perms?.can?.inviteMembers || perms?.role === 'owner' || perms?.role === 'admin'
+
+  async function startCheckout() {
+    setCheckoutLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/stripe/checkout', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok || !data.url) {
+        setError(data.error || 'Could not start checkout.')
+        setCheckoutLoading(false)
+        return
+      }
+      window.location.href = data.url
+    } catch (err: any) {
+      setError(err?.message || 'Network error.')
+      setCheckoutLoading(false)
+    }
+  }
+
+  async function openPortal() {
+    setPortalLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/stripe/portal', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok || !data.url) {
+        setError(data.error || 'Could not open billing portal.')
+        setPortalLoading(false)
+        return
+      }
+      window.location.href = data.url
+    } catch (err: any) {
+      setError(err?.message || 'Network error.')
+      setPortalLoading(false)
+    }
+  }
+
+  if (loadingPlan) {
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-sm text-slate-500">
+        Loading billing details…
+      </div>
+    )
+  }
+
+  if (!plan) {
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-sm text-slate-500">
+        Could not load billing details. Please refresh.
+      </div>
+    )
+  }
+
+  // Non-admin view
+  if (!isAdmin) {
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl p-6">
+        <h3 className="text-base font-bold text-slate-900 mb-2">Billing</h3>
+        <p className="text-sm text-slate-600">
+          Only your organization's owner or admin can manage billing. Please contact them if you have questions about your subscription.
+        </p>
+      </div>
+    )
+  }
+
+  // Status badge
+  const statusBadge = (() => {
+    switch (plan.subscriptionStatus) {
+      case 'lifetime':
+        return <span className="text-xs font-bold bg-emerald-100 text-emerald-800 px-2 py-1 rounded">Lifetime · Comp</span>
+      case 'active':
+        return <span className="text-xs font-bold bg-emerald-100 text-emerald-800 px-2 py-1 rounded">Active</span>
+      case 'trial':
+        return plan.trialExpired
+          ? <span className="text-xs font-bold bg-red-100 text-red-800 px-2 py-1 rounded">Trial expired</span>
+          : <span className="text-xs font-bold bg-blue-100 text-blue-800 px-2 py-1 rounded">Trial · {plan.daysLeftInTrial} days left</span>
+      case 'past_due':
+        return <span className="text-xs font-bold bg-amber-100 text-amber-800 px-2 py-1 rounded">Payment failed · Retrying</span>
+      case 'canceled':
+        return <span className="text-xs font-bold bg-slate-200 text-slate-700 px-2 py-1 rounded">Canceled</span>
+      default:
+        return null
+    }
+  })()
+
+  return (
+    <div className="space-y-4">
+      {/* Current plan card */}
+      <div className="bg-white border border-slate-200 rounded-xl p-6">
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h3 className="text-base font-bold text-slate-900">ControlLens Pro</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              5 active projects · Up to 56 users · TIA, Trend, EVM
+            </p>
+          </div>
+          {statusBadge}
+        </div>
+
+        <div className="grid grid-cols-2 gap-4 mb-5">
+          <div>
+            <div className="text-[11px] uppercase tracking-wider text-slate-500 font-bold mb-1">Plan</div>
+            <div className="text-sm font-semibold text-slate-900">$99 / month</div>
+          </div>
+          <div>
+            <div className="text-[11px] uppercase tracking-wider text-slate-500 font-bold mb-1">Projects</div>
+            <div className="text-sm font-semibold text-slate-900">{plan.currentCount} / {plan.projectLimit}</div>
+          </div>
+        </div>
+
+        {/* Past-due warning */}
+        {plan.subscriptionStatus === 'past_due' && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-xs text-amber-900">
+            ⚠️ Your last payment failed. Stripe is retrying automatically over the next 1-2 days. You can update your card below to resolve this immediately.
+          </div>
+        )}
+
+        {/* Trial state — show countdown */}
+        {plan.subscriptionStatus === 'trial' && !plan.trialExpired && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-xs text-blue-900">
+            ⏳ You're on a 15-day free trial. <strong>{plan.daysLeftInTrial} day{plan.daysLeftInTrial === 1 ? '' : 's'} left.</strong> Subscribe now to keep your projects, TIA, Trend, and EVM after day 16.
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div className="flex flex-wrap gap-2">
+          {/* Subscribe — for trial users (with or without expired trial) and canceled users */}
+          {(plan.subscriptionStatus === 'trial' || plan.subscriptionStatus === 'canceled') && (
+            <button
+              onClick={startCheckout}
+              disabled={checkoutLoading}
+              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-sm px-5 py-2 rounded-lg transition-colors"
+            >
+              {checkoutLoading
+                ? 'Opening checkout…'
+                : plan.subscriptionStatus === 'canceled'
+                  ? 'Re-subscribe — $49.50/mo'
+                  : 'Subscribe to Pro — $49.50/mo'}
+            </button>
+          )}
+
+          {/* Manage — for active/past_due users with a Stripe customer */}
+          {(plan.subscriptionStatus === 'active' || plan.subscriptionStatus === 'past_due') && plan.stripeCustomerId && (
+            <button
+              onClick={openPortal}
+              disabled={portalLoading}
+              className="bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-bold text-sm px-5 py-2 rounded-lg transition-colors"
+            >
+              {portalLoading ? 'Opening…' : 'Manage subscription'}
+            </button>
+          )}
+
+          {/* Lifetime accounts have no actions */}
+          {plan.subscriptionStatus === 'lifetime' && (
+            <div className="text-xs text-slate-500 italic py-2">
+              Complimentary lifetime access. No billing required.
+            </div>
+          )}
+        </div>
+
+        {error && (
+          <div className="mt-4 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
+            {error}
+          </div>
+        )}
+      </div>
+
+      {/* Pricing reminder */}
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-xs text-slate-600">
+        <div className="font-bold text-slate-800 mb-2 text-sm">How billing works</div>
+        <ul className="space-y-1.5 leading-relaxed">
+          <li>• First 2 months: <strong>$49.50/month</strong> (50% launch discount)</li>
+          <li>• Month 3 onwards: <strong>$99/month</strong></li>
+          <li>• No pro-rating. Each month billed in full.</li>
+          <li>• Cancel anytime. You keep access until your paid period ends.</li>
+          <li>• Need more than 5 projects? <a href="mailto:sales@control-lens.com" className="text-blue-600 hover:underline">Contact sales</a></li>
+        </ul>
+      </div>
+    </div>
+  )
 }
