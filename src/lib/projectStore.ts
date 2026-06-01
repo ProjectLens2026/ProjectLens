@@ -30,6 +30,7 @@ import {
   renameProjectInSupabase,
   moveVersionInSupabase,
 } from './supabase/db'
+import { createClient } from './supabase/client'
 
 // =============================================================================
 // Project status — 5-state model.
@@ -155,6 +156,11 @@ export interface SaveResult {
 const LEGACY_PROJECTS_KEY = 'pl_projects'
 const ACTIVE_PROJECT_KEY = 'pl_active_project_id'
 const ACTIVE_VERSION_KEY = 'pl_active_version_id'
+// Day 12 — track which Supabase user the IndexedDB cache belongs to.
+// On hydrate, if the current user_id differs from this stored value, we wipe
+// the local cache before loading. Stops Account A's projects from leaking
+// into Account B's view when both sign in on the same browser.
+const LAST_USER_ID_KEY = 'pl_last_user_id'
 
 const DB_NAME = 'nobelpm'
 const DB_VERSION = 1
@@ -251,6 +257,34 @@ async function idbDeleteProject(id: string): Promise<void> {
     req.onsuccess = () => resolve()
     req.onerror = () => reject(req.error || new Error('idbDelete failed'))
   })
+}
+
+// Day 12 — wipe the entire IndexedDB project cache. Called from hydrate()
+// when the current Supabase user differs from the user the cache was last
+// populated for. Without this, Account A's projects leak into Account B's
+// view if both sign in on the same browser.
+async function idbClearAllProjects(): Promise<void> {
+  const db = await openDB()
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(PROJECTS_STORE, 'readwrite')
+    const store = tx.objectStore(PROJECTS_STORE)
+    const req = store.clear()
+    req.onsuccess = () => resolve()
+    req.onerror = () => reject(req.error || new Error('idbClear failed'))
+  })
+}
+
+// Day 12 — fetch the current Supabase user's id. Returns null if not signed
+// in or if the auth call fails (treat as "no user" so hydration is safe).
+async function getCurrentSupabaseUserId(): Promise<string | null> {
+  try {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    return user?.id ?? null
+  } catch (err) {
+    console.warn('[ControlLens] getCurrentSupabaseUserId failed:', err)
+    return null
+  }
 }
 
 // =============================================================================
@@ -481,6 +515,43 @@ export function buildLabeledVersion(opts: {
 async function hydrate(): Promise<void> {
   if (_hydrated) return
   try {
+    // Day 12 — User-change detection. IndexedDB is per-BROWSER, not per-user.
+    // If Account A signed in earlier on this browser, their projects are still
+    // in the local cache. When Account B signs in, we must wipe before hydration
+    // or B will see A's projects in the sidebar.
+    //
+    // Logic:
+    //   - Read currentUserId from Supabase auth
+    //   - Read lastUserId from localStorage
+    //   - If different (and we actually have a currentUserId), wipe local cache
+    //   - Save currentUserId at end of hydration
+    //
+    // No-user case (currentUserId === null): the auth check in the layout
+    // will redirect to /login before this matters, so we just proceed.
+    let currentUserId: string | null = null
+    try {
+      currentUserId = await getCurrentSupabaseUserId()
+      const lastUserId = (typeof localStorage !== 'undefined')
+        ? localStorage.getItem(LAST_USER_ID_KEY)
+        : null
+      if (currentUserId && lastUserId && currentUserId !== lastUserId) {
+        console.log('[ControlLens] User changed (' + lastUserId.slice(0, 8) + ' → ' + currentUserId.slice(0, 8) + ') — wiping local cache')
+        try {
+          await idbClearAllProjects()
+        } catch (e) {
+          console.error('[ControlLens] idbClearAllProjects failed (non-fatal):', e)
+        }
+        // Also clear the active-project pointers so we don't try to focus
+        // a project that no longer exists in this user's view.
+        try {
+          localStorage.removeItem(ACTIVE_PROJECT_KEY)
+          localStorage.removeItem(ACTIVE_VERSION_KEY)
+        } catch {}
+      }
+    } catch (err) {
+      console.warn('[ControlLens] User-change check failed (non-fatal):', err)
+    }
+
     // v15 — Load from BOTH sources and merge. This ensures:
     //   - Cross-device users see their cloud data
     //   - Local-only users (cloud writes failing) still see their work
@@ -560,6 +631,13 @@ async function hydrate(): Promise<void> {
 
     _projects = projects
     _hydrated = true
+
+    // Day 12 — Record which user this cache belongs to. Next hydration will
+    // compare to this value and wipe if a different user signs in.
+    if (currentUserId && typeof localStorage !== 'undefined') {
+      try { localStorage.setItem(LAST_USER_ID_KEY, currentUserId) } catch {}
+    }
+
     notifyListeners()
   } catch (err) {
     console.error('[ControlLens] Hydration failed:', err)
