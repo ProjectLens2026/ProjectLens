@@ -232,86 +232,95 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       default: return predType.replace(/^PR_/, '')
     }
   }
+  // -------------------------------------------------------------------------
+  // Out-of-Sequence detection (Day 12 — matches Primavera P6 Schedule Log)
+  //
+  // P6 flags an activity as out-of-sequence when:
+  //   - The SUCCESSOR has actualized (started or finished) the date that this
+  //     relationship constrains
+  //   - BUT the PREDECESSOR has NOT yet actualized the date this relationship
+  //     requires (per the FS/SS/FF/SF rule)
+  //
+  // Practical examples:
+  //   FS:  succ has act_start but pred has no act_end → OOS
+  //   SS:  succ has act_start but pred has no act_start → OOS
+  //   FF:  succ has act_end   but pred has no act_end → OOS
+  //   SF:  succ has act_end   but pred has no act_start → OOS
+  //
+  // This is the CLASSIC real-world OOS — "you progressed a successor without
+  // updating its predecessor's status." It does NOT include "date mismatch
+  // between two completed activities" which P6 treats as already-resolved.
+  //
+  // Dedupe by successor task_id — one activity counts once regardless of how
+  // many of its predecessors are missing actuals. Matches P6's count.
+  // -------------------------------------------------------------------------
   const oosMap = new Map<string, OutOfSequence>()
   for (const r of relationships) {
     const t = tasks[r.task_id]
     const p = tasks[r.pred_task_id]
     if (!t || !p) continue
-    const lagMs = parseFloat(r.lag_hr_cnt || '0') * HOUR_MS
-    if (isNaN(lagMs)) continue
-    let predAnchorMs: number | null = null
-    let succActualMs: number | null = null
-    let predAnchorDateStr = ''
-    let succActualDateStr = ''
-    let kindLabel = ''
+
+    let predAnchorDate = ''
+    let succActualDate = ''
+    let predAnchorKind = ''     // what the predecessor needed to do (finished/started)
+    let succActualKind = ''     // what the successor already did (finished/started)
+
     switch (r.pred_type) {
       case 'PR_FS':
-        predAnchorMs = dateMs(p.act_end_date)
-        succActualMs = dateMs(t.act_start_date)
-        predAnchorDateStr = p.act_end_date
-        succActualDateStr = t.act_start_date
-        kindLabel = 'finished'
+        predAnchorDate = p.act_end_date
+        succActualDate = t.act_start_date
+        predAnchorKind = 'finished'
+        succActualKind = 'started'
         break
       case 'PR_SS':
-        predAnchorMs = dateMs(p.act_start_date)
-        succActualMs = dateMs(t.act_start_date)
-        predAnchorDateStr = p.act_start_date
-        succActualDateStr = t.act_start_date
-        kindLabel = 'started'
+        predAnchorDate = p.act_start_date
+        succActualDate = t.act_start_date
+        predAnchorKind = 'started'
+        succActualKind = 'started'
         break
       case 'PR_FF':
-        predAnchorMs = dateMs(p.act_end_date)
-        succActualMs = dateMs(t.act_end_date)
-        predAnchorDateStr = p.act_end_date
-        succActualDateStr = t.act_end_date
-        kindLabel = 'finished'
+        predAnchorDate = p.act_end_date
+        succActualDate = t.act_end_date
+        predAnchorKind = 'finished'
+        succActualKind = 'finished'
         break
       case 'PR_SF':
-        predAnchorMs = dateMs(p.act_start_date)
-        succActualMs = dateMs(t.act_end_date)
-        predAnchorDateStr = p.act_start_date
-        succActualDateStr = t.act_end_date
-        kindLabel = 'started'
+        predAnchorDate = p.act_start_date
+        succActualDate = t.act_end_date
+        predAnchorKind = 'started'
+        succActualKind = 'finished'
         break
       default:
         continue
     }
-    if (predAnchorMs === null || succActualMs === null) continue
-    const requiredMs = predAnchorMs + lagMs
-    const violated = succActualMs < requiredMs
-    if (!violated) continue
-    const varianceDays = Math.max(0, Math.round((requiredMs - succActualMs) / DAY_MS))
-    const lagHours = lagMs / HOUR_MS
+
+    // P6 OOS rule: succ has its required actual, pred does not.
+    // Skip if either condition fails (no OOS to report).
+    const succHasActual = !!succActualDate && dateMs(succActualDate) !== null
+    const predHasActual = !!predAnchorDate && dateMs(predAnchorDate) !== null
+    if (!succHasActual || predHasActual) continue
+
     const relLabel = relTypeLabel(r.pred_type)
-    const succAction = (r.pred_type === 'PR_FS' || r.pred_type === 'PR_SS') ? 'started' : 'finished'
-    let lagPhrase = ''
-    if (lagHours > 0) {
-      const lagDays = Math.round(lagHours / 24)
-      lagPhrase = ` (${relLabel} + ${lagDays} day lag)`
-    } else if (lagHours < 0) {
-      const leadDays = Math.round(Math.abs(lagHours) / 24)
-      lagPhrase = ` (${relLabel} − ${leadDays} day lead allowed)`
-    } else {
-      lagPhrase = ` (${relLabel}, no lag)`
-    }
     const description =
-      `Predecessor ${p.task_code} ${kindLabel} ${predAnchorDateStr?.slice(0, 16) || '—'}, ` +
-      `but ${t.task_code} ${succAction} ${succActualDateStr?.slice(0, 16) || '—'} ` +
-      `— ${varianceDays} day${varianceDays === 1 ? '' : 's'} too early${lagPhrase}.`
+      `${t.task_code} ${succActualKind} ${succActualDate.slice(0, 16)}, ` +
+      `but predecessor ${p.task_code} has not ${predAnchorKind} yet (${relLabel}).`
+
     const violation: SequenceViolation = {
       pred: p,
       relType: r.pred_type,
       relTypeLabel: relLabel,
-      predDate: predAnchorDateStr,
-      succDate: succActualDateStr,
-      requiredDate: fmtDate(requiredMs),
-      lagHours,
-      varianceDays,
+      predDate: '',                                    // pred hasn't acted yet
+      succDate: succActualDate,
+      requiredDate: '',                                // no required date — pred is missing
+      lagHours: parseFloat(r.lag_hr_cnt || '0'),
+      varianceDays: 0,                                 // not applicable; pred never started
       description,
     }
+
     let category = 'Other'
     if (t.task_code?.includes('PRO-') || t.task_code?.includes('PROC')) category = 'Procurement'
     else if (t.task_code?.includes('PRE-CON')) category = 'Pre-Construction'
+
     const existing = oosMap.get(t.task_id)
     if (existing) {
       existing.predecessors.push(p)
