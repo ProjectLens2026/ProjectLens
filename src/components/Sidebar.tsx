@@ -14,6 +14,7 @@ import {
 } from '@/lib/projectStore'
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions, roleLabel, roleBadgeColor } from '@/lib/usePermissions'
+import { getOrgPlanInfo, OrgPlanInfo } from '@/lib/supabase/db'
 import CreateProjectModal from '@/components/CreateProjectModal'
 import ProjectTeamModal from '@/components/ProjectTeamModal'
 interface SidebarProps {
@@ -46,6 +47,12 @@ export default function Sidebar({ user }: SidebarProps) {
   const [movePickerForVersionId, setMovePickerForVersionId] = useState<string | null>(null)
   // Phase 3B — modal state for "Create New Project" (Owner/Admin only)
   const [createProjectModalOpen, setCreateProjectModalOpen] = useState(false)
+  // Phase A.1 — Project limit detection. When the org is at its project_limit,
+  // the "+ New project" click opens an upgrade prompt instead of the create modal.
+  // Stops the silent-rejection bug where the modal would let the user fill out
+  // a project that Supabase then refused, leaving an orphan in local IndexedDB.
+  const [planInfo, setPlanInfo] = useState<OrgPlanInfo | null>(null)
+  const [limitModalOpen, setLimitModalOpen] = useState(false)
   // Phase 3D — Project Team modal (Owner/Admin/PM)
   const [teamModalForProject, setTeamModalForProject] = useState<Project | null>(null)
 
@@ -89,6 +96,23 @@ export default function Sidebar({ user }: SidebarProps) {
       document.body.style.userSelect = ''
     }
   }, [isDragging])
+
+  // Phase A.1 — load plan info on mount so we know if the org is at limit.
+  // The "+ New project" button uses this to swap in the upgrade modal.
+  // Refreshed whenever a project is created/deleted (via refreshPlanInfo()).
+  useEffect(() => {
+    refreshPlanInfo()
+  }, [])
+
+  async function refreshPlanInfo() {
+    try {
+      const info = await getOrgPlanInfo()
+      setPlanInfo(info)
+    } catch (err) {
+      console.error('[sidebar] failed to load plan info:', err)
+      setPlanInfo(null)
+    }
+  }
 
   // Persist width when drag ends (separate effect so it fires after the
   // setIsDragging(false) state update). Skip when dragging in progress.
@@ -991,10 +1015,32 @@ export default function Sidebar({ user }: SidebarProps) {
         })}
         {!searchQuery && perms.can.createProject && (
           <button
-            onClick={() => setCreateProjectModalOpen(true)}
-            className="w-full flex items-center gap-1.5 px-2 py-2 mt-2 text-blue-400 hover:text-blue-300 hover:bg-white/5 rounded-md text-xs font-medium text-left"
+            onClick={() => {
+              // Phase A.1 — if org is at project limit, open the upgrade prompt
+              // instead of the create modal. Prevents the silent-rejection bug
+              // where a user could fill out a project that Supabase then refused.
+              if (planInfo && planInfo.atLimit) {
+                setLimitModalOpen(true)
+              } else {
+                setCreateProjectModalOpen(true)
+              }
+            }}
+            className={clsx(
+              'w-full flex items-center gap-1.5 px-2 py-2 mt-2 hover:bg-white/5 rounded-md text-xs font-medium text-left',
+              planInfo && planInfo.atLimit
+                ? 'text-amber-300 hover:text-amber-200'
+                : 'text-blue-400 hover:text-blue-300'
+            )}
+            title={planInfo && planInfo.atLimit
+              ? `You're at your ${planInfo.projectLimit}-project limit. Click to upgrade.`
+              : undefined}
           >
-            <span className="text-base leading-none">+</span> New project
+            <span className="text-base leading-none">
+              {planInfo && planInfo.atLimit ? '🔒' : '+'}
+            </span>
+            {planInfo && planInfo.atLimit
+              ? 'New project (upgrade required)'
+              : 'New project'}
           </button>
         )}
         {!searchQuery && !perms.can.createProject && perms.user && (
@@ -1102,8 +1148,22 @@ export default function Sidebar({ user }: SidebarProps) {
           button gate above; modal itself is always mounted but invisible) */}
       <CreateProjectModal
         open={createProjectModalOpen}
-        onClose={() => setCreateProjectModalOpen(false)}
+        onClose={() => {
+          setCreateProjectModalOpen(false)
+          // Phase A.1 — refresh plan info so atLimit flips to true if this
+          // creation was the org's 5th project.
+          refreshPlanInfo()
+        }}
         redirectTo="upload"
+      />
+
+      {/* Phase A.1 — Upgrade prompt shown when at project limit.
+          Replaces the create modal entirely so the user can't fill out
+          a project that Supabase would refuse. */}
+      <LimitReachedModal
+        open={limitModalOpen}
+        onClose={() => setLimitModalOpen(false)}
+        planInfo={planInfo}
       />
 
       {/* Phase 3D — Project Team modal (Owner/Admin/PM manage who has access) */}
@@ -1117,5 +1177,100 @@ export default function Sidebar({ user }: SidebarProps) {
         />
       )}
     </aside>
+  )
+}
+
+// =============================================================================
+// LimitReachedModal — Phase A.1
+// =============================================================================
+// Shown when an admin/owner clicks "+ New project" but their org has hit its
+// project_limit. Two CTAs:
+//   - "Contact sales" — opens mailto with org ID + counts pre-filled.
+//   - "Cancel" — closes the modal.
+//
+// This is intentionally short and friendly. The goal is to turn a frustrating
+// limit into a sales conversation, not a wall.
+// =============================================================================
+
+interface LimitReachedModalProps {
+  open: boolean
+  onClose: () => void
+  planInfo: OrgPlanInfo | null
+}
+
+function LimitReachedModal({ open, onClose, planInfo }: LimitReachedModalProps) {
+  // ESC to close
+  useEffect(() => {
+    if (!open) return
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
+  if (!open) return null
+
+  const limit = planInfo?.projectLimit ?? 5
+  const orgId = planInfo?.orgId ?? ''
+
+  // Pre-fill the sales email so the rep sees org context immediately.
+  const mailto = (
+    `mailto:sales@control-lens.com` +
+    `?subject=${encodeURIComponent('ControlLens — More than ' + limit + ' projects')}` +
+    `&body=${encodeURIComponent(
+      'Hi,\n\n' +
+      "We're at our " + limit + "-project limit and would like to add more " +
+      'projects to ControlLens.\n\n' +
+      'Org ID: ' + orgId + '\n' +
+      'Current projects: ' + (planInfo?.currentCount ?? limit) + '\n' +
+      'Projects needed: \n\n' +
+      'Please send us a quote.\n\n' +
+      'Thanks.'
+    )}`
+  )
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden"
+      >
+        <div className="px-6 py-7 text-center">
+          <div className="text-5xl mb-3">🔒</div>
+          <div className="text-lg font-extrabold text-slate-900 mb-2">
+            You've reached your {limit}-project limit
+          </div>
+          <p className="text-sm text-slate-600 leading-relaxed mb-6">
+            Your Pro plan covers up to {limit} active projects. To run more,
+            contact our team for a custom plan tailored to your portfolio.
+          </p>
+
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-left text-xs text-slate-600 mb-6">
+            <div className="font-bold text-slate-800 mb-1.5 text-sm">What happens next</div>
+            <ul className="space-y-1 leading-relaxed">
+              <li>• You'll hear back from us within 1 business day</li>
+              <li>• We'll quote a custom plan based on how many projects you need</li>
+              <li>• Once you approve, your limit is raised — no app changes needed</li>
+            </ul>
+          </div>
+
+          <div className="flex gap-2 justify-center">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900">
+              Cancel
+            </button>
+            <a
+              href={mailto}
+              onClick={() => { setTimeout(onClose, 100) }}
+              className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-5 py-2 rounded-lg transition-colors">
+              📧 Contact sales
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
