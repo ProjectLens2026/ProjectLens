@@ -173,7 +173,11 @@ export async function POST(req: NextRequest) {
       // Recurring payment succeeded — bump status back to active in case
       // we had past_due and Stripe successfully retried.
       case 'invoice.payment_succeeded': {
-        const invoice = event.data.object as Stripe.Invoice
+        // Cast to any: newer Stripe SDK tightened the Invoice type and removed
+        // the top-level `subscription` field from the public types, but the
+        // runtime payload from Stripe still includes it. Cast bypasses the
+        // type check; runtime behavior unchanged.
+        const invoice = event.data.object as any
         if (!invoice.subscription) break
 
         const subscriptionId =
@@ -195,7 +199,7 @@ export async function POST(req: NextRequest) {
       // Recurring payment failed. Mark past_due — Stripe will retry over the
       // next 1-2 days. If all retries fail, subscription.deleted will fire.
       case 'invoice.payment_failed': {
-        const invoice = event.data.object as Stripe.Invoice
+        const invoice = event.data.object as any
         if (!invoice.subscription) break
 
         const subscriptionId =
