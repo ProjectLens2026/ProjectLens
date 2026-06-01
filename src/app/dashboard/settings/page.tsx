@@ -683,8 +683,9 @@ function BillingTab({ perms }: { perms: ReturnType<typeof usePermissions> }) {
       .finally(() => setLoadingPlan(false))
   }, [])
 
-  // Only owners/admins can manage billing. (perms is from usePermissions hook.)
-  const isAdmin = perms?.can?.manageBilling || perms?.role === 'owner' || perms?.role === 'admin'
+  // Only owners/admins can manage billing. (perms.can.manageBilling is true
+  // for the 'owner' and 'admin' roles per usePermissions hook.)
+  const isAdmin = !!perms?.can?.manageBilling
 
   async function startCheckout() {
     setCheckoutLoading(true)
