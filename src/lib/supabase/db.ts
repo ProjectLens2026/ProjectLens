@@ -156,6 +156,14 @@ export async function ensureUserHasOrg(): Promise<string | null> {
     console.error('[db.ensureUserHasOrg] member insert failed:', insertErr.message)
   }
   console.log('[db] created personal workspace', org.id, 'for', user.email)
+
+  // Day 13 — Fire-and-forget owner notification. We don't await this and we
+  // never let a failure here propagate. The endpoint has its own auth check
+  // and 5-minute age guard to prevent abuse.
+  try {
+    fetch('/api/notify-signup', { method: 'POST' }).catch(() => {})
+  } catch {}
+
   return org.id
 }
 

@@ -25,6 +25,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getStripeClient, getWebhookSecret } from '@/lib/stripe'
+import { sendOwnerNotification, notificationTemplate } from '@/lib/email/notify'
 import type Stripe from 'stripe'
 
 // Disable Next's auto body parsing — Stripe needs the raw body bytes to verify
@@ -113,6 +114,27 @@ export async function POST(req: NextRequest) {
         const sub = event.data.object as Stripe.Subscription
         const orgId = (sub.metadata && sub.metadata.org_id) || null
 
+        // Day 13 — Detect "customer just clicked cancel in Stripe Portal."
+        // Stripe fires subscription.updated with cancel_at_period_end now true
+        // AND previous_attributes showing it WAS false before this event.
+        // We email the owners with the feedback Stripe collected.
+        try {
+          const prev = (event.data as any).previous_attributes || {}
+          const justScheduledCancel = (sub as any).cancel_at_period_end === true
+            && prev.cancel_at_period_end === false
+          if (justScheduledCancel) {
+            await sendCancellationEmail(db, sub, 'scheduled')
+          }
+          // Also: customer un-canceled (toggled back). Worth knowing about too.
+          const justResumed = (sub as any).cancel_at_period_end === false
+            && prev.cancel_at_period_end === true
+          if (justResumed) {
+            await sendResumeEmail(db, sub)
+          }
+        } catch (notifyErr) {
+          console.error('[stripe.webhook] cancel notification failed (non-fatal):', notifyErr)
+        }
+
         // Map Stripe status to our enum:
         //   'active' / 'trialing'        → 'active'
         //   'past_due' / 'unpaid'        → 'past_due'   (Stripe will retry)
@@ -166,6 +188,13 @@ export async function POST(req: NextRequest) {
           console.error('[stripe.webhook] failed to mark org canceled:', error)
         } else {
           console.log(`[stripe.webhook] subscription ${sub.id} canceled`)
+        }
+
+        // Day 13 — Subscription truly ended. Send the final "they're gone" email.
+        try {
+          await sendCancellationEmail(db, sub, 'ended')
+        } catch (notifyErr) {
+          console.error('[stripe.webhook] ended-email failed (non-fatal):', notifyErr)
         }
         break
       }
@@ -228,5 +257,169 @@ export async function POST(req: NextRequest) {
     console.error('[stripe.webhook] handler error:', err)
     // Return 500 so Stripe retries — better to be retried than to lose the event
     return NextResponse.json({ error: err?.message || 'Webhook handler failed' }, { status: 500 })
+  }
+}
+
+// =============================================================================
+// Owner notification helpers — Day 13
+// =============================================================================
+// All three of these wrap the email send in their own try/catch. If anything
+// inside fails we log and return — never let an email failure break webhook
+// acknowledgement, which would cause Stripe to retry endlessly.
+// =============================================================================
+
+async function sendCancellationEmail(
+  db: ReturnType<typeof getServiceClient>,
+  sub: Stripe.Subscription,
+  phase: 'scheduled' | 'ended'
+): Promise<void> {
+  try {
+    // Look up the org so we can include name and customer context
+    const orgId = (sub.metadata && sub.metadata.org_id) || null
+    let orgName = 'Unknown'
+    let orgCreatedAt: string | null = null
+    let customerEmail: string | null = null
+
+    if (orgId) {
+      const { data: org } = await db
+        .from('organizations')
+        .select('name, created_at')
+        .eq('id', orgId)
+        .single()
+      if (org) {
+        orgName = org.name
+        orgCreatedAt = org.created_at
+      }
+
+      // Try to pull the user's email via the first member of the org
+      const { data: members } = await db
+        .from('organization_members')
+        .select('user_id')
+        .eq('org_id', orgId)
+        .order('created_at', { ascending: true })
+        .limit(1)
+      if (members && members[0]) {
+        const { data: { user } } = await db.auth.admin.getUserById(members[0].user_id)
+        customerEmail = user?.email ?? null
+      }
+    }
+
+    // Cancellation reason + comment from Stripe Portal feedback collection
+    const details = (sub as any).cancellation_details || {}
+    const reason = details.feedback || details.reason || '—'
+    const comment = details.comment || '—'
+
+    // Cancellation feedback codes from Stripe map to friendly labels
+    const reasonLabel = ({
+      customer_service: 'Customer service issue',
+      low_quality: 'Low quality',
+      missing_features: 'Missing features',
+      other: 'Other',
+      switched_service: 'Switched to a competitor',
+      too_complex: 'Too complex to use',
+      too_expensive: 'Too expensive',
+      unused: 'Not using it enough',
+    } as Record<string, string>)[reason] || reason
+
+    // Customer-for-N-days calculation
+    const customerDays = orgCreatedAt
+      ? Math.floor((Date.now() - new Date(orgCreatedAt).getTime()) / (1000 * 60 * 60 * 24))
+      : null
+
+    // Period end date (when access actually stops)
+    const periodEndUnix = (sub as any).current_period_end as number | undefined
+    const periodEnd = periodEndUnix
+      ? new Date(periodEndUnix * 1000).toLocaleDateString('en-US', { dateStyle: 'long' })
+      : '—'
+
+    const isScheduled = phase === 'scheduled'
+    const headline = isScheduled
+      ? 'Subscription canceled (access continues until period end)'
+      : 'Subscription ended'
+    const intro = isScheduled
+      ? `${customerEmail || orgName} just clicked Cancel in the Stripe Customer Portal. They keep access until ${periodEnd}. Reach out now while it might still be recoverable.`
+      : `${customerEmail || orgName}'s subscription has officially ended. They no longer have access. Send a "we'd love to have you back" email if appropriate.`
+
+    const rows: Array<{ label: string; value: string }> = [
+      { label: 'Customer', value: customerEmail || '(unknown)' },
+      { label: 'Organization', value: orgName },
+      { label: 'Was a customer for', value: customerDays !== null ? `${customerDays} days` : '—' },
+      { label: 'Reason given', value: reasonLabel },
+      { label: 'Comment', value: comment },
+      { label: 'Access ends', value: periodEnd },
+      { label: 'Stripe subscription', value: sub.id },
+    ]
+
+    const { html, text } = notificationTemplate({
+      headline,
+      intro,
+      rows,
+      ctaText: 'View in Stripe Dashboard',
+      ctaUrl: `https://dashboard.stripe.com/subscriptions/${sub.id}`,
+      footer: isScheduled
+        ? 'Tip: A "what could we do better?" email within 24 hours recovers 10-30% of cancellations.'
+        : 'They paid for a full month and used it. Consider a "come back" offer in 30 days.',
+    })
+
+    await sendOwnerNotification({
+      subject: isScheduled
+        ? `[ControlLens] Cancellation scheduled: ${customerEmail || orgName}`
+        : `[ControlLens] Subscription ended: ${customerEmail || orgName}`,
+      html,
+      text,
+    })
+  } catch (err) {
+    console.error('[notify.cancel] failed:', err)
+  }
+}
+
+async function sendResumeEmail(
+  db: ReturnType<typeof getServiceClient>,
+  sub: Stripe.Subscription
+): Promise<void> {
+  try {
+    const orgId = (sub.metadata && sub.metadata.org_id) || null
+    let orgName = 'Unknown'
+    let customerEmail: string | null = null
+
+    if (orgId) {
+      const { data: org } = await db
+        .from('organizations')
+        .select('name')
+        .eq('id', orgId)
+        .single()
+      if (org) orgName = org.name
+
+      const { data: members } = await db
+        .from('organization_members')
+        .select('user_id')
+        .eq('org_id', orgId)
+        .order('created_at', { ascending: true })
+        .limit(1)
+      if (members && members[0]) {
+        const { data: { user } } = await db.auth.admin.getUserById(members[0].user_id)
+        customerEmail = user?.email ?? null
+      }
+    }
+
+    const { html, text } = notificationTemplate({
+      headline: 'Customer reactivated subscription 🎉',
+      intro: `${customerEmail || orgName} had scheduled a cancellation but then clicked "Don't cancel" in the Stripe Customer Portal. They're back on the active list.`,
+      rows: [
+        { label: 'Customer', value: customerEmail || '(unknown)' },
+        { label: 'Organization', value: orgName },
+        { label: 'Stripe subscription', value: sub.id },
+      ],
+      ctaText: 'View in Stripe',
+      ctaUrl: `https://dashboard.stripe.com/subscriptions/${sub.id}`,
+    })
+
+    await sendOwnerNotification({
+      subject: `[ControlLens] Reactivated: ${customerEmail || orgName}`,
+      html,
+      text,
+    })
+  } catch (err) {
+    console.error('[notify.resume] failed:', err)
   }
 }
