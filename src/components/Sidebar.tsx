@@ -447,7 +447,7 @@ export default function Sidebar({ user }: SidebarProps) {
   // Viewers (read-only role). Lens (Schedule Analysis) stays — it's view-only.
   const allViews = activeProject ? [
     { href: '/dashboard', icon: '⊞', label: 'Overview', requires: 'view' as const },
-    { href: '/dashboard/report', icon: '📄', label: 'Complete Report', requires: 'view' as const },
+    { href: '/dashboard/reports', icon: '📄', label: 'Reports', requires: 'view' as const },
     { href: '/dashboard/lens', icon: '🔍', label: 'Schedule Analysis', requires: 'view' as const },
     { href: '/dashboard/evm', icon: '💰', label: 'Earned Value', requires: 'advanced' as const },
     { href: '/dashboard/risks', icon: '⚠', label: 'Risks & Issues', requires: 'view' as const },
