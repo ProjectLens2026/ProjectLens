@@ -182,7 +182,7 @@ export default function ExecutiveReportPage() {
   const versionLabel = version.versionLabel || version.fileName || 'v1 · working draft'
 
   return (
-    <div className="p-6 max-w-[920px] mx-auto">
+    <div className="p-6 max-w-[920px] mx-auto h-full overflow-y-auto">
       <Link href="/dashboard/reports" className="text-[12px] text-slate-500 hover:text-slate-800 print:hidden">
         ‹ Reports
       </Link>
