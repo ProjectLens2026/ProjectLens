@@ -67,10 +67,10 @@ export default function ReportsHubPage() {
       tag: 'OOS',
     },
     {
-      href: '#',
+      href: '/dashboard/reports/tia',
       title: 'Time Impact Analysis',
       desc: 'Quantifies the delay caused by a fragnet or schedule change. Shows the un-impacted vs impacted path with the day-by-day variance.',
-      live: false,
+      live: true,
       tag: 'TIA',
     },
     {
