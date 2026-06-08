@@ -46,10 +46,10 @@ export default function ReportsHubPage() {
       tag: 'EXEC',
     },
     {
-      href: '#',
+      href: '/dashboard/reports/full',
       title: 'Full Analysis Report',
       desc: 'Every diagnostic the Lens engine produces — critical path drivers, float distribution, logic anomalies, activity-level risk, and TIA evidence.',
-      live: false,
+      live: true,
       tag: 'FULL',
     },
     {
