@@ -81,10 +81,10 @@ export default function ReportsHubPage() {
       tag: 'TREND',
     },
     {
-      href: '#',
+      href: '/dashboard/reports/long-lead',
       title: 'Long-Lead & Procurement',
       desc: 'Long-lead items, procurement activities, and their float exposure. Surfaces what could trip up the construction sequence weeks out.',
-      live: false,
+      live: true,
       tag: 'LEAD',
     },
     {
