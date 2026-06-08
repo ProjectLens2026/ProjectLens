@@ -179,7 +179,7 @@ export default function ExecutiveReportPage() {
   // Report metadata
   const projectCode = project.projectId || (project as any).project_code || project.name
   const reportNo = reportNumber(projectCode, 'EXEC')
-  const versionLabel = version.label || version.fileName || 'v1 · working draft'
+  const versionLabel = version.versionLabel || version.fileName || 'v1 · working draft'
 
   return (
     <div className="p-6 max-w-[920px] mx-auto">
