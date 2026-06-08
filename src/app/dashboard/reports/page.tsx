@@ -74,10 +74,10 @@ export default function ReportsHubPage() {
       tag: 'TIA',
     },
     {
-      href: '#',
+      href: '/dashboard/reports/trend',
       title: 'Trend & Variance Report',
       desc: 'Compare any two schedule versions side-by-side — added, removed, and changed activities, milestone movement, and logic deltas.',
-      live: false,
+      live: true,
       tag: 'TREND',
     },
     {
