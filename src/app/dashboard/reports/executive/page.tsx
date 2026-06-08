@@ -195,7 +195,7 @@ export default function ExecutiveReportPage() {
             name: project.name,
             projectId: project.projectId,
             project_code: (project as any).project_code,
-            owner: (project as any).owner || project.contractDates?.owner,
+            owner: (project as any).owner,
             location: (project as any).location,
           }}
           healthScore={healthScore}
