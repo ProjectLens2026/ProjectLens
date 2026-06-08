@@ -88,10 +88,10 @@ export default function ReportsHubPage() {
       tag: 'LEAD',
     },
     {
-      href: '#',
+      href: '/dashboard/reports/evm',
       title: 'Earned Value Report',
       desc: 'PV, EV, AC, SV, CV, CPI, SPI with time-phased curves. Construction-only activities; LOE and milestone work excluded by default.',
-      live: false,
+      live: true,
       tag: 'EVM',
     },
     {
