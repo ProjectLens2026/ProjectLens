@@ -53,10 +53,10 @@ export default function ReportsHubPage() {
       tag: 'FULL',
     },
     {
-      href: '#',
+      href: '/dashboard/reports/risks',
       title: 'Risk Register',
       desc: 'Every detected risk grouped by severity (Critical / High / Medium) with the activity, the cause in plain English, and the recommended action.',
-      live: false,
+      live: true,
       tag: 'RISK',
     },
     {
