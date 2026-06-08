@@ -95,10 +95,10 @@ export default function ReportsHubPage() {
       tag: 'EVM',
     },
     {
-      href: '#',
+      href: '/dashboard/reports/submittals',
       title: 'Submittals & RFI Impact',
       desc: 'Outstanding submittals and RFIs mapped to the activities they hold up. Shows which schedule risks trace back to a paperwork bottleneck.',
-      live: false,
+      live: true,
       tag: 'SUB',
     },
     {
