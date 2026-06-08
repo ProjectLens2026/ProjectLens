@@ -60,10 +60,10 @@ export default function ReportsHubPage() {
       tag: 'RISK',
     },
     {
-      href: '#',
+      href: '/dashboard/reports/oos',
       title: 'Out-of-Sequence Report',
       desc: 'The exact activities P6 Schedule Log would flag — successors actualized before their predecessors. Matches the federal audit convention.',
-      live: false,
+      live: true,
       tag: 'OOS',
     },
     {
