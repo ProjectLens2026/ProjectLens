@@ -31,6 +31,23 @@ export interface Relationship {
   pred_type: string
   lag_hr_cnt: string
 }
+// Day 15 — Trace Logic: lightweight task shape stored for every activity so
+// the Trace Logic view can walk predecessor/successor chains without needing
+// the full Task record or a re-parse of the XER.
+export interface TraceTask {
+  task_id: string
+  task_code: string
+  task_name: string
+  status_code: string
+  task_type: string
+  total_float_hr_cnt: string
+  early_start_date: string
+  early_end_date: string
+  act_start_date: string
+  act_end_date: string
+  target_start_date: string
+  target_end_date: string
+}
 export interface ParsedXER {
   projectName: string
   dataDate: string
@@ -62,6 +79,8 @@ export interface XERAnalysis {
   longestPathActivities?: Task[]
   submittals?: Task[]
   allTasksForPaths?: Task[]  // Day 10 — Multiple Float Paths source data
+  traceRelationships?: Relationship[]      // Day 15 — Trace Logic edge list
+  traceTasks?: Record<string, TraceTask>   // Day 15 — Trace Logic node dict
   healthScore: number
   condition: string
   delayDays: number
@@ -232,95 +251,86 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       default: return predType.replace(/^PR_/, '')
     }
   }
-  // -------------------------------------------------------------------------
-  // Out-of-Sequence detection (Day 12 — matches Primavera P6 Schedule Log)
-  //
-  // P6 flags an activity as out-of-sequence when:
-  //   - The SUCCESSOR has actualized (started or finished) the date that this
-  //     relationship constrains
-  //   - BUT the PREDECESSOR has NOT yet actualized the date this relationship
-  //     requires (per the FS/SS/FF/SF rule)
-  //
-  // Practical examples:
-  //   FS:  succ has act_start but pred has no act_end → OOS
-  //   SS:  succ has act_start but pred has no act_start → OOS
-  //   FF:  succ has act_end   but pred has no act_end → OOS
-  //   SF:  succ has act_end   but pred has no act_start → OOS
-  //
-  // This is the CLASSIC real-world OOS — "you progressed a successor without
-  // updating its predecessor's status." It does NOT include "date mismatch
-  // between two completed activities" which P6 treats as already-resolved.
-  //
-  // Dedupe by successor task_id — one activity counts once regardless of how
-  // many of its predecessors are missing actuals. Matches P6's count.
-  // -------------------------------------------------------------------------
   const oosMap = new Map<string, OutOfSequence>()
   for (const r of relationships) {
     const t = tasks[r.task_id]
     const p = tasks[r.pred_task_id]
     if (!t || !p) continue
-
-    let predAnchorDate = ''
-    let succActualDate = ''
-    let predAnchorKind = ''     // what the predecessor needed to do (finished/started)
-    let succActualKind = ''     // what the successor already did (finished/started)
-
+    const lagMs = parseFloat(r.lag_hr_cnt || '0') * HOUR_MS
+    if (isNaN(lagMs)) continue
+    let predAnchorMs: number | null = null
+    let succActualMs: number | null = null
+    let predAnchorDateStr = ''
+    let succActualDateStr = ''
+    let kindLabel = ''
     switch (r.pred_type) {
       case 'PR_FS':
-        predAnchorDate = p.act_end_date
-        succActualDate = t.act_start_date
-        predAnchorKind = 'finished'
-        succActualKind = 'started'
+        predAnchorMs = dateMs(p.act_end_date)
+        succActualMs = dateMs(t.act_start_date)
+        predAnchorDateStr = p.act_end_date
+        succActualDateStr = t.act_start_date
+        kindLabel = 'finished'
         break
       case 'PR_SS':
-        predAnchorDate = p.act_start_date
-        succActualDate = t.act_start_date
-        predAnchorKind = 'started'
-        succActualKind = 'started'
+        predAnchorMs = dateMs(p.act_start_date)
+        succActualMs = dateMs(t.act_start_date)
+        predAnchorDateStr = p.act_start_date
+        succActualDateStr = t.act_start_date
+        kindLabel = 'started'
         break
       case 'PR_FF':
-        predAnchorDate = p.act_end_date
-        succActualDate = t.act_end_date
-        predAnchorKind = 'finished'
-        succActualKind = 'finished'
+        predAnchorMs = dateMs(p.act_end_date)
+        succActualMs = dateMs(t.act_end_date)
+        predAnchorDateStr = p.act_end_date
+        succActualDateStr = t.act_end_date
+        kindLabel = 'finished'
         break
       case 'PR_SF':
-        predAnchorDate = p.act_start_date
-        succActualDate = t.act_end_date
-        predAnchorKind = 'started'
-        succActualKind = 'finished'
+        predAnchorMs = dateMs(p.act_start_date)
+        succActualMs = dateMs(t.act_end_date)
+        predAnchorDateStr = p.act_start_date
+        succActualDateStr = t.act_end_date
+        kindLabel = 'started'
         break
       default:
         continue
     }
-
-    // P6 OOS rule: succ has its required actual, pred does not.
-    // Skip if either condition fails (no OOS to report).
-    const succHasActual = !!succActualDate && dateMs(succActualDate) !== null
-    const predHasActual = !!predAnchorDate && dateMs(predAnchorDate) !== null
-    if (!succHasActual || predHasActual) continue
-
+    if (predAnchorMs === null || succActualMs === null) continue
+    const requiredMs = predAnchorMs + lagMs
+    const violated = succActualMs < requiredMs
+    if (!violated) continue
+    const varianceDays = Math.max(0, Math.round((requiredMs - succActualMs) / DAY_MS))
+    const lagHours = lagMs / HOUR_MS
     const relLabel = relTypeLabel(r.pred_type)
+    const succAction = (r.pred_type === 'PR_FS' || r.pred_type === 'PR_SS') ? 'started' : 'finished'
+    let lagPhrase = ''
+    if (lagHours > 0) {
+      const lagDays = Math.round(lagHours / 24)
+      lagPhrase = ` (${relLabel} + ${lagDays} day lag)`
+    } else if (lagHours < 0) {
+      const leadDays = Math.round(Math.abs(lagHours) / 24)
+      lagPhrase = ` (${relLabel} − ${leadDays} day lead allowed)`
+    } else {
+      lagPhrase = ` (${relLabel}, no lag)`
+    }
     const description =
-      `${t.task_code} ${succActualKind} ${succActualDate.slice(0, 16)}, ` +
-      `but predecessor ${p.task_code} has not ${predAnchorKind} yet (${relLabel}).`
-
+      `Predecessor ${p.task_code} ${kindLabel} ${predAnchorDateStr?.slice(0, 16) || '—'}, ` +
+      `but ${t.task_code} ${succAction} ${succActualDateStr?.slice(0, 16) || '—'} ` +
+      `— ${varianceDays} day${varianceDays === 1 ? '' : 's'} too early${lagPhrase}.`
     const violation: SequenceViolation = {
       pred: p,
       relType: r.pred_type,
       relTypeLabel: relLabel,
-      predDate: '',                                    // pred hasn't acted yet
-      succDate: succActualDate,
-      requiredDate: '',                                // no required date — pred is missing
-      lagHours: parseFloat(r.lag_hr_cnt || '0'),
-      varianceDays: 0,                                 // not applicable; pred never started
+      predDate: predAnchorDateStr,
+      succDate: succActualDateStr,
+      requiredDate: fmtDate(requiredMs),
+      lagHours,
+      varianceDays,
       description,
     }
-
     let category = 'Other'
     if (t.task_code?.includes('PRO-') || t.task_code?.includes('PROC')) category = 'Procurement'
     else if (t.task_code?.includes('PRE-CON')) category = 'Pre-Construction'
-
     const existing = oosMap.get(t.task_id)
     if (existing) {
       existing.predecessors.push(p)
@@ -719,6 +729,28 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       act_end_date: t.act_end_date,
     }))
 
+  // Day 15 — Trace Logic: lightweight dict of ALL tasks (incl. complete),
+  // keyed by task_id, so the Trace Logic view can walk pred/succ chains
+  // without re-parsing the XER. The relationships array is passed through
+  // as the edge list.
+  const traceTasks: Record<string, TraceTask> = {}
+  for (const t of taskArr) {
+    traceTasks[t.task_id] = {
+      task_id: t.task_id,
+      task_code: t.task_code,
+      task_name: t.task_name,
+      status_code: t.status_code,
+      task_type: t.task_type,
+      total_float_hr_cnt: t.total_float_hr_cnt,
+      early_start_date: t.early_start_date,
+      early_end_date: t.early_end_date,
+      act_start_date: t.act_start_date,
+      act_end_date: t.act_end_date,
+      target_start_date: t.target_start_date,
+      target_end_date: t.target_end_date,
+    }
+  }
+
   return {
     totalActivities: taskArr.length,
     complete, inProgress, notStarted, negativeFloat,
@@ -732,6 +764,8 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     longestPathActivities,
     submittals,
     allTasksForPaths,  // Day 10
+    traceRelationships: relationships,  // Day 15 — Trace Logic
+    traceTasks,                          // Day 15 — Trace Logic
     healthScore, condition, delayDays,
     dataDate: parsed.dataDate,
     projectStartDate, projectStartSource,
