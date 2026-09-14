@@ -17,6 +17,7 @@ export interface Task {
   target_start_date: string
   target_end_date: string
   clndr_id: string
+  wbs_id?: string
 }
 export interface Calendar {
   clndr_id: string
@@ -34,6 +35,11 @@ export interface Relationship {
 // Day 15 — Trace Logic: lightweight task shape stored for every activity so
 // the Trace Logic view can walk predecessor/successor chains without needing
 // the full Task record or a re-parse of the XER.
+//
+// Brick 1 (construction logic) — RAW WBS fields added. These are the schedule's
+// own work-breakdown truth, untouched. Building/level/area/system SCOPE is NOT
+// derived here — the Step 2 engine infers scope live from wbsPath + activity
+// text + codes, so scope inference can improve without a re-upload.
 export interface TraceTask {
   task_id: string
   task_code: string
@@ -41,12 +47,26 @@ export interface TraceTask {
   status_code: string
   task_type: string
   total_float_hr_cnt: string
+  driving_path_flag?: string
   early_start_date: string
   early_end_date: string
   act_start_date: string
   act_end_date: string
   target_start_date: string
   target_end_date: string
+  // raw WBS — source truth, no inference
+  wbs_id?: string
+  wbs_name?: string
+  parent_wbs_id?: string
+  wbs_path?: string[]   // full ancestry, project root → leaf
+}
+
+// Brick 1 — raw WBS hierarchy node, preserved exactly as the XER has it.
+export interface WbsNode {
+  wbs_id: string
+  wbs_name: string
+  parent_wbs_id?: string
+  full_path: string[]   // names, project root → this node
 }
 export interface ParsedXER {
   projectName: string
@@ -58,6 +78,7 @@ export interface ParsedXER {
   predMap: Record<string, string[]>
   succMap: Record<string, string[]>
   calendars: Record<string, Calendar>
+  wbsNodes: Record<string, WbsNode>   // Brick 1 — raw WBS hierarchy
 }
 export interface XERAnalysis {
   totalActivities: number
@@ -81,6 +102,7 @@ export interface XERAnalysis {
   allTasksForPaths?: Task[]  // Day 10 — Multiple Float Paths source data
   traceRelationships?: Relationship[]      // Day 15 — Trace Logic edge list
   traceTasks?: Record<string, TraceTask>   // Day 15 — Trace Logic node dict
+  wbsNodes?: Record<string, WbsNode>       // Brick 1 — raw WBS hierarchy
   healthScore: number
   condition: string
   delayDays: number
@@ -158,6 +180,7 @@ export function parseXER(content: string): ParsedXER {
   const tasks: Record<string, Task> = {}
   const relationships: Relationship[] = []
   const calendars: Record<string, Calendar> = {}
+  const wbsRaw: Record<string, { wbs_id: string; wbs_name: string; parent_wbs_id?: string }> = {}
   let projectName = ''
   let dataDate = ''
   let contractEnd = ''
@@ -190,7 +213,34 @@ export function parseXER(content: string): ParsedXER {
         const rel: any = {}
         currentFields.forEach((f, i) => rel[f] = values[i] || '')
         relationships.push(rel as Relationship)
+      } else if (currentTable === 'PROJWBS') {
+        // Brick 1 — raw WBS hierarchy, preserved exactly as the XER has it.
+        const row: any = {}
+        currentFields.forEach((f, i) => row[f] = values[i] || '')
+        if (row.wbs_id) {
+          wbsRaw[row.wbs_id] = {
+            wbs_id: row.wbs_id,
+            wbs_name: row.wbs_name || '',
+            parent_wbs_id: row.parent_wbs_id || undefined,
+          }
+        }
       }
+    }
+  }
+  // Brick 1 — build the WbsNode map with full ancestry paths (root → leaf).
+  const wbsNodes: Record<string, WbsNode> = {}
+  const pathOf = (wid: string | undefined, guard = 0): string[] => {
+    if (!wid || !wbsRaw[wid] || guard > 50) return []
+    const node = wbsRaw[wid]
+    return [...pathOf(node.parent_wbs_id, guard + 1), node.wbs_name]
+  }
+  for (const wid of Object.keys(wbsRaw)) {
+    const n = wbsRaw[wid]
+    wbsNodes[wid] = {
+      wbs_id: n.wbs_id,
+      wbs_name: n.wbs_name,
+      parent_wbs_id: n.parent_wbs_id,
+      full_path: pathOf(wid),
     }
   }
   const predMap: Record<string, string[]> = {}
@@ -201,10 +251,10 @@ export function parseXER(content: string): ParsedXER {
     if (!succMap[r.pred_task_id]) succMap[r.pred_task_id] = []
     succMap[r.pred_task_id].push(r.task_id)
   }
-  return { projectName, dataDate, contractEnd, projectedEnd, tasks, relationships, predMap, succMap, calendars }
+  return { projectName, dataDate, contractEnd, projectedEnd, tasks, relationships, predMap, succMap, calendars, wbsNodes }
 }
 export function analyzeXER(parsed: ParsedXER): XERAnalysis {
-  const { tasks, relationships, predMap, succMap, calendars } = parsed
+  const { tasks, relationships, predMap, succMap, calendars, wbsNodes } = parsed
   const taskArr = Object.values(tasks)
   const getCalendar = (t: Task) => calendars[t.clndr_id]
   // ==========================================================================
@@ -735,6 +785,7 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   // as the edge list.
   const traceTasks: Record<string, TraceTask> = {}
   for (const t of taskArr) {
+    const wnode = t.wbs_id ? wbsNodes[t.wbs_id] : undefined
     traceTasks[t.task_id] = {
       task_id: t.task_id,
       task_code: t.task_code,
@@ -742,12 +793,18 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       status_code: t.status_code,
       task_type: t.task_type,
       total_float_hr_cnt: t.total_float_hr_cnt,
+      driving_path_flag: t.driving_path_flag,
       early_start_date: t.early_start_date,
       early_end_date: t.early_end_date,
       act_start_date: t.act_start_date,
       act_end_date: t.act_end_date,
       target_start_date: t.target_start_date,
       target_end_date: t.target_end_date,
+      // Brick 1 — raw WBS truth (no inference)
+      wbs_id: t.wbs_id,
+      wbs_name: wnode?.wbs_name,
+      parent_wbs_id: wnode?.parent_wbs_id,
+      wbs_path: wnode?.full_path,
     }
   }
 
@@ -766,6 +823,7 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     allTasksForPaths,  // Day 10
     traceRelationships: relationships,  // Day 15 — Trace Logic
     traceTasks,                          // Day 15 — Trace Logic
+    wbsNodes,                            // Brick 1 — raw WBS hierarchy
     healthScore, condition, delayDays,
     dataDate: parsed.dataDate,
     projectStartDate, projectStartSource,
