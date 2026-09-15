@@ -419,6 +419,7 @@ export default function Sidebar({ user }: SidebarProps) {
     { href: '/dashboard/report', icon: '📄', label: 'Complete Report', requires: 'view' as const },
     { href: '/dashboard/lens', icon: '🔍', label: 'Schedule Analysis', requires: 'view' as const },
     { href: '/dashboard/trace', icon: '🧭', label: 'Trace Logic', requires: 'view' as const },
+    { href: '/dashboard/approval', icon: '✅', label: 'Approval Readiness', requires: 'view' as const },
     { href: '/dashboard/evm', icon: '💰', label: 'Earned Value', requires: 'advanced' as const },
     { href: '/dashboard/risks', icon: '⚠', label: 'Risks & Issues', requires: 'view' as const },
     { href: '/dashboard/procurement', icon: '🚚', label: 'Procurement', requires: 'view' as const },
