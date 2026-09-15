@@ -15,9 +15,9 @@
 // hardcodes scoring numbers — they come from the evaluator/framework.
 // =============================================================================
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { getActiveProject, getActiveVersion } from '@/lib/projectStore'
+import { getActiveProject, getActiveVersion, updateVersionApprovalResult } from '@/lib/projectStore'
 import { evaluateApprovalReadiness } from '@/lib/approval-readiness/evaluator'
 import type { ApprovalReadinessResult, ApprovalMode, ApprovalFinding } from '@/lib/approval-readiness/types'
 
@@ -33,29 +33,46 @@ function gradeColor(grade: string): string {
 
 export default function ApprovalReadinessPage() {
   const [project, setProject] = useState<any>(null)
+  const [version, setVersion] = useState<any>(null)
   const [analysis, setAnalysis] = useState<any>(null)
   const [ready, setReady] = useState(false)
   const [mode, setMode] = useState<ApprovalMode>('PRE_SUBMISSION')
-  const [ran, setRan] = useState(false)
+  const [result, setResult] = useState<ApprovalReadinessResult | null>(null)
+  const [running, setRunning] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
 
+  // Load project/version, and REHYDRATE a previously-run result so it persists
+  // across navigation (stored on the version via projectStore).
   useEffect(() => {
     const p = getActiveProject()
     setProject(p)
     const v = getActiveVersion(p)
+    setVersion(v)
     setAnalysis(v?.analysis || null)
+    if (v?.approvalResult) {
+      setResult(v.approvalResult as ApprovalReadinessResult)
+      if (v.approvalResult.mode) setMode(v.approvalResult.mode)
+    }
     setReady(true)
   }, [])
 
-  const result: ApprovalReadinessResult | null = useMemo(() => {
-    if (!ran || !analysis) return null
+  function runCheck() {
+    if (!analysis) return
+    setRunning(true)
     try {
-      return evaluateApprovalReadiness(analysis, { mode, projectType: 'ALL' })
+      const res = evaluateApprovalReadiness(analysis, { mode, projectType: 'ALL' })
+      setResult(res)
+      // persist so it survives leaving the page
+      if (res && project?.id && version?.id) {
+        try { updateVersionApprovalResult(project.id, version.id, res) } catch {}
+      }
     } catch (e) {
       console.error('[approval] evaluation failed:', e)
-      return null
+      setResult(null)
+    } finally {
+      setRunning(false)
     }
-  }, [ran, analysis, mode])
+  }
 
   if (!ready) return <Shell><div className="p-6 text-sm text-slate-500">Loading…</div></Shell>
 
@@ -95,28 +112,28 @@ export default function ApprovalReadinessPage() {
       <div className="rounded-2xl border border-slate-200 bg-white p-4 mb-4">
         <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-700 mb-2">Select mode</div>
         <div className="flex flex-wrap items-center gap-3">
-          <ModeButton active={mode === 'PRE_SUBMISSION'} onClick={() => { setMode('PRE_SUBMISSION'); setRan(false) }}
+          <ModeButton active={mode === 'PRE_SUBMISSION'} onClick={() => { setMode('PRE_SUBMISSION') }}
             title="Pre-Submission Check" sub="Contractor — check before you submit" />
-          <ModeButton active={mode === 'REVIEWER'} onClick={() => { setMode('REVIEWER'); setRan(false) }}
+          <ModeButton active={mode === 'REVIEWER'} onClick={() => { setMode('REVIEWER') }}
             title="Reviewer Check" sub="Owner / PM — verify before you approve" />
-          <button onClick={() => setRan(true)}
-            className="ml-auto text-white text-[13px] font-bold px-5 py-2.5 rounded-lg" style={{ background: COLORS.blue }}>
-            Run Approval Readiness Check
+          <button onClick={runCheck} disabled={running}
+            className="ml-auto text-white text-[13px] font-bold px-5 py-2.5 rounded-lg disabled:opacity-60" style={{ background: COLORS.blue }}>
+            {running ? 'Running…' : result ? 'Re-run Check' : 'Run Approval Readiness Check'}
           </button>
         </div>
       </div>
 
-      {!ran && (
+      {!result && !running && (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
           <div className="text-2xl mb-2">☝️</div>
           <div className="text-[13px] font-bold" style={{ color: COLORS.ink }}>Choose a mode and run the check</div>
-          <div className="text-[11px] text-slate-500 mt-1">Control Lens will score the schedule and surface what requires attention.</div>
+          <div className="text-[11px] text-slate-500 mt-1">Control Lens will score the schedule and surface what requires attention. The result stays here when you leave and return.</div>
         </div>
       )}
 
-      {ran && !result && (
+      {running && !result && (
         <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-[13px] text-slate-500">
-          Could not evaluate this schedule. Try re-uploading the XER.
+          Running check…
         </div>
       )}
 

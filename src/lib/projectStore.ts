@@ -89,6 +89,7 @@ export interface ScheduleVersion {
   fileName: string
   analysis: any
   aiNarrative?: string
+  approvalResult?: any   // cached Approval Readiness result (persists across navigation)
   context?: any
   versionLabel?: string
   rawXER?: string
@@ -1276,4 +1277,34 @@ export function updateVersionNarrative(
 
 export function migrateLegacyData() {
   // No longer needed — hydrate() handles migration.
+}
+
+// Persist the Approval Readiness result on a version so it survives leaving
+// and returning to the Approval Readiness page (mirrors updateVersionNarrative).
+// Pass null to clear.
+export function updateVersionApprovalResult(
+  projectId: string,
+  versionId: string,
+  result: any | null
+): boolean {
+  const idx = _projects.findIndex(p => p.id === projectId)
+  if (idx === -1) return false
+  const project = _projects[idx]
+  const verIdx = project.versions.findIndex(v => v.id === versionId)
+  if (verIdx === -1) return false
+  const updatedVersions = [...project.versions]
+  updatedVersions[verIdx] = {
+    ...updatedVersions[verIdx],
+    approvalResult: result || undefined,
+  }
+  const updated: Project = {
+    ...project,
+    versions: updatedVersions,
+  }
+  _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
+  notifyListeners()
+  idbPutProject(updated).catch(err => {
+    console.error('[ControlLens] updateVersionApprovalResult: IndexedDB persist failed:', err)
+  })
+  return true
 }
