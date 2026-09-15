@@ -237,7 +237,8 @@ export function runConstructionReview(analysis: {
   const pct = (x: number) => Math.round((100 * x) / N)
 
   // ---- group Phase → Discipline → System -------------------------------------
-  const bucketCounts = Object.fromEntries(Object.keys(BUCKET_LABEL).map(k => [k, 0])) as Record<FindingBucket, number>
+  const bucketCounts = {} as Record<FindingBucket, number>
+  for (const k of Object.keys(BUCKET_LABEL)) bucketCounts[k as FindingBucket] = 0
   for (const f of findings) bucketCounts[f.bucket]++
 
   const byPhase = new Map<string, ReviewFinding[]>()
@@ -257,7 +258,7 @@ export function runConstructionReview(analysis: {
       phase: p,
       phaseLabel: p === 'UNCLASSIFIED' ? 'Unclassified' : PHASE_LABEL[p as ProjectPhase],
       count: list.length,
-      disciplines: [...byDisc.entries()].map(([discipline, dfindings]) => {
+      disciplines: Array.from(byDisc.entries()).map(([discipline, dfindings]) => {
         const bySys = new Map<string, ReviewFinding[]>()
         for (const f of dfindings) {
           const s = f.system || 'General'
@@ -265,7 +266,7 @@ export function runConstructionReview(analysis: {
         }
         return {
           discipline, count: dfindings.length,
-          systems: [...bySys.entries()].map(([system, sf]) => ({ system, findings: sf })),
+          systems: Array.from(bySys.entries()).map(([system, sf]) => ({ system, findings: sf })),
         }
       }),
     }
