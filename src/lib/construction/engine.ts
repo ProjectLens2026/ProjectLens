@@ -69,11 +69,20 @@ export interface CompleteXerPath {
 }
 
 export interface SequencingMemo {
+  /** Plain-English finding written for a PM/owner, not a P6 diagnostic log. */
+  whatControlLensFound: string
+  /** Why the condition matters to schedule credibility / construction execution. */
+  whyThisMatters: string
+  /** Kept for backward compatibility with the first Brick-2 UI. */
   scheduleCondition: string
   xerSequence: string[]
+  /** One-sentence translation of FS/SS/FF/SF into normal language. */
+  xerLogicMeaning: string
   clReferenceSequence: string[]
   clAssessment: string
   recommendedAction: string
+  /** Raw schedule evidence belongs behind Technical Details, not in the headline. */
+  technicalDetails: string[]
 }
 
 export interface ReviewFinding {
@@ -132,6 +141,7 @@ function looksLikeMilestoneName(n: string): boolean {
   return /(complete|completed|readiness|ready for|turnover|substantial|final completion|dry-in|dry in|weather.?tight|available|accepted|approved)/.test(s)
 }
 function clean(v?: string): string { return (v || '').trim() }
+function findingId(n: number): string { const x = String(n); return 'SQ-' + ('000' + x).slice(-3) }
 function norm(v?: string): string { return clean(v).toLowerCase() }
 
 /** Lightweight scope comparison only. It does NOT overwrite raw WBS. */
@@ -165,10 +175,10 @@ function nodeFor(id: string, tasks: Record<string, TraceTask>, cls: Record<strin
     id,
     code: t.task_code,
     name: t.task_name,
-    phase: c && c.phase,
-    discipline: c && c.discipline,
-    system: c && c.system,
-    stage: c && c.stage,
+    phase: c ? c.phase : undefined,
+    discipline: c ? c.discipline : undefined,
+    system: c ? c.system : undefined,
+    stage: c ? c.stage : undefined,
     wbsPath: (t as any).wbs_path,
   }
 }
@@ -196,7 +206,7 @@ function buildCompletePath(
 
   const walk = (start: string, adj: Record<string, string[]>, out: Set<string>) => {
     const q = [start]
-    const seen = new Set<string>([start])
+    const seen = new Set<string>(); seen.add(start)
     while (q.length) {
       const cur = q.shift()!
       for (const next of adj[cur] || []) {
@@ -209,7 +219,7 @@ function buildCompletePath(
   walk(focusId, predAdj, upstream)
   walk(focusId, succAdj, downstream)
 
-  const ids = new Set<string>([focusId])
+  const ids = new Set<string>(); ids.add(focusId)
   upstream.forEach(x => ids.add(x)); downstream.forEach(x => ids.add(x))
   const nodes: XerPathNode[] = []
   ids.forEach(id => { const n = nodeFor(id, tasks, cls); if (n) nodes.push(n) })
@@ -262,28 +272,100 @@ function referenceSequenceFor(pred: TraceTask, succ: TraceTask, pc?: Classificat
   return ['Control Lens reference rule not yet authored for this relationship', 'Preserve actual XER dates', 'Review technical necessity of the relationship before changing logic']
 }
 
+function relationMeaning(
+  pred: TraceTask,
+  succ: TraceTask,
+  relationship: string,
+  lagDays: number,
+): string {
+  const lagText = lagDays > 0 ? ` plus a ${lagDays}-day lag` : ''
+  if (relationship === 'Finish-to-Start') return `The XER requires ${pred.task_code} — ${pred.task_name} to finish before ${succ.task_code} — ${succ.task_name} can start${lagText}.`
+  if (relationship === 'Start-to-Start') return `The XER requires ${pred.task_code} — ${pred.task_name} to start before ${succ.task_code} — ${succ.task_name} can start${lagText}.`
+  if (relationship === 'Finish-to-Finish') return `The XER requires ${pred.task_code} — ${pred.task_name} to reach its finish before ${succ.task_code} — ${succ.task_name} can reach its finish${lagText}.`
+  if (relationship === 'Start-to-Finish') return `The XER ties the finish of ${succ.task_code} — ${succ.task_name} to the start of ${pred.task_code} — ${pred.task_name}${lagText}. This uncommon relationship should be reviewed carefully.`
+  return `The XER links ${pred.task_code} — ${pred.task_name} to ${succ.task_code} — ${succ.task_name} using ${relationship}${lagText}.`
+}
+
+function dateLabel(value?: string): string {
+  if (!value) return 'no recorded actual date'
+  const d = new Date(value.replace(' ', 'T'))
+  if (isNaN(d.getTime())) return value
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`
+}
+
+function actualEvidence(pred: TraceTask, succ: TraceTask, relationship: string): { predDate?: string; succDate?: string; sentence: string } {
+  let predDate: string | undefined
+  let succDate: string | undefined
+  let sentence = ''
+  if (relationship === 'Finish-to-Start') {
+    predDate = pred.act_end_date; succDate = succ.act_start_date
+    sentence = `${succ.task_code} — ${succ.task_name} started on ${dateLabel(succDate)}, while ${pred.task_code} — ${pred.task_name} did not finish until ${dateLabel(predDate)}.`
+  } else if (relationship === 'Start-to-Start') {
+    predDate = pred.act_start_date; succDate = succ.act_start_date
+    sentence = `${succ.task_code} — ${succ.task_name} started on ${dateLabel(succDate)}, before ${pred.task_code} — ${pred.task_name} started on ${dateLabel(predDate)}.`
+  } else if (relationship === 'Finish-to-Finish') {
+    predDate = pred.act_end_date; succDate = succ.act_end_date
+    sentence = `${succ.task_code} — ${succ.task_name} finished on ${dateLabel(succDate)}, before ${pred.task_code} — ${pred.task_name} finished on ${dateLabel(predDate)}.`
+  } else {
+    predDate = pred.act_start_date; succDate = succ.act_end_date
+    sentence = `${succ.task_code} — ${succ.task_name} finished on ${dateLabel(succDate)}, before ${pred.task_code} — ${pred.task_name} started on ${dateLabel(predDate)}.`
+  }
+  return { predDate, succDate, sentence }
+}
+
 function makeMemo(
   succ: TraceTask,
   pred: TraceTask,
   relationship: string,
+  lagDays: number,
+  lagHours: number,
   variance: number,
   bucket: FindingBucket,
   recommendation: string,
   pc: ClassificationResult,
   sc: ClassificationResult,
 ): SequencingMemo {
-  const condition = `${succ.task_code} — ${succ.task_name} actualized ${variance} day${variance === 1 ? '' : 's'} earlier than permitted by the XER ${relationship} relationship from ${pred.task_code} — ${pred.task_name}.`
-  let assessment = 'The actual dates conflict with the XER relationship. Control Lens does not yet have an authored rule establishing that this relationship is technically required, so the condition requires schedule/field review rather than an automatic construction-failure conclusion.'
-  if (bucket === 'CONSTRUCTION_SEQUENCE') assessment = 'The actual dates conflict with the XER relationship and the relationship aligns with a recognized physical, testing, or permitting prerequisite. This is a stronger construction-sequence concern and should be validated against the contract, approved plans, and field records.'
-  if (bucket === 'LIKELY_INCORRECT_RELATIONSHIP') assessment = 'The predecessor and successor classify to different construction systems. The XER relationship may be cross-linking work that does not share a direct technical prerequisite. Validate the intended dependency before preserving this logic.'
-  if (bucket === 'PHASING_LOCATION') assessment = 'The activities classify to the same system but different apparent work areas/locations. The XER may be using a project-wide relationship where location-based or workfront sequencing better represents actual execution.'
+  const logicMeaning = relationMeaning(pred, succ, relationship, lagDays)
+  const evidence = actualEvidence(pred, succ, relationship)
+  const varianceText = `${variance} day${variance === 1 ? '' : 's'}`
+
+  // The first sentence tells a PM what the schedule says; the second tells them what
+  // actually happened. Raw P6 terminology is deliberately pushed to Technical Details.
+  const found = `${logicMeaning} Actual progress does not follow that sequence: ${evidence.sentence} The recorded work therefore occurred ${varianceText} earlier than the current XER logic would allow.`
+
+  let why = 'This is a schedule-logic conflict, but it does not by itself prove that the field work was performed incorrectly. The reviewer needs to determine whether the actual dates are wrong, the relationship no longer represents the intended sequence, or the work was legitimately resequenced.'
+  let assessment = 'Control Lens found a conflict between recorded actual progress and the accepted XER relationship. No authored construction rule currently establishes that this exact relationship is technically mandatory, so the condition should remain a review item until the project basis is verified.'
+
+  if (bucket === 'CONSTRUCTION_SEQUENCE') {
+    why = 'This relationship aligns with a recognized physical, testing, environmental, or permitting prerequisite. Proceeding out of sequence may affect safety, quality, inspections, acceptance, or downstream readiness, so this condition deserves stronger review than a simple P6 date conflict.'
+    assessment = 'Control Lens recognizes a construction prerequisite behind this relationship. The schedule conflict may therefore represent a genuine sequencing concern, subject to confirmation against the contract, approved plans, permits, inspection requirements, and field records.'
+  } else if (bucket === 'LIKELY_INCORRECT_RELATIONSHIP') {
+    why = 'The two activities classify to different construction systems. Cross-system relationships can be valid, but this one may be tying the successor to work that is not its real construction driver. Leaving an unsupported relationship in place can distort float, critical-path visibility, and forecast dates.'
+    assessment = 'Control Lens sees a possible cross-system logic problem. The relationship should be preserved only if the contractor can explain the technical or contractual dependency; otherwise the schedule should be tied to the actual construction driver.'
+  } else if (bucket === 'PHASING_LOCATION') {
+    why = 'The activities appear to belong to the same system but different work areas or locations. The field may have legitimately progressed by workfront, while the XER uses one broad relationship that forces the entire predecessor activity to finish first. If so, the schedule is masking the contractor’s real phasing strategy.'
+    assessment = 'Control Lens sees a likely workfront/location issue rather than automatic bad field execution. Confirm the contractor’s area-by-area sequence and, if appropriate, model the work with location-based activities or relationships while preserving truthful actual dates.'
+  }
+
+  const technical = [
+    `Predecessor: ${pred.task_code} — ${pred.task_name}`,
+    `Successor: ${succ.task_code} — ${succ.task_name}`,
+    `Relationship: ${relationship}`,
+    `Lag: ${lagHours || 0} hour${Math.abs(lagHours || 0) === 1 ? '' : 's'}${lagDays ? ` (approximately ${lagDays} working day${Math.abs(lagDays) === 1 ? '' : 's'} for display)` : ''}`,
+    `Measured variance: ${varianceText} earlier than the current XER relationship permits`,
+  ]
 
   return {
-    scheduleCondition: condition,
-    xerSequence: [`${pred.task_code} — ${pred.task_name}`, `${relationship}`, `${succ.task_code} — ${succ.task_name}`],
+    whatControlLensFound: found,
+    whyThisMatters: why,
+    scheduleCondition: found,
+    xerSequence: [`${pred.task_code} — ${pred.task_name}`, `${relationship}${lagDays ? ` + ${lagDays}d lag` : ''}`, `${succ.task_code} — ${succ.task_name}`],
+    xerLogicMeaning: logicMeaning,
     clReferenceSequence: referenceSequenceFor(pred, succ, pc, sc),
     clAssessment: assessment,
     recommendedAction: recommendation,
+    technicalDetails: technical,
   }
 }
 
@@ -370,7 +452,7 @@ export function runConstructionReview(analysis: {
 
     const relationship = relLabel(r.pred_type)
     findings.push({
-      id: `SQ-${String(++fid).padStart(3, '0')}`,
+      id: findingId(++fid),
       bucket, severity, confidence,
       activityId: r.task_id,
       activityCode: succ.task_code,
@@ -380,12 +462,18 @@ export function runConstructionReview(analysis: {
       system: sc.system,
       stage: sc.stage,
       wbsPath: (succ as any).wbs_path,
-      headline: `${succ.task_code} ${kind} by ${variance} day${variance === 1 ? '' : 's'}`,
-      detail: `Actual execution conflicts with the ${relationship} relationship from ${pred.task_code} — ${pred.task_name}.`,
+      headline: bucket === 'CONSTRUCTION_SEQUENCE'
+        ? `Construction sequence needs verification for ${succ.task_code} — ${succ.task_name}`
+        : bucket === 'PHASING_LOCATION'
+          ? `Current XER logic may not reflect the field phasing for ${succ.task_code} — ${succ.task_name}`
+          : bucket === 'LIKELY_INCORRECT_RELATIONSHIP'
+            ? `Relationship may not represent the actual construction driver for ${succ.task_code} — ${succ.task_name}`
+            : `Recorded progress does not follow the current XER logic for ${succ.task_code} — ${succ.task_name}`,
+      detail: relationMeaning(pred, succ, relationship, lagDays),
       varianceDays: variance,
       predecessor: { id: r.pred_task_id, code: pred.task_code, name: pred.task_name, relationship, lagDays, lagHours },
       recommendation,
-      memo: makeMemo(succ, pred, relationship, variance, bucket, recommendation, pc, sc),
+      memo: makeMemo(succ, pred, relationship, lagDays, lagHours, variance, bucket, recommendation, pc, sc),
       completeXerPath: buildCompletePath(r.task_id, tasks, rels, cls),
     })
   }
@@ -414,7 +502,7 @@ export function runConstructionReview(analysis: {
       const c = cls[id]
       const recommendation = 'Review the milestone definition and its supporting logic. If these activities are genuine prerequisites, they should drive the completion/readiness milestone. If they are not prerequisites, remove the inappropriate relationships and redefine the milestone basis.'
       milestoneFindings.push({
-        id: `SQ-${String(++fid).padStart(3, '0')}`,
+        id: findingId(++fid),
         bucket: 'MILESTONE_INTEGRITY',
         severity: 4,
         confidence: 'high',
@@ -431,11 +519,15 @@ export function runConstructionReview(analysis: {
         supporting: late.slice(0, 50),
         recommendation,
         memo: {
+          whatControlLensFound: `${mtask.task_code} — ${mtask.task_name} is recorded as complete/ready, but ${late.length} activities currently connected as supporting predecessors finished after that declared completion point. The schedule is therefore saying the milestone was achieved while work represented as a prerequisite was still unfinished.`,
+          whyThisMatters: `A completion or readiness milestone should give the owner a reliable control point. When ${late.length} linked prerequisites finish later, the milestone can no longer be read at face value and may misstate readiness, downstream starts, float, or contractual status. This is one milestone-integrity issue with ${late.length} pieces of supporting evidence — not ${late.length} separate construction failures.`,
           scheduleCondition: `${mtask.task_code} — ${mtask.task_name} is recorded complete/ready while ${late.length} supporting predecessors finish afterward.`,
           xerSequence: late.slice(0, 12).map(x => `${x.code} — ${x.name} (${x.note})`).concat([`→ ${mtask.task_code} — ${mtask.task_name}`]),
+          xerLogicMeaning: `The XER represents these ${late.length} activities as supporting predecessors to ${mtask.task_code} — ${mtask.task_name}, yet the milestone is recorded complete before they finish.`,
           clReferenceSequence: ['Required supporting approvals / prerequisites', '→ Completion / Readiness milestone'],
-          clAssessment: 'The milestone is not supported by its recorded predecessor completion dates. This is primarily a milestone-definition/logic integrity issue, not a collection of independent construction failures.',
+          clAssessment: 'Control Lens identifies a milestone-definition and logic-integrity problem. First determine which linked activities are true requirements for this milestone. Genuine prerequisites should drive the milestone; unrelated activities should not be connected in a way that falsely defines completion.',
           recommendedAction: recommendation,
+          technicalDetails: late.slice(0, 20).map(x => `${x.code} — ${x.name}: ${x.note}`),
         },
         completeXerPath: buildCompletePath(id, tasks, rels, cls),
       })
@@ -471,7 +563,8 @@ export function runConstructionReview(analysis: {
     ;(byPhase.get(key) || byPhase.set(key, []).get(key)!).push(f)
   }
 
-  const orderedPhases = [...PHASE_ORDER, 'UNCLASSIFIED'] as (ProjectPhase | 'UNCLASSIFIED')[]
+  const orderedPhases = PHASE_ORDER.slice() as (ProjectPhase | 'UNCLASSIFIED')[]
+  orderedPhases.push('UNCLASSIFIED')
   const groups = orderedPhases.filter(p => byPhase.has(p)).map(p => {
     const list = byPhase.get(p)!
     const byDisc = new Map<string, ReviewFinding[]>()
