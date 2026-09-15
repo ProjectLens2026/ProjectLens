@@ -198,7 +198,7 @@ export function runConstructionReview(analysis: {
     const mFin = ms(mtask.act_end_date) ?? ms(mtask.early_end_date)
     if (mFin === null) continue
     const preds = predMap[id] || []
-    const late: { code: string; name: string; note: string }[] = []
+    const late: { id: string; code: string; name: string; note: string }[] = []
     for (const p of preds) {
       const pt = tasks[p.pred]; if (!pt) continue
       const pFin = ms(pt.act_end_date) ?? ms(pt.early_end_date)
