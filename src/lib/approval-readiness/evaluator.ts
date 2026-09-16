@@ -100,6 +100,9 @@ function strengthFor(f: ReviewFinding): RuleStrength {
 // otherwise fall back to phase+discipline+system. Prevents both the
 // "General · General" junk drawer and 18 unrelated rows under one finding.
 function consolidationKey(f: ReviewFinding): string {
+  if (f.findingKind === 'KEY_MILESTONE_SUGGESTION') {
+    return `REC:${f.findingKind}:${f.targetMilestone || f.system || f.activityId}`
+  }
   if (f.predecessor) return `PRED:${f.predecessor.id}`
   return `GRP:${f.phase || 'NA'}|${f.discipline || 'General'}|${f.system || 'General'}`
 }
@@ -132,8 +135,11 @@ export function evaluateApprovalReadiness(
     const primaryDomain = mapDomain(rep)
     const ruleStrength = strengthFor(rep)
     const severity = rep.severity
-    const criticalGate = severity >= 5 && (ruleStrength === 'REQUIRED')
-    const deduction = rep.scoreEligible === false ? 0 : computeDeduction(severity, ruleStrength)
+    const kind: ApprovalFinding['kind'] = evidence.every(e => e.scoreEligible === false || e.findingKind === 'KEY_MILESTONE_SUGGESTION')
+      ? 'RECOMMENDATION'
+      : 'FINDING'
+    const criticalGate = kind === 'FINDING' && severity >= 5 && (ruleStrength === 'REQUIRED')
+    const deduction = kind === 'RECOMMENDATION' ? 0 : computeDeduction(severity, ruleStrength)
 
     // affected activities — ID + name always, deduped, cap for display
     const seen = new Set<string>()
@@ -153,6 +159,7 @@ export function evaluateApprovalReadiness(
     const sysLabel = rep.system || 'General'
     findings.push({
       id: `CL-${String(++n).padStart(3, '0')}`,
+      kind,
       primaryDomain,
       phase: rep.phase,
       discipline: rep.discipline,
@@ -162,11 +169,17 @@ export function evaluateApprovalReadiness(
       confidence: rep.confidence,
       criticalGate,
       scoreDeduction: deduction,
-      title: `${disc} · ${sysLabel} — ${evidence.length} related condition${evidence.length === 1 ? '' : 's'}`,
+      title: kind === 'RECOMMENDATION'
+        ? rep.headline
+        : `${disc} · ${sysLabel} — ${evidence.length} related condition${evidence.length === 1 ? '' : 's'}`,
       whatFound: rep.headline + (evidence.length > 1 ? ` (plus ${evidence.length - 1} related)` : ''),
       whyItMatters: rep.detail,
-      reviewerCheck: MODE_LANGUAGE.REVIEWER.voice,
-      preSubmissionNote: MODE_LANGUAGE.PRE_SUBMISSION.voice,
+      reviewerCheck: kind === 'RECOMMENDATION'
+        ? 'Consider whether this control milestone would improve schedule visibility. No revision is required if the schedule already provides an equivalent owner-approved control point.'
+        : MODE_LANGUAGE.REVIEWER.voice,
+      preSubmissionNote: kind === 'RECOMMENDATION'
+        ? 'Consider adding or mapping this control milestone before submission if it improves clarity. This is not a contractual requirement unless the governing documents require it.'
+        : MODE_LANGUAGE.PRE_SUBMISSION.voice,
       referenceRequirement: rep.recommendation,
       affectedActivities: affected.slice(0, 40),
       evidence,
@@ -175,7 +188,12 @@ export function evaluateApprovalReadiness(
   }
 
   // order by materiality then deduction
-  findings.sort((a, b) => (b.criticalGate ? 1 : 0) - (a.criticalGate ? 1 : 0) || b.severity - a.severity || b.scoreDeduction - a.scoreDeduction)
+  findings.sort((a, b) =>
+    (a.kind === 'RECOMMENDATION' ? 1 : 0) - (b.kind === 'RECOMMENDATION' ? 1 : 0) ||
+    (b.criticalGate ? 1 : 0) - (a.criticalGate ? 1 : 0) ||
+    b.severity - a.severity ||
+    b.scoreDeduction - a.scoreDeduction
+  )
 
   // ---- score + gates ----
   const domains = scoreDomains(findings)
@@ -191,6 +209,7 @@ export function evaluateApprovalReadiness(
     recommendation: gates.passed ? recommendation : 'REVISE & RESUBMIT — Critical Approval Gate Failed',
     criticalGates: gates,
     counts,
+    recommendationCount: findings.filter(f => f.kind === 'RECOMMENDATION').length,
     domains,
     findings,
     meta: {

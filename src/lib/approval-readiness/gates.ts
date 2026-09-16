@@ -21,6 +21,7 @@ export function evaluateGates(
   const failed: GateResult['failed'] = []
   for (const gate of activeGates(projectType)) {
     const tripped = findings.some(f =>
+      f.kind !== 'RECOMMENDATION' &&
       (f.criticalGate || gate.triggerDomains.includes(f.primaryDomain)) &&
       gate.triggerDomains.includes(f.primaryDomain) &&
       f.severity >= gate.minSeverity,

@@ -247,6 +247,16 @@ function supplementalActivityClass(name: string): { activityClass?: ActivityClas
  * library. Longest keyword wins, matching the existing conservative classifier.
  * This is annotation only: unresolved activities remain in the raw XER graph.
  */
+function canonicalKeywordMatches(haystack: string, rawKeyword: string): boolean {
+  const kw = (rawKeyword || '').toLowerCase().trim()
+  if (!kw) return false
+  if (/^[a-z0-9]{2,4}$/.test(kw)) {
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i').test(haystack)
+  }
+  return haystack.includes(kw)
+}
+
 function classifyActivityClass(name: string): {
   activityClass?: ActivityClass
   matchLen: number
@@ -261,9 +271,9 @@ function classifyActivityClass(name: string): {
   for (const entry of CLASSIFICATION) {
     for (const raw of entry.keywords || []) {
       const kw = (raw || '').toLowerCase()
-      if (kw && n.includes(kw) && kw.length > matchLen) {
+      if (kw && canonicalKeywordMatches(n, kw) && kw.trim().length > matchLen) {
         activityClass = entry.activityClass
-        matchLen = kw.length
+        matchLen = kw.trim().length
         matchedEntry = entry
       }
     }

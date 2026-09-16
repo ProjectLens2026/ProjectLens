@@ -14,10 +14,12 @@ import {
 export function scoreDomains(findings: ApprovalFinding[]): DomainScore[] {
   return DOMAINS.map(d => {
     const inDomain = findings.filter(f => f.primaryDomain === d.id)
+    const scoringFindings = inDomain.filter(f => f.kind !== 'RECOMMENDATION')
+    const recommendations = inDomain.filter(f => f.kind === 'RECOMMENDATION')
 
     // Diminishing returns: sort each finding's deduction desc, weight the Nth
     // by DIMINISHING_WEIGHTS[N] (tail after). Many small items asymptote.
-    const sorted = inDomain.map(f => f.scoreDeduction).sort((a, b) => b - a)
+    const sorted = scoringFindings.map(f => f.scoreDeduction).sort((a, b) => b - a)
     let deductions = 0
     sorted.forEach((ded, i) => {
       const w = i < DIMINISHING_WEIGHTS.length ? DIMINISHING_WEIGHTS[i] : DIMINISHING_TAIL
@@ -26,7 +28,7 @@ export function scoreDomains(findings: ApprovalFinding[]): DomainScore[] {
 
     // Soft cap: review-level noise can't remove more than a fraction of the
     // domain — UNLESS a genuine REQUIRED failure of real severity exists.
-    const hasRealFailure = inDomain.some(
+    const hasRealFailure = scoringFindings.some(
       f => f.ruleStrength === 'REQUIRED' && f.severity >= REQUIRED_FAILURE_SEVERITY,
     )
     if (!hasRealFailure) {
@@ -41,7 +43,8 @@ export function scoreDomains(findings: ApprovalFinding[]): DomainScore[] {
       maxPoints: d.weight,
       deductions,
       score,
-      findingCount: inDomain.length,
+      findingCount: scoringFindings.length,
+      recommendationCount: recommendations.length,
     }
   })
 }
@@ -58,6 +61,9 @@ export function gradeAndRecommendation(score: number): { grade: Grade; recommend
 
 export function materialityCounts(findings: ApprovalFinding[]): { critical: number; major: number; minor: number } {
   const c = { critical: 0, major: 0, minor: 0 }
-  for (const f of findings) c[materiality(f.severity, f.criticalGate)]++
+  for (const f of findings) {
+    if (f.kind === 'RECOMMENDATION') continue
+    c[materiality(f.severity, f.criticalGate)]++
+  }
   return c
 }

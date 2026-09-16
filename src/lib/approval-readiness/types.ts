@@ -38,11 +38,14 @@ export type Grade = 'A' | 'A-' | 'B+' | 'B' | 'C' | 'D/F'
 export type FindingStatus =
   | 'NEW' | 'OPEN' | 'RESPONDED' | 'PARTIALLY_ADDRESSED' | 'CLOSED' | 'DISMISSED'
 
+export type ApprovalItemKind = 'FINDING' | 'RECOMMENDATION'
+
 // ---------------------------------------------------------------------------
 // The canonical Approval Readiness finding — the full spec fields.
 // ---------------------------------------------------------------------------
 export interface ApprovalFinding {
   id: string                       // e.g. CL-007
+  kind?: ApprovalItemKind           // optional for saved-result compatibility
   primaryDomain: ApprovalDomainId  // ONE scoring domain (ruling 3)
   crossReferencedDomains?: ApprovalDomainId[]
 
@@ -83,6 +86,7 @@ export interface DomainScore {
   deductions: number
   score: number                    // maxPoints - deductions (floored at 0)
   findingCount: number
+  recommendationCount?: number
 }
 
 // The full evaluation result the UI + PDF consume.
@@ -96,6 +100,7 @@ export interface ApprovalReadinessResult {
     failed: { gateId: string; label: string; reason: string }[]
   }
   counts: { critical: number; major: number; minor: number }
+  recommendationCount?: number
   domains: DomainScore[]
   findings: ApprovalFinding[]      // consolidated, ordered by materiality
 
