@@ -318,6 +318,14 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
   const voice = mode === 'PRE_SUBMISSION' ? 'Pre-Submission Check (Contractor)' : 'Reviewer Check (Owner / PM)'
   const gc = gradeColor(result.grade)
 
+  // Report title is hardcoded by WHO is running it:
+  //   Reviewer (owner)      → "Owner's Review Report"
+  //   Pre-Submission (GC)   → "Readiness Report — Before Submission"
+  const reportTitle = mode === 'REVIEWER'
+    ? "Owner's Review Report"
+    : 'Readiness Report — Before Submission'
+  const docKind = kind === 'executive' ? 'Executive Summary' : 'Complete Schedule Control Review'
+
   // executive = critical + major only; complete = everything
   const shown = kind === 'executive'
     ? result.findings.filter(f => f.criticalGate || f.severity >= 3)
@@ -339,9 +347,7 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
       {/* toolbar — hidden on print */}
       <div className="print:hidden bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-3 flex-shrink-0">
         <button onClick={onBack} className="text-[12px] text-slate-500 hover:text-slate-800">‹ Back to workspace</button>
-        <span className="text-[13px] font-bold ml-2" style={{ color: COLORS.ink }}>
-          {kind === 'executive' ? 'Executive Approval Readiness Report' : 'Complete Schedule Control Review'}
-        </span>
+        <span className="text-[13px] font-bold ml-2" style={{ color: COLORS.ink }}>{reportTitle}</span>
         <button onClick={() => window.print()} className="ml-auto text-white text-[12px] font-bold px-4 py-2 rounded-lg" style={{ background: COLORS.blue }}>
           🖨 Save as PDF
         </button>
@@ -351,28 +357,37 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
         <div className="ar-print-doc max-w-[820px] mx-auto bg-white border border-slate-200 print:border-0 p-8 print:p-0">
 
           {/* ── Cover header ─────────────────────────────────────────── */}
-          <div className="flex items-start justify-between border-b-2 pb-4 mb-5" style={{ borderColor: COLORS.ink }}>
-            <div className="flex items-start gap-3">
-              <div className="flex flex-col gap-[3px] mt-1">
-                <span className="block h-[5px] rounded-[1px]" style={{ width: 22, background: COLORS.blue }} />
-                <span className="block h-[5px] rounded-[1px]" style={{ width: 30, background: COLORS.red }} />
-                <span className="block h-[5px] rounded-[1px]" style={{ width: 18, background: COLORS.green }} />
-                <span className="block h-[5px] rounded-[1px]" style={{ width: 25, background: COLORS.slate }} />
+          <div className="border-b-2 pb-4 mb-5" style={{ borderColor: COLORS.ink }}>
+            <div className="flex items-start justify-between">
+              <div className="flex items-start gap-3">
+                <div className="flex flex-col gap-[3px] mt-1">
+                  <span className="block h-[5px] rounded-[1px]" style={{ width: 22, background: COLORS.blue }} />
+                  <span className="block h-[5px] rounded-[1px]" style={{ width: 30, background: COLORS.red }} />
+                  <span className="block h-[5px] rounded-[1px]" style={{ width: 18, background: COLORS.green }} />
+                  <span className="block h-[5px] rounded-[1px]" style={{ width: 25, background: COLORS.slate }} />
+                </div>
+                <div>
+                  <div className="text-[18px] font-extrabold leading-tight" style={{ color: COLORS.ink }}>
+                    CONTROL<span style={{ color: COLORS.blue }}>LENS</span>
+                  </div>
+                  <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500 mt-0.5">
+                    Approval Readiness
+                  </div>
+                </div>
               </div>
-              <div>
-                <div className="text-[20px] font-extrabold leading-tight" style={{ color: COLORS.ink }}>
-                  CONTROL<span style={{ color: COLORS.blue }}>LENS</span>
-                </div>
-                <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500 mt-0.5">
-                  Approval Readiness
-                </div>
+              <div className="text-right">
+                <div className="font-mono text-[10px] text-slate-500">{reportNo}</div>
+                <div className="font-mono text-[10px] text-slate-500">{today}</div>
               </div>
             </div>
-            <div className="text-right">
-              <div className="text-[15px] font-extrabold" style={{ color: COLORS.ink }}>
-                {kind === 'executive' ? 'Executive Approval Readiness Report' : 'Complete Schedule Control Review'}
+            {/* Bold, centered, mode-based title */}
+            <div className="text-center mt-4">
+              <div className="text-[22px] font-extrabold uppercase tracking-wide" style={{ color: COLORS.ink }}>
+                {reportTitle}
               </div>
-              <div className="font-mono text-[10px] text-slate-500 mt-0.5">{reportNo} · {today}</div>
+              <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 mt-1">
+                {docKind}
+              </div>
             </div>
           </div>
 
