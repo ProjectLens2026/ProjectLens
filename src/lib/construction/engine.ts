@@ -17,6 +17,7 @@
 import type { Relationship, TraceTask, WbsNode } from '../xerParser'
 import { classifyActivity, type ClassificationResult, type ProjectPhase, PHASE_ORDER, PHASE_LABEL } from './classify'
 import { RULES } from './library'
+import { REFERENCE_CONTROL_MILESTONES } from './referencePaths'
 import type { ConstructionRule, ActivityClass, ActivityStage, ScopeLevel } from './types'
 
 export type FindingBucket =
@@ -103,6 +104,9 @@ export interface ReviewFinding {
   activityClass?: string
   targetMilestone?: string
   ruleStrengthHint?: 'REQUIRED' | 'EXPECTED' | 'ADVISORY'
+  /** false = recommendation only; display it but do not deduct readiness score. */
+  scoreEligible?: boolean
+  findingKind?: 'KEY_MILESTONE_SUGGESTION'
   wbsPath?: string
   headline: string
   detail: string
@@ -710,7 +714,111 @@ export function runConstructionReview(analysis: {
     }
   }
 
+
   findings = findings.concat(ruleFindings)
+
+  // ---------------------------------------------------------------------------
+  // REFERENCE-PATH PRESENCE / SUGGESTED KEY MILESTONES
+  // ---------------------------------------------------------------------------
+  // Important boundary:
+  //   - These are Control Lens control recommendations, NOT contractual findings.
+  //   - They are non-scoring until a future Contract / Owner Profile explicitly
+  //     marks the same milestone as required.
+  //   - Applicability comes from systems actually detected in the XER, so a
+  //     standard building is not forced to carry data-center-only milestones.
+  // ---------------------------------------------------------------------------
+  const presentClasses = new Set<ActivityClass>()
+  for (const id of Object.keys(cls)) {
+    const ac = cls[id]?.activityClass
+    if (ac) presentClasses.add(ac)
+  }
+
+  function milestoneNameMatch(name: string, aliases: string[]): boolean {
+    const n = norm(name).replace(/[–—_-]+/g, ' ').replace(/\s+/g, ' ')
+    return aliases.some(alias => {
+      const a = norm(alias).replace(/[–—_-]+/g, ' ').replace(/\s+/g, ' ')
+      if (!a) return false
+      if (a === 'rfs') return /(^|\s)rfs($|\s)/.test(n)
+      return n.includes(a)
+    })
+  }
+
+  function isMilestoneTask(t: TraceTask): boolean {
+    const tt = String(t.task_type || '')
+    return tt === 'TT_Mile' || tt === 'TT_FinMile' || tt === 'TT_StartMile' || looksLikeMilestoneName(t.task_name || '')
+  }
+
+  const milestoneSuggestionFindings: ReviewFinding[] = []
+  for (const ref of REFERENCE_CONTROL_MILESTONES) {
+    const anyClass = ref.appliesIfAnyClass.some(c => presentClasses.has(c))
+    const signature = !!ref.appliesIfAllGroups?.length && ref.appliesIfAllGroups.every(group => group.some(c => presentClasses.has(c)))
+    if (!anyClass && !signature) continue
+
+    const equivalentTasks = Object.keys(tasks).filter(id => milestoneNameMatch(tasks[id].task_name || '', ref.aliases))
+    const equivalentMilestones = equivalentTasks.filter(id => isMilestoneTask(tasks[id]))
+    if (equivalentMilestones.length) continue
+
+    // Anchor the recommendation to a real, relevant XER activity so the existing
+    // report/trace components need no redesign.
+    const relevantIds = Object.keys(tasks).filter(id => {
+      const ac = cls[id]?.activityClass
+      return !!ac && ref.appliesIfAnyClass.includes(ac)
+    })
+    const anchorId = equivalentTasks[0] || relevantIds[0]
+    if (!anchorId) continue
+    const anchor = tasks[anchorId]
+    const ac = cls[anchorId]
+    const stateExists = equivalentTasks.length > 0
+
+    const condition = stateExists
+      ? `An equivalent schedule state was identified (${anchor.task_code} — ${anchor.task_name}), but it is not modeled as an identifiable key milestone.`
+      : `Control Lens did not identify an equivalent ${ref.name} milestone in the XER.`
+    const recommendation = `Consider adding “${ref.name}” under the ${ref.recommendedWbs} WBS, or map the existing equivalent control point to it. This is a Control Lens schedule-control recommendation, not a contractual requirement unless the governing contract or owner profile requires it.`
+
+    milestoneSuggestionFindings.push({
+      id: findingId(++fid),
+      bucket: 'NEEDS_REVIEW',
+      severity: 1,
+      confidence: stateExists ? 'high' : 'medium',
+      activityId: anchorId,
+      activityCode: anchor.task_code,
+      activityName: anchor.task_name,
+      phase: ref.approvalArea === 'COMMISSIONING' ? 'STARTUP_COMMISSIONING' : ac.phase,
+      discipline: ref.discipline,
+      system: ref.system,
+      stage: ac.stage,
+      activityClass: ac.activityClass,
+      targetMilestone: ref.name,
+      ruleStrengthHint: 'ADVISORY',
+      scoreEligible: false,
+      findingKind: 'KEY_MILESTONE_SUGGESTION',
+      wbsPath: (anchor as any).wbs_path,
+      headline: `Suggested Key Milestone — ${ref.name}`,
+      detail: `${condition} ${ref.rationale}`,
+      recommendation,
+      memo: {
+        whatControlLensFound: condition,
+        whyThisMatters: ref.rationale,
+        scheduleCondition: condition,
+        xerSequence: stateExists
+          ? [`Existing equivalent state: ${anchor.task_code} — ${anchor.task_name}`]
+          : [`Relevant system evidence: ${anchor.task_code} — ${anchor.task_name}`],
+        xerLogicMeaning: 'Control Lens compared the systems detected in the XER with its reference control-milestone scaffold. This check does not infer a contract requirement.',
+        clReferenceSequence: ref.referencePath,
+        clAssessment: `Adding ${ref.name} as a visible control milestone can improve milestone convergence, executive reporting, and downstream readiness review. It remains optional unless project requirements make it mandatory.`,
+        recommendedAction: recommendation,
+        technicalDetails: [
+          `Reference control milestone: ${ref.id}`,
+          'Classification: Control Lens recommendation only',
+          'Scoring impact: none',
+          `Suggested WBS: ${ref.recommendedWbs}`,
+        ],
+      },
+      completeXerPath: buildCompletePath(anchorId, tasks, rels, cls),
+    })
+  }
+
+  findings = findings.concat(milestoneSuggestionFindings)
 
   // MILESTONE INTEGRITY — consolidate repetitive predecessor conflicts.
   const milestonePairs = new Set<string>()

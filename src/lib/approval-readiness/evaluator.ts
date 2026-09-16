@@ -48,6 +48,14 @@ function mapDomain(f: ReviewFinding): ApprovalDomainId {
   const target = (f.targetMilestone || '').toUpperCase()
   const activityClass = (f.activityClass || '').toUpperCase()
 
+  // Suggested key milestones are advisory schedule-control recommendations,
+  // not contractual failures. Route them to the milestone or commissioning
+  // domain for visibility while keeping them non-scoring.
+  if (f.findingKind === 'KEY_MILESTONE_SUGGESTION') {
+    if (/IST|COMMISSION|CONTROLS|READY FOR SERVICE/.test(target) || /IST|COMMISSION|CONTROLS|READY FOR SERVICE/.test(sys)) return 'AR-06'
+    return 'AR-01'
+  }
+
   // milestone-integrity on a completion/turnover milestone → AR-08, else AR-01
   if (f.bucket === 'MILESTONE_INTEGRITY') {
     if (/turnover|substantial|final|ready for service|occupancy/.test(name)) return 'AR-08'
@@ -125,7 +133,7 @@ export function evaluateApprovalReadiness(
     const ruleStrength = strengthFor(rep)
     const severity = rep.severity
     const criticalGate = severity >= 5 && (ruleStrength === 'REQUIRED')
-    const deduction = computeDeduction(severity, ruleStrength)
+    const deduction = rep.scoreEligible === false ? 0 : computeDeduction(severity, ruleStrength)
 
     // affected activities — ID + name always, deduped, cap for display
     const seen = new Set<string>()
