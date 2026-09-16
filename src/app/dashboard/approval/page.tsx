@@ -40,6 +40,7 @@ export default function ApprovalReadinessPage() {
   const [result, setResult] = useState<ApprovalReadinessResult | null>(null)
   const [running, setRunning] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [reportKind, setReportKind] = useState<null | 'executive' | 'complete'>(null)
 
   // Load project/version, and REHYDRATE a previously-run result so it persists
   // across navigation (stored on the version via projectStore).
@@ -106,6 +107,12 @@ export default function ApprovalReadinessPage() {
     )
   }
 
+  // When a report is requested, render the print-optimized document instead
+  // of the interactive workspace. Built from the same structured result.
+  if (reportKind && result) {
+    return <ApprovalReport result={result} mode={mode} kind={reportKind} project={project} onBack={() => setReportKind(null)} />
+  }
+
   return (
     <Shell project={project}>
       {/* Mode select + run */}
@@ -163,6 +170,16 @@ export default function ApprovalReadinessPage() {
                     {result.criticalGates.failed.map(g => `✗ ${g.label}`).join('  ·  ')}
                   </div>
                 )}
+              </div>
+              <div className="flex flex-col gap-2 flex-shrink-0">
+                <button onClick={() => setReportKind('executive')}
+                  className="text-[11px] font-bold px-3 py-2 rounded-lg text-white" style={{ background: COLORS.ink }}>
+                  📄 Executive Report
+                </button>
+                <button onClick={() => setReportKind('complete')}
+                  className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">
+                  📑 Complete Review
+                </button>
               </div>
             </div>
           </div>
@@ -279,6 +296,203 @@ function ModeButton({ active, onClick, title, sub }: { active: boolean; onClick:
 
 function Chip({ label, color }: { label: string; color: string }) {
   return <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: `${color}18`, color }}>{label}</span>
+}
+
+// =============================================================================
+// ApprovalReport — print-optimized document (Executive or Complete)
+// Built from the structured ApprovalReadinessResult, not scraped from the DOM.
+// Save-as-PDF uses the browser print dialog; the dashboard layout hides the
+// sidebar on print, and the toolbar below is print-hidden.
+// =============================================================================
+function ApprovalReport({ result, mode, kind, project, onBack }: {
+  result: ApprovalReadinessResult
+  mode: ApprovalMode
+  kind: 'executive' | 'complete'
+  project: any
+  onBack: () => void
+}) {
+  const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit' })
+  const code = (project?.projectId || project?.name || 'PRJ').toString().replace(/\s+/g, '').toUpperCase().slice(0, 14)
+  const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  const reportNo = `CL-AR-${code}-${kind === 'executive' ? 'EXEC' : 'FULL'}-${ymd}`
+  const voice = mode === 'PRE_SUBMISSION' ? 'Pre-Submission Check (Contractor)' : 'Reviewer Check (Owner / PM)'
+  const gc = gradeColor(result.grade)
+
+  // executive = critical + major only; complete = everything
+  const shown = kind === 'executive'
+    ? result.findings.filter(f => f.criticalGate || f.severity >= 3)
+    : result.findings
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* toolbar — hidden on print */}
+      <div className="print:hidden bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-3 flex-shrink-0">
+        <button onClick={onBack} className="text-[12px] text-slate-500 hover:text-slate-800">‹ Back to workspace</button>
+        <span className="text-[13px] font-bold ml-2" style={{ color: COLORS.ink }}>
+          {kind === 'executive' ? 'Executive Approval Readiness Report' : 'Complete Schedule Control Review'}
+        </span>
+        <button onClick={() => window.print()} className="ml-auto text-white text-[12px] font-bold px-4 py-2 rounded-lg" style={{ background: COLORS.blue }}>
+          🖨 Save as PDF
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto bg-slate-100 p-6 print:p-0 print:bg-white">
+        <div className="max-w-[820px] mx-auto bg-white border border-slate-200 print:border-0 p-8 print:p-0">
+
+          {/* ── Cover header ─────────────────────────────────────────── */}
+          <div className="flex items-start justify-between border-b-2 pb-4 mb-5" style={{ borderColor: COLORS.ink }}>
+            <div className="flex items-start gap-3">
+              <div className="flex flex-col gap-[3px] mt-1">
+                <span className="block h-[5px] rounded-[1px]" style={{ width: 22, background: COLORS.blue }} />
+                <span className="block h-[5px] rounded-[1px]" style={{ width: 30, background: COLORS.red }} />
+                <span className="block h-[5px] rounded-[1px]" style={{ width: 18, background: COLORS.green }} />
+                <span className="block h-[5px] rounded-[1px]" style={{ width: 25, background: COLORS.slate }} />
+              </div>
+              <div>
+                <div className="text-[20px] font-extrabold leading-tight" style={{ color: COLORS.ink }}>
+                  CONTROL<span style={{ color: COLORS.blue }}>LENS</span>
+                </div>
+                <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500 mt-0.5">
+                  Approval Readiness
+                </div>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[15px] font-extrabold" style={{ color: COLORS.ink }}>
+                {kind === 'executive' ? 'Executive Approval Readiness Report' : 'Complete Schedule Control Review'}
+              </div>
+              <div className="font-mono text-[10px] text-slate-500 mt-0.5">{reportNo} · {today}</div>
+            </div>
+          </div>
+
+          {/* project strip */}
+          <div className="grid grid-cols-3 gap-6 mb-5">
+            <Info label="Project" value={project?.name || '—'} />
+            <Info label="Project Code" value={project?.projectId || '—'} mono />
+            <Info label="Review Mode" value={voice} />
+          </div>
+
+          {/* ── Executive summary block (both reports) ───────────────── */}
+          <SectionBar>Executive Summary</SectionBar>
+          <div className="flex items-center gap-6 mb-4 print:break-inside-avoid">
+            <div className="text-center">
+              <div className="font-mono text-[40px] font-extrabold leading-none" style={{ color: gc }}>
+                {result.totalScore}<span className="text-[18px] text-slate-400">/100</span>
+              </div>
+              <div className="text-[20px] font-extrabold" style={{ color: gc }}>{result.grade}</div>
+            </div>
+            <div className="flex-1">
+              <div className="text-[14px] font-extrabold uppercase tracking-wide mb-1" style={{ color: COLORS.ink }}>{result.recommendation}</div>
+              <div className="text-[11px] text-slate-600">
+                Critical Gates: <b style={{ color: result.criticalGates.passed ? COLORS.green : COLORS.red }}>{result.criticalGates.passed ? 'PASS' : 'FAIL'}</b>
+                {'  ·  '}Critical {result.counts.critical} · Major {result.counts.major} · Minor {result.counts.minor}
+              </div>
+              {!result.criticalGates.passed && (
+                <div className="text-[10px] mt-1" style={{ color: COLORS.red }}>
+                  {result.criticalGates.failed.map(g => `✗ ${g.label} — ${g.reason}`).join('  ·  ')}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* domain table */}
+          <SectionBar>Approval Domains</SectionBar>
+          <table className="w-full text-[11px] mb-5 print:break-inside-avoid">
+            <thead>
+              <tr className="text-left text-[8.5px] uppercase tracking-wider text-slate-500 border-b-2 border-slate-200">
+                <th className="py-1.5 pr-2">Domain</th><th className="py-1.5 pr-2 text-right">Score</th>
+                <th className="py-1.5 pr-2 text-right">Max</th><th className="py-1.5 pr-2 text-right">Findings</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.domains.map(d => {
+                const pf = d.maxPoints > 0 ? (d.score / d.maxPoints) * 100 : 100
+                const c = pf >= 90 ? COLORS.green : pf >= 70 ? COLORS.amber : COLORS.red
+                return (
+                  <tr key={d.domain} className="border-b border-slate-100">
+                    <td className="py-1.5 pr-2"><span className="font-mono font-bold" style={{ color: COLORS.ink }}>{d.domain}</span> {d.label}</td>
+                    <td className="py-1.5 pr-2 text-right font-mono font-bold" style={{ color: c }}>{d.score}</td>
+                    <td className="py-1.5 pr-2 text-right font-mono text-slate-500">{d.maxPoints}</td>
+                    <td className="py-1.5 pr-2 text-right font-mono text-slate-500">{d.findingCount}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+
+          {/* ── Findings ─────────────────────────────────────────────── */}
+          <SectionBar>{kind === 'executive' ? 'Material Findings' : 'All Findings — Detail & Evidence'}</SectionBar>
+          {shown.length === 0 ? (
+            <div className="text-[12px] text-slate-500 italic py-3">No material findings.</div>
+          ) : shown.map(f => (
+            <div key={f.id} className="mb-4 border border-slate-200 rounded-lg overflow-hidden print:break-inside-avoid">
+              <div className="px-3 py-2 border-b border-slate-200 flex items-center gap-2" style={{ background: '#f8fafc' }}>
+                <span className="font-mono text-[10px] font-bold text-white px-1.5 py-0.5 rounded" style={{ background: COLORS.ink }}>{f.id}</span>
+                <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">{f.primaryDomain}</span>
+                <span className="text-[12px] font-extrabold flex-1" style={{ color: COLORS.ink }}>{f.title}</span>
+                <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{f.ruleStrength} · sev {f.severity} · −{f.scoreDeduction}</span>
+              </div>
+              <div className="px-4 py-3 text-[11px]">
+                <Memo label="What Control Lens Found">{f.whatFound}</Memo>
+                <Memo label="Why This Matters">{f.whyItMatters}</Memo>
+                <Memo label={mode === 'PRE_SUBMISSION' ? 'Pre-Submission Note' : 'Reviewer Check'}>
+                  {mode === 'PRE_SUBMISSION' ? f.preSubmissionNote : f.reviewerCheck}
+                </Memo>
+                {kind === 'complete' && <Memo label="Reference">{f.referenceRequirement}</Memo>}
+                {kind === 'complete' && f.affectedActivities.length > 0 && (
+                  <>
+                    <div className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500 mb-1 mt-2">Affected activities</div>
+                    <table className="w-full text-[10.5px]">
+                      <tbody>
+                        {f.affectedActivities.map((a, i) => (
+                          <tr key={i} className="border-b border-slate-50 last:border-0">
+                            <td className="py-1 pr-2 font-mono font-bold w-[22%]" style={{ color: COLORS.ink }}>{a.code}</td>
+                            <td className="py-1 pr-2 text-slate-600">{a.name}</td>
+                            <td className="py-1 text-slate-400 text-[9px] w-[24%]">{a.note || ''}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
+                {kind === 'executive' && f.affectedActivities.length > 0 && (
+                  <div className="text-[10px] text-slate-500 mt-1">
+                    {f.affectedActivities.length} affected activit{f.affectedActivities.length === 1 ? 'y' : 'ies'} — see Complete Review for full evidence.
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {/* footer */}
+          <div className="flex items-center justify-between pt-3 mt-4 border-t-2 text-[10px] text-slate-400" style={{ borderColor: COLORS.ink }}>
+            <span>Generated by <b style={{ color: COLORS.ink }}>ControlLens</b> — Approval Readiness. Advisory; the P6 schedule of record and the authorized reviewer govern. Score is provisional pending calibration.</span>
+            <span className="font-mono">{reportNo}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Info({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div>
+      <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500 mb-1">{label}</div>
+      <div className={`text-[12px] font-semibold ${mono ? 'font-mono' : ''}`} style={{ color: COLORS.ink }}>{value}</div>
+    </div>
+  )
+}
+function SectionBar({ children }: { children: React.ReactNode }) {
+  return <div className="text-[11px] font-extrabold uppercase tracking-wide text-white px-3 py-1.5 rounded mb-3 mt-4" style={{ background: COLORS.ink }}>{children}</div>
+}
+function Memo({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-1.5">
+      <div className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="text-[11px] text-slate-700 leading-relaxed">{children}</div>
+    </div>
+  )
 }
 
 function Shell({ children, project }: { children: React.ReactNode; project?: any }) {
