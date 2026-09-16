@@ -159,16 +159,9 @@ body {
   /* Tabs — show only the active tab content when printing */
   /* (Most pages use conditional rendering so inactive tabs aren't in the DOM) */
 
-  /* Print header for context — only visible on print */
-  body::before {
-    content: "NobelPM Schedule Intelligence Report";
-    display: block;
-    font-size: 9pt;
-    color: #6b7280;
-    border-bottom: 1px solid #e5e7eb;
-    padding-bottom: 4pt;
-    margin-bottom: 8pt;
-  }
+  /* Print header removed — it injected a full-width block at the top of
+     <body> that pushed report content onto page 2, leaving a near-blank
+     first page. Each report already renders its own branded header. */
 
   /* Footer — page number on each page */
   @page {
@@ -178,7 +171,7 @@ body {
       color: #9ca3af;
     }
     @bottom-left {
-      content: "NobelPM · " attr(data-print-date);
+      content: "ControlLens · " attr(data-print-date);
       font-size: 8pt;
       color: #9ca3af;
     }
