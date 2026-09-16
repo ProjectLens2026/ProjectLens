@@ -135,17 +135,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const showPaywall = planInfo?.requiresPayment && !isPathAllowedDuringPaywall(pathname || '')
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-100">
+    <div className="app-shell flex h-screen overflow-hidden bg-slate-100">
       {/* print:hidden — sidebar should not appear in printed pages.
           Each page's main content prints on its own. */}
       <div className="print:hidden">
         <Sidebar user={user} />
       </div>
-      <div className="flex-1 overflow-hidden flex flex-col min-w-0">
+      <div className="app-main flex-1 overflow-hidden flex flex-col min-w-0">
         {!showPaywall && <TrialBanner planInfo={planInfo} />}
         {showPaywall ? <PaywallScreen planInfo={planInfo!} /> : children}
       </div>
-      <HelpWidget />
+      <div className="print:hidden">
+        <HelpWidget />
+      </div>
     </div>
   )
 }

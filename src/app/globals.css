@@ -86,6 +86,21 @@ body {
     overflow-y: visible !important;
   }
 
+  /* App shell — the dashboard layout is `flex h-screen overflow-hidden` with a
+     `flex-1 overflow-hidden` content column. On print these force the content
+     onto page 2 and leave a near-blank page 1. Collapse them to natural flow. */
+  .app-shell {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .app-main {
+    display: block !important;
+    flex: none !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
   /* Hide sidebar and navigation */
   aside,
   nav,
