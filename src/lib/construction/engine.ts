@@ -16,6 +16,8 @@
 
 import type { Relationship, TraceTask, WbsNode } from '../xerParser'
 import { classifyActivity, type ClassificationResult, type ProjectPhase, PHASE_ORDER, PHASE_LABEL } from './classify'
+import { RULES } from './library'
+import type { ConstructionRule, ActivityClass, ActivityStage, ScopeLevel } from './types'
 
 export type FindingBucket =
   | 'ACTUAL_VS_RELATIONSHIP'
@@ -46,6 +48,7 @@ export interface XerPathNode {
   discipline?: string
   system?: string
   stage?: string
+  activityClass?: string
   wbsPath?: string
 }
 
@@ -97,6 +100,9 @@ export interface ReviewFinding {
   discipline?: string
   system?: string
   stage?: string
+  activityClass?: string
+  targetMilestone?: string
+  ruleStrengthHint?: 'REQUIRED' | 'EXPECTED' | 'ADVISORY'
   wbsPath?: string
   headline: string
   detail: string
@@ -168,6 +174,103 @@ function differentMeaningfulSystem(a?: string, b?: string): boolean {
   return !!x && !!y && x !== 'general' && y !== 'general' && x !== y
 }
 
+
+function classMatches(actual: ActivityClass | undefined, required: ActivityClass | ActivityClass[]): boolean {
+  if (!actual) return false
+  return Array.isArray(required) ? required.includes(actual) : actual === required
+}
+
+function stageMatches(actual: ActivityStage | undefined, required?: ActivityStage | ActivityStage[]): boolean {
+  if (!required) return true
+  if (!actual) return false
+  return Array.isArray(required) ? required.includes(actual) : actual === required
+}
+
+function wbsText(t: TraceTask): string {
+  const raw = (t as any).wbs_path
+  return Array.isArray(raw) ? raw.join(' > ').toLowerCase() : String(raw || '').toLowerCase()
+}
+
+function sameWbsBranch(a: TraceTask, b: TraceTask): boolean {
+  const aa = wbsText(a).split('>').map(x => x.trim()).filter(Boolean)
+  const bb = wbsText(b).split('>').map(x => x.trim()).filter(Boolean)
+  if (!aa.length || !bb.length) return false
+  const n = Math.min(aa.length, bb.length)
+  let shared = 0
+  while (shared < n && aa[shared] === bb[shared]) shared++
+  return shared >= Math.min(2, n)
+}
+
+/** Conservative scope matcher. If a rule asks for a location-based scope but the
+ * XER does not expose enough location detail, we do not reject the candidate on
+ * location alone; raw graph evidence remains authoritative. */
+function scopeMatches(
+  triggerId: string,
+  candidateId: string,
+  scopes: ScopeLevel[],
+  tasks: Record<string, TraceTask>,
+  cls: Record<string, ClassificationResult>,
+): boolean {
+  if (scopes.includes('PROJECT_WIDE')) return true
+  const trigger = tasks[triggerId]; const candidate = tasks[candidateId]
+  if (!trigger || !candidate) return false
+  const tc = cls[triggerId]; const cc = cls[candidateId]
+  const tl = locationToken(trigger); const cl = locationToken(candidate)
+
+  for (const scope of scopes) {
+    if (scope === 'SAME_SYSTEM' && sameMeaningfulSystem(tc?.system, cc?.system)) return true
+    if (scope === 'SAME_WBS_BRANCH' && sameWbsBranch(trigger, candidate)) return true
+    if (scope === 'SAME_AREA' || scope === 'SAME_BUILDING') {
+      if (tl && cl && tl === cl) return true
+      if (!tl || !cl) continue
+    }
+    if (scope === 'SAME_EQUIPMENT_TRAIN') {
+      if (sameMeaningfulSystem(tc?.system, cc?.system) && (!tl || !cl || tl === cl)) return true
+    }
+  }
+
+  // When the authored scope is location-based but location is unavailable, fall
+  // back to same-system evidence instead of creating a false missing-activity finding.
+  const locationOnly = scopes.every(s => ['SAME_AREA', 'SAME_BUILDING', 'SAME_EQUIPMENT_TRAIN'].includes(s))
+  if (locationOnly && (!tl || !cl) && sameMeaningfulSystem(tc?.system, cc?.system)) return true
+  return false
+}
+
+function ancestorSet(rootId: string, predAdj: Record<string, string[]>): Set<string> {
+  const out = new Set<string>()
+  const q = [...(predAdj[rootId] || [])]
+  while (q.length) {
+    const id = q.shift()!
+    if (out.has(id)) continue
+    out.add(id)
+    for (const p of predAdj[id] || []) if (!out.has(p)) q.push(p)
+  }
+  return out
+}
+
+function descendantSet(rootId: string, succAdj: Record<string, string[]>): Set<string> {
+  const out = new Set<string>()
+  const q = [...(succAdj[rootId] || [])]
+  while (q.length) {
+    const id = q.shift()!
+    if (out.has(id)) continue
+    out.add(id)
+    for (const p of succAdj[id] || []) if (!out.has(p)) q.push(p)
+  }
+  return out
+}
+
+function ruleApplies(rule: ConstructionRule, cls: Record<string, ClassificationResult>): boolean {
+  if (rule.applicability.includes('ALL')) return true
+  // Until project type is explicitly stored in the analysis object, enable
+  // mission-critical rules only when the XER itself contains strong mission-
+  // critical signals. This keeps generic schedules conservative.
+  if (rule.applicability.includes('MISSION_CRITICAL')) {
+    return Object.values(cls).some(c => c.activityClass && ['IST', 'UPS', 'CRAH', 'EPMS'].includes(c.activityClass))
+  }
+  return false
+}
+
 function nodeFor(id: string, tasks: Record<string, TraceTask>, cls: Record<string, ClassificationResult>): XerPathNode | null {
   const t = tasks[id]; if (!t) return null
   const c = cls[id]
@@ -179,6 +282,7 @@ function nodeFor(id: string, tasks: Record<string, TraceTask>, cls: Record<strin
     discipline: c ? c.discipline : undefined,
     system: c ? c.system : undefined,
     stage: c ? c.stage : undefined,
+    activityClass: c ? c.activityClass : undefined,
     wbsPath: (t as any).wbs_path,
   }
 }
@@ -477,6 +581,136 @@ export function runConstructionReview(analysis: {
       completeXerPath: buildCompletePath(r.task_id, tasks, rels, cls),
     })
   }
+
+
+  // ---------------------------------------------------------------------------
+  // REFERENCE-LIBRARY REVIEW — use the authored construction rules already
+  // generated in library.ts. This is additive: it does not replace Layer 1,
+  // does not alter dates, and does not recompute CPM.
+  // ---------------------------------------------------------------------------
+  const predAdj: Record<string, string[]> = {}
+  const succAdj: Record<string, string[]> = {}
+  for (const r of rels) {
+    if (!r?.task_id || !r?.pred_task_id) continue
+    ;(predAdj[r.task_id] ||= []).push(r.pred_task_id)
+    ;(succAdj[r.pred_task_id] ||= []).push(r.task_id)
+  }
+
+  const ruleFindings: ReviewFinding[] = []
+  for (const rule of RULES) {
+    if (!ruleApplies(rule, cls)) continue
+
+    for (const triggerId of Object.keys(tasks)) {
+      const tc = cls[triggerId]
+      if (!tc || tc.activityClass !== rule.trigger.activityClass || tc.stage !== rule.trigger.stage) continue
+
+      const trigger = tasks[triggerId]
+      const ancestors = ancestorSet(triggerId, predAdj)
+      const descendants = descendantSet(triggerId, succAdj)
+      const problems: { label: string; kind: 'missing' | 'untied' | 'downstream'; ids: string[] }[] = []
+      const supporting: { id: string; code: string; name: string; note: string }[] = []
+
+      for (const req of rule.prerequisites) {
+        const requiredClasses = Array.isArray(req.activityClass) ? req.activityClass : [req.activityClass]
+        const classResults = requiredClasses.map(requiredClass => {
+          const candidates = Object.keys(tasks).filter(id => {
+            const c = cls[id]
+            return classMatches(c?.activityClass, requiredClass) && stageMatches(c?.stage, req.stage) &&
+              scopeMatches(triggerId, id, req.scope, tasks, cls)
+          })
+          const upstream = candidates.filter(id => ancestors.has(id))
+          const downstream = candidates.filter(id => descendants.has(id))
+          return { requiredClass, candidates, upstream, downstream }
+        })
+
+        const needsAllClasses = req.mode === 'ALL' && requiredClasses.length > 1
+        const satisfied = needsAllClasses
+          ? classResults.every(x => x.upstream.length > 0)
+          : classResults.some(x => x.upstream.length > 0)
+        if (satisfied) continue
+
+        const anyCandidate = classResults.some(x => x.candidates.length > 0)
+        const anyDownstream = classResults.some(x => x.downstream.length > 0)
+        const kind: 'missing' | 'untied' | 'downstream' = !anyCandidate ? 'missing' : anyDownstream ? 'downstream' : 'untied'
+        if (req.optional && kind === 'missing') continue
+
+        const ids = classResults.flatMap(x => x.candidates).slice(0, 12)
+        problems.push({ label: req.label, kind, ids })
+        for (const id of ids.slice(0, 4)) {
+          const t = tasks[id]
+          if (!t) continue
+          supporting.push({
+            id,
+            code: t.task_code,
+            name: t.task_name,
+            note: kind === 'downstream' ? `${req.label} appears downstream of the trigger` : `${req.label} exists but is not in the trigger's predecessor path`,
+          })
+        }
+      }
+
+      if (!problems.length) continue
+
+      const labels = problems.map(p => p.label)
+      const missing = problems.filter(p => p.kind === 'missing').map(p => p.label)
+      const untied = problems.filter(p => p.kind === 'untied').map(p => p.label)
+      const downstream = problems.filter(p => p.kind === 'downstream').map(p => p.label)
+      const target = String(rule.targetMilestone || '')
+      const strength = rule.ruleType === 'HARD' ? 'REQUIRED' : rule.ruleType === 'EXPECTED' ? 'EXPECTED' : 'ADVISORY'
+      const bucket: FindingBucket = rule.ruleType === 'HARD' ? 'CONSTRUCTION_SEQUENCE' : 'NEEDS_REVIEW'
+      const recommendation = rule.ruleType === 'HARD'
+        ? `Verify the ${labels.join(', ')} readiness requirements in the XER path to ${target || trigger.task_name}. Add or correct the logical ties where the prerequisite is genuinely required; preserve truthful actual dates.`
+        : `The current path differs from the Control Lens reference sequence. Verify whether the project-specific plan justifies the deviation and clarify or revise the logic as appropriate.`
+      const conditionParts = [
+        missing.length ? `missing from the scoped schedule: ${missing.join(', ')}` : '',
+        untied.length ? `present but not in the predecessor path: ${untied.join(', ')}` : '',
+        downstream.length ? `shown downstream of the trigger: ${downstream.join(', ')}` : '',
+      ].filter(Boolean)
+      const condition = conditionParts.join('; ')
+
+      ruleFindings.push({
+        id: findingId(++fid),
+        bucket,
+        severity: rule.severity,
+        confidence: rule.ruleType === 'HARD' ? 'high' : 'medium',
+        activityId: triggerId,
+        activityCode: trigger.task_code,
+        activityName: trigger.task_name,
+        phase: tc.phase,
+        discipline: tc.discipline || rule.trigger.discipline,
+        system: tc.system || rule.trigger.system,
+        stage: tc.stage,
+        activityClass: tc.activityClass,
+        targetMilestone: target,
+        ruleStrengthHint: strength,
+        wbsPath: (trigger as any).wbs_path,
+        headline: `${target || tc.system || 'System'} readiness path is incomplete for ${trigger.task_code} — ${trigger.task_name}`,
+        detail: `${rule.findingText} Control Lens found ${problems.length} unsatisfied reference prerequisite${problems.length === 1 ? '' : 's'}: ${condition}.`,
+        supporting: supporting.slice(0, 20),
+        recommendation,
+        memo: {
+          whatControlLensFound: `${trigger.task_code} — ${trigger.task_name} does not currently demonstrate the complete Control Lens reference path to ${target || 'the target milestone'}. ${condition}.`,
+          whyThisMatters: `The affected prerequisite states support ${target || 'system readiness'}. If they are genuinely required but absent from the driving path, the schedule may overstate readiness, distort float, or allow downstream startup/testing milestones to appear achievable before the system is actually ready.`,
+          scheduleCondition: condition,
+          xerSequence: [`Trigger: ${trigger.task_code} — ${trigger.task_name}`].concat(supporting.slice(0, 10).map(x => `${x.code} — ${x.name} (${x.note})`)),
+          xerLogicMeaning: `Control Lens traced the raw XER predecessor network for the trigger and compared the detected construction states with authored rule ${rule.id}.`,
+          clReferenceSequence: rule.recommendedChain.slice().sort((a, b) => a.order - b.order).map(x => x.label),
+          clAssessment: rule.ruleType === 'HARD'
+            ? `Rule ${rule.id} is a required construction/readiness prerequisite in the current reference library. The path is incomplete and should be verified before relying on ${target || 'the downstream milestone'}.`
+            : `Rule ${rule.id} represents an expected/reference sequence. The deviation is a reviewer trigger, not an automatic declaration that the contractor is wrong.`,
+          recommendedAction: recommendation,
+          technicalDetails: [
+            `Reference rule: ${rule.id}`,
+            `Rule strength: ${strength}`,
+            `Trigger class/stage: ${rule.trigger.activityClass} / ${rule.trigger.stage}`,
+            `Target milestone: ${target || '—'}`,
+          ].concat(problems.map(p => `${p.label}: ${p.kind}`)),
+        },
+        completeXerPath: buildCompletePath(triggerId, tasks, rels, cls),
+      })
+    }
+  }
+
+  findings = findings.concat(ruleFindings)
 
   // MILESTONE INTEGRITY — consolidate repetitive predecessor conflicts.
   const milestonePairs = new Set<string>()

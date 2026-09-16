@@ -160,7 +160,19 @@ const STAGE_KW: Partial<Record<ActivityStage, string[]>> = {
   DELIVER: ['deliver', ' fat', 'ship', 'fabricat'],
   SET: ['install', 'erect', 'set ', 'f/r/p', 'place', 'pour', 'pull', 'rough', 'deck'],
   TERMINATE: ['terminat', 'splice'],
-  TEST: ['test', ' tab', 'balanc', 'pressure test', 'hi-pot', 'megger'],
+  GROUND: ['grounding', 'grounded', 'bonding', 'bonded'],
+  CONNECT: ['connect', 'connection'],
+  POINT_TO_POINT: ['point-to-point', 'point to point', 'p2p'],
+  LOAD_BANK: ['load bank', 'load-bank'],
+  PRESSURE_TEST: ['pressure test', 'hydrostatic test'],
+  FLUSH_CLEAN: ['flush', 'cleaning'],
+  TREAT: ['water treatment', 'chemical treatment', 'treatment'],
+  FILL_CIRCULATE: ['fill and circulate', 'fill/circulate', 'circulate'],
+  FLOW: ['design flow', 'flow verification', 'flow test'],
+  CONTROLS: ['controls wiring', 'control wiring', 'controls complete'],
+  PROGRAM: ['programming', 'program '],
+  TAB: ['testing adjusting balancing', 'testing, adjusting', 'air balance', 'water balance', ' tab'],
+  TEST: ['test', 'balanc', 'hi-pot', 'megger'],
   ENERGIZE: ['energiz'],
   STARTUP: ['startup', 'start up', 'start-up'],
   FUNCTIONAL_TEST: ['functional', 'fpt', 'commission'],
@@ -174,15 +186,77 @@ const STAGE_KW: Partial<Record<ActivityStage, string[]>> = {
 }
 
 
+/** Focused inference for canonical classes already defined in types.ts but not yet
+ * emitted by the generated 19-class library. These are narrow construction terms,
+ * not broad guesses; they exist only so authored RULES can consume the vocabulary
+ * they already reference. The generated library remains the primary classifier. */
+function supplementalActivityClass(name: string): { activityClass?: ActivityClass; matchLen: number } {
+  const n = ' ' + (name || '').toLowerCase() + ' '
+  const rules: { cls: ActivityClass; terms: string[] }[] = [
+    { cls: 'ELECTRICAL_FPT', terms: ['electrical functional test', 'electrical fpt'] },
+    { cls: 'MECHANICAL_FPT', terms: ['mechanical functional test', 'mechanical fpt'] },
+    { cls: 'CONTROLS_FPT', terms: ['controls functional test', 'controls fpt', 'bms functional test'] },
+    { cls: 'LIFE_SAFETY_FPT', terms: ['life safety functional test', 'life-safety functional test', 'life safety fpt'] },
+    { cls: 'IST', terms: ['integrated systems test', 'integrated system test', ' ist '] },
+    { cls: 'MV_CABLE', terms: ['mv cable', 'medium voltage cable', '15kv cable', '13.8kv cable'] },
+    { cls: 'BATTERY', terms: ['battery system', 'battery cabinet', 'battery string', 'batteries'] },
+    { cls: 'FUEL_GAS', terms: ['fuel gas', 'natural gas', 'generator gas', 'fuel system'] },
+    { cls: 'NORMAL_SOURCE', terms: ['normal source', 'utility source'] },
+    { cls: 'EMERGENCY_SOURCE', terms: ['emergency source', 'generator source'] },
+    { cls: 'CHW_PIPE', terms: ['chilled water piping', 'chw piping', 'chilled water pipe', 'chw pipe'] },
+    { cls: 'SPRINKLER', terms: ['sprinkler', 'standpipe', 'fire pump'] },
+    { cls: 'FIRE_ALARM', terms: ['fire alarm'] },
+    { cls: 'SMOKE_CONTROL', terms: ['smoke control'] },
+    { cls: 'FIRE_MARSHAL', terms: ['fire marshal', 'ahj inspection', 'life safety inspection'] },
+    { cls: 'SLAB_ON_GRADE', terms: ['slab on grade', 'slab-on-grade', ' sog '] },
+    { cls: 'DUCTBANK', terms: ['duct bank', 'ductbank'] },
+    { cls: 'CABLE_PULL', terms: ['cable pull', 'pull cable', 'cable pulling'] },
+    { cls: 'MEP_ROUGHIN', terms: ['mep rough-in', 'mep rough in', 'underslab mep', 'under slab mep'] },
+    { cls: 'LV_ROUGHIN', terms: ['low voltage rough-in', 'low voltage rough in', 'lv rough-in'] },
+    { cls: 'INTERIOR_DRYWALL', terms: ['drywall', 'gypsum board', 'gwb'] },
+    { cls: 'CEILING', terms: ['ceiling grid', 'acoustical ceiling', 'act ceiling', 'ceiling close'] },
+    { cls: 'INSPECTION', terms: ['pre-pour inspection', 'pre pour inspection', 'above-ceiling inspection', 'above ceiling inspection'] },
+    { cls: 'ROOFING', terms: ['roofing', 'roof install', 'roof complete'] },
+    { cls: 'GLAZING', terms: ['glazing', 'window install', 'curtainwall', 'curtain wall'] },
+    { cls: 'SENSITIVE_ELEC_EQUIP', terms: ['switchgear', 'switchboard', 'ups', 'transformer', 'pdu'] },
+    { cls: 'FOOTING', terms: ['footing'] },
+    { cls: 'FOUNDATION_WALL', terms: ['foundation wall'] },
+    { cls: 'PILE_CAP', terms: ['pile cap'] },
+    { cls: 'GRADE_BEAM', terms: ['grade beam'] },
+    { cls: 'MAT_FOUNDATION', terms: ['mat foundation', 'raft foundation'] },
+    { cls: 'EQUIPMENT_FOUNDATION', terms: ['equipment foundation', 'equipment pad'] },
+    { cls: 'TRAINING_OM', terms: ['owner training', 'o&m manual', 'o&m manuals', 'operations and maintenance manual'] },
+    { cls: 'CO', terms: ['certificate of occupancy', ' c of o ', 'occupancy permit'] },
+  ]
+
+  let activityClass: ActivityClass | undefined
+  let matchLen = 0
+  for (const rule of rules) {
+    for (const term of rule.terms) {
+      if (n.includes(term) && term.length > matchLen) {
+        activityClass = rule.cls
+        matchLen = term.length
+      }
+    }
+  }
+  return { activityClass, matchLen }
+}
+
 /**
  * Resolve the canonical construction activity class from the generated reference
  * library. Longest keyword wins, matching the existing conservative classifier.
  * This is annotation only: unresolved activities remain in the raw XER graph.
  */
-function classifyActivityClass(name: string): { activityClass?: ActivityClass; matchLen: number } {
+function classifyActivityClass(name: string): {
+  activityClass?: ActivityClass
+  matchLen: number
+  libraryStage?: ActivityStage
+  stageMatchLen: number
+} {
   const n = ' ' + (name || '').toLowerCase() + ' '
   let activityClass: ActivityClass | undefined
   let matchLen = 0
+  let matchedEntry: (typeof CLASSIFICATION)[number] | undefined
 
   for (const entry of CLASSIFICATION) {
     for (const raw of entry.keywords || []) {
@@ -190,11 +264,36 @@ function classifyActivityClass(name: string): { activityClass?: ActivityClass; m
       if (kw && n.includes(kw) && kw.length > matchLen) {
         activityClass = entry.activityClass
         matchLen = kw.length
+        matchedEntry = entry
       }
     }
   }
 
-  return { activityClass, matchLen }
+  // Once the activity class is known, use that class's authored stage hints as a
+  // more specific secondary signal. This lets phrases such as "load bank",
+  // "point-to-point", "pressure test" and "flow" resolve to their canonical
+  // stages without disturbing the existing general stage dictionary.
+  let libraryStage: ActivityStage | undefined
+  let stageMatchLen = 0
+  if (matchedEntry) {
+    for (const [stage, hints] of Object.entries(matchedEntry.stageHints || {})) {
+      for (const raw of hints || []) {
+        const kw = (raw || '').toLowerCase()
+        if (kw && n.includes(kw) && kw.length > stageMatchLen) {
+          libraryStage = stage as ActivityStage
+          stageMatchLen = kw.length
+        }
+      }
+    }
+  }
+
+  const supplemental = supplementalActivityClass(name)
+  if (supplemental.activityClass && supplemental.matchLen > matchLen) {
+    activityClass = supplemental.activityClass
+    matchLen = supplemental.matchLen
+  }
+
+  return { activityClass, matchLen, libraryStage, stageMatchLen }
 }
 
 // -----------------------------------------------------------------------------
@@ -235,7 +334,10 @@ export function classifyActivity(task: ClassifiableTask): ClassificationResult {
   const pm = bestMatch(name, PHASE_KW as Record<string, string[]>)
   const acm = classifyActivityClass(name)
 
+  // Preserve the existing general stage classifier, but allow a longer/more
+  // specific class-authored hint to win (e.g. LOAD_BANK over generic TEST).
   let stage = (stm.key as ActivityStage | null) || undefined
+  if (acm.libraryStage && acm.stageMatchLen > stm.len) stage = acm.libraryStage
   if (isMilestone && !stage) stage = 'MILESTONE'
 
   // Phase: strong keyword wins; else infer from stage/discipline (supporting).
@@ -264,7 +366,7 @@ export function classifyActivity(task: ClassifiableTask): ClassificationResult {
       phase: phaseConf,
       discipline: conf(dm.len),
       system: conf(sm.len),
-      stage: conf(stm.len || (isMilestone ? 4 : 0)),
+      stage: conf(Math.max(stm.len, acm.stageMatchLen, isMilestone ? 4 : 0)),
     },
   }
 }

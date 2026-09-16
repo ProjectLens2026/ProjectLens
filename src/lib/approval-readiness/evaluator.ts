@@ -45,14 +45,18 @@ interface AnalysisInput {
 function mapDomain(f: ReviewFinding): ApprovalDomainId {
   const sys = (f.system || '').toUpperCase()
   const name = (f.activityName || '').toLowerCase()
+  const target = (f.targetMilestone || '').toUpperCase()
+  const activityClass = (f.activityClass || '').toUpperCase()
 
   // milestone-integrity on a completion/turnover milestone → AR-08, else AR-01
   if (f.bucket === 'MILESTONE_INTEGRITY') {
     if (/turnover|substantial|final|ready for service|occupancy/.test(name)) return 'AR-08'
     return 'AR-01'
   }
-  // commissioning / startup / IST systems → AR-06
-  if (/IST|FPT|BMS|COMMISSION/.test(sys) || /commission|startup|functional|energiz|ist\b/.test(name)) return 'AR-06'
+  // commissioning / startup / IST systems → AR-06. Reference-library findings
+  // may carry the commissioning meaning in targetMilestone/activityClass even
+  // when the contractor's activity name uses different wording.
+  if (/IST|FPT|BMS|COMMISSION/.test(sys) || /IST|FPT|COMMISSION/.test(target) || /IST|FPT|COMMISSION/.test(activityClass) || /commission|startup|functional|energiz|ist\b/.test(name)) return 'AR-06'
   // procurement-phase → AR-05
   if (f.phase === 'PROCUREMENT') return 'AR-05'
   // physical construction sequence → AR-04
@@ -65,6 +69,7 @@ function mapDomain(f: ReviewFinding): ApprovalDomainId {
 
 // bucket → rule strength (conservative; Needs-Review stays EXPECTED/ADVISORY)
 function strengthFor(f: ReviewFinding): RuleStrength {
+  if (f.ruleStrengthHint) return f.ruleStrengthHint
   switch (f.bucket) {
     case 'CONSTRUCTION_SEQUENCE': return 'REQUIRED'
     case 'MILESTONE_INTEGRITY': return 'REQUIRED'
