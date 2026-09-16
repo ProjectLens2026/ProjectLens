@@ -324,7 +324,18 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
     : result.findings
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="ar-print-root flex flex-col h-full">
+      <style>{`
+        @media print {
+          /* neutralize the app's fixed-height / scroll layout so the document
+             flows naturally instead of rendering a blank full-height page 1 */
+          html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
+          .ar-print-root { height: auto !important; overflow: visible !important; display: block !important; }
+          .ar-print-scroll { height: auto !important; overflow: visible !important; flex: none !important; padding: 0 !important; background: #fff !important; }
+          .ar-print-doc { max-width: none !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; }
+          @page { margin: 0.5in; }
+        }
+      `}</style>
       {/* toolbar — hidden on print */}
       <div className="print:hidden bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-3 flex-shrink-0">
         <button onClick={onBack} className="text-[12px] text-slate-500 hover:text-slate-800">‹ Back to workspace</button>
@@ -336,8 +347,8 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto bg-slate-100 p-6 print:p-0 print:bg-white">
-        <div className="max-w-[820px] mx-auto bg-white border border-slate-200 print:border-0 p-8 print:p-0">
+      <div className="ar-print-scroll flex-1 overflow-y-auto bg-slate-100 p-6 print:p-0 print:bg-white">
+        <div className="ar-print-doc max-w-[820px] mx-auto bg-white border border-slate-200 print:border-0 p-8 print:p-0">
 
           {/* ── Cover header ─────────────────────────────────────────── */}
           <div className="flex items-start justify-between border-b-2 pb-4 mb-5" style={{ borderColor: COLORS.ink }}>
