@@ -71,14 +71,26 @@ export const SEVERITY_DEDUCTION: Record<1 | 2 | 3 | 4 | 5, number> = {
 }
 
 export const STRENGTH_MULTIPLIER: Record<RuleStrength, number> = {
-  REQUIRED: 1.0,   // full weight
-  EXPECTED: 0.6,   // deviation triggers verification, not full penalty
-  ADVISORY: 0.25,  // best-practice observation
+  REQUIRED: 1.0,   // full weight — a real prerequisite failure
+  EXPECTED: 0.45,  // deviation triggers verification, modest penalty
+  ADVISORY: 0.15,  // "needs review" observation — should barely move the score
 }
 
-// A single finding can never remove more than this from one domain (prevents
-// one condition from zeroing a domain by itself).
+// A single finding can never remove more than this from one domain.
 export const MAX_DEDUCTION_PER_FINDING = 8
+
+// Diminishing returns: within a domain, the Nth finding (sorted by size desc)
+// is weighted by DIMINISHING_WEIGHTS[N] (falling back to the tail). This makes
+// the score measure MATERIAL concern, not raw violation count — 15 similar
+// review items don't linearly wipe a domain; a reviewer notes the pattern once.
+export const DIMINISHING_WEIGHTS = [1.0, 0.5, 0.3, 0.2, 0.15]
+export const DIMINISHING_TAIL = 0.08
+
+// Non-critical findings can remove at most this fraction of a domain's weight.
+// A domain only goes below this floor when a genuine REQUIRED failure of
+// severity >= this threshold exists (a real, material deficiency).
+export const DOMAIN_SOFT_CAP_FRAC = 0.6
+export const REQUIRED_FAILURE_SEVERITY = 4
 
 export function computeDeduction(
   severity: 1 | 2 | 3 | 4 | 5,

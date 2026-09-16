@@ -68,7 +68,13 @@ function strengthFor(f: ReviewFinding): RuleStrength {
   switch (f.bucket) {
     case 'CONSTRUCTION_SEQUENCE': return 'REQUIRED'
     case 'MILESTONE_INTEGRITY': return 'REQUIRED'
-    case 'ACTUAL_VS_RELATIONSHIP': return 'EXPECTED'
+    case 'ACTUAL_VS_RELATIONSHIP':
+      // Procurement-phase submit/review/fabricate/deliver activities are
+      // commonly tied to a coarse "Start Procurement Phase" summary link and
+      // legitimately begin early. These are Needs-Review, not REQUIRED
+      // failures — do not let them penalize like a physical prerequisite.
+      if (f.phase === 'PROCUREMENT' || f.phase === 'PRECONSTRUCTION') return 'ADVISORY'
+      return 'EXPECTED'
     case 'LIKELY_INCORRECT_RELATIONSHIP': return 'EXPECTED'
     case 'PHASING_LOCATION': return 'ADVISORY'
     case 'NEEDS_REVIEW': return 'ADVISORY'
@@ -76,10 +82,13 @@ function strengthFor(f: ReviewFinding): RuleStrength {
   }
 }
 
-// A consolidation key: prefer target milestone, else phase+discipline+system.
+// Consolidation key: group conditions that share a PREDECESSOR (they're the
+// same root cause — e.g. many activities hanging off one summary/milestone),
+// otherwise fall back to phase+discipline+system. Prevents both the
+// "General · General" junk drawer and 18 unrelated rows under one finding.
 function consolidationKey(f: ReviewFinding): string {
-  const anySystem = f.system || 'General'
-  return `${f.phase || 'NA'}|${f.discipline || 'General'}|${anySystem}`
+  if (f.predecessor) return `PRED:${f.predecessor.id}`
+  return `GRP:${f.phase || 'NA'}|${f.discipline || 'General'}|${f.system || 'General'}`
 }
 
 export function evaluateApprovalReadiness(

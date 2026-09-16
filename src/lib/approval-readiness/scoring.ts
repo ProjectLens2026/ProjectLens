@@ -6,18 +6,40 @@
 // =============================================================================
 
 import type { ApprovalFinding, DomainScore, Grade } from './types'
-import { DOMAINS, domainLabel, gradeFor, materiality } from './framework'
+import {
+  DOMAINS, domainLabel, gradeFor, materiality,
+  DIMINISHING_WEIGHTS, DIMINISHING_TAIL, DOMAIN_SOFT_CAP_FRAC, REQUIRED_FAILURE_SEVERITY,
+} from './framework'
 
 export function scoreDomains(findings: ApprovalFinding[]): DomainScore[] {
   return DOMAINS.map(d => {
     const inDomain = findings.filter(f => f.primaryDomain === d.id)
-    const deductions = inDomain.reduce((s, f) => s + f.scoreDeduction, 0)
+
+    // Diminishing returns: sort each finding's deduction desc, weight the Nth
+    // by DIMINISHING_WEIGHTS[N] (tail after). Many small items asymptote.
+    const sorted = inDomain.map(f => f.scoreDeduction).sort((a, b) => b - a)
+    let deductions = 0
+    sorted.forEach((ded, i) => {
+      const w = i < DIMINISHING_WEIGHTS.length ? DIMINISHING_WEIGHTS[i] : DIMINISHING_TAIL
+      deductions += ded * w
+    })
+
+    // Soft cap: review-level noise can't remove more than a fraction of the
+    // domain — UNLESS a genuine REQUIRED failure of real severity exists.
+    const hasRealFailure = inDomain.some(
+      f => f.ruleStrength === 'REQUIRED' && f.severity >= REQUIRED_FAILURE_SEVERITY,
+    )
+    if (!hasRealFailure) {
+      deductions = Math.min(deductions, d.weight * DOMAIN_SOFT_CAP_FRAC)
+    }
+
+    deductions = Math.round(deductions * 10) / 10
     const score = Math.max(0, Math.round((d.weight - deductions) * 10) / 10)
     return {
       domain: d.id,
       label: domainLabel(d.id),
       maxPoints: d.weight,
-      deductions: Math.round(deductions * 10) / 10,
+      deductions,
       score,
       findingCount: inDomain.length,
     }
