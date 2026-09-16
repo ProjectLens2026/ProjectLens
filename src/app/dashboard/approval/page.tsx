@@ -19,6 +19,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { getActiveProject, getActiveVersion, updateVersionApprovalResult } from '@/lib/projectStore'
 import { evaluateApprovalReadiness } from '@/lib/approval-readiness/evaluator'
+import { printReport } from '@/lib/printReport'
 import type { ApprovalReadinessResult, ApprovalMode, ApprovalFinding } from '@/lib/approval-readiness/types'
 
 const COLORS = {
@@ -348,13 +349,13 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
       <div className="print:hidden bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-3 flex-shrink-0">
         <button onClick={onBack} className="text-[12px] text-slate-500 hover:text-slate-800">‹ Back to workspace</button>
         <span className="text-[13px] font-bold ml-2" style={{ color: COLORS.ink }}>{reportTitle}</span>
-        <button onClick={() => window.print()} className="ml-auto text-white text-[12px] font-bold px-4 py-2 rounded-lg" style={{ background: COLORS.blue }}>
+        <button onClick={() => printReport('ar-print-area', { title: reportTitle, footerLabel: reportNo })} className="ml-auto text-white text-[12px] font-bold px-4 py-2 rounded-lg" style={{ background: COLORS.blue }}>
           🖨 Save as PDF
         </button>
       </div>
 
       <div className="ar-print-scroll flex-1 overflow-y-auto bg-slate-100 p-6 print:p-0 print:bg-white">
-        <div className="ar-print-doc max-w-[820px] mx-auto bg-white border border-slate-200 print:border-0 p-8 print:p-0">
+        <div id="ar-print-area" className="ar-print-doc max-w-[820px] mx-auto bg-white border border-slate-200 print:border-0 p-8 print:p-0">
 
           {/* ── Cover header ─────────────────────────────────────────── */}
           <div className="border-b-2 pb-4 mb-5" style={{ borderColor: COLORS.ink }}>
