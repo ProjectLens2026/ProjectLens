@@ -26,7 +26,8 @@
 // Dictionaries grow iteratively; this is the first validated pass.
 // =============================================================================
 
-import type { Discipline, ActivityStage } from './types'
+import type { Discipline, ActivityStage, ActivityClass } from './types'
+import { CLASSIFICATION } from './library'
 
 // The six-phase project spine.
 export type ProjectPhase =
@@ -45,6 +46,8 @@ export interface ClassificationResult {
   discipline?: Discipline
   system?: string
   stage?: ActivityStage
+  /** Canonical construction class from the generated reference library. */
+  activityClass?: ActivityClass
   confidence: {
     phase: ConfidenceLevel
     discipline: ConfidenceLevel
@@ -170,6 +173,30 @@ const STAGE_KW: Partial<Record<ActivityStage, string[]>> = {
   MILESTONE: ['milestone'],
 }
 
+
+/**
+ * Resolve the canonical construction activity class from the generated reference
+ * library. Longest keyword wins, matching the existing conservative classifier.
+ * This is annotation only: unresolved activities remain in the raw XER graph.
+ */
+function classifyActivityClass(name: string): { activityClass?: ActivityClass; matchLen: number } {
+  const n = ' ' + (name || '').toLowerCase() + ' '
+  let activityClass: ActivityClass | undefined
+  let matchLen = 0
+
+  for (const entry of CLASSIFICATION) {
+    for (const raw of entry.keywords || []) {
+      const kw = (raw || '').toLowerCase()
+      if (kw && n.includes(kw) && kw.length > matchLen) {
+        activityClass = entry.activityClass
+        matchLen = kw.length
+      }
+    }
+  }
+
+  return { activityClass, matchLen }
+}
+
 // -----------------------------------------------------------------------------
 // Matching
 // -----------------------------------------------------------------------------
@@ -206,6 +233,7 @@ export function classifyActivity(task: ClassifiableTask): ClassificationResult {
   const sm = bestMatch(name, SYS_KW)
   const stm = bestMatch(name, STAGE_KW as Record<string, string[]>)
   const pm = bestMatch(name, PHASE_KW as Record<string, string[]>)
+  const acm = classifyActivityClass(name)
 
   let stage = (stm.key as ActivityStage | null) || undefined
   if (isMilestone && !stage) stage = 'MILESTONE'
@@ -231,6 +259,7 @@ export function classifyActivity(task: ClassifiableTask): ClassificationResult {
     discipline: (dm.key as Discipline | null) || undefined,
     system: sm.key || undefined,
     stage,
+    activityClass: acm.activityClass,
     confidence: {
       phase: phaseConf,
       discipline: conf(dm.len),
