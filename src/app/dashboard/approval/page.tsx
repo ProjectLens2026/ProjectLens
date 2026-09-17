@@ -17,7 +17,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { getActiveProject, getActiveVersion, updateVersionApprovalResult } from '@/lib/projectStore'
+import { getActiveProject, getActiveVersion, subscribeToProjects, updateVersionApprovalResult } from '@/lib/projectStore'
 import { evaluateApprovalReadiness } from '@/lib/approval-readiness/evaluator'
 import { printReport } from '@/lib/printReport'
 import type { ApprovalReadinessResult, ApprovalMode, ApprovalFinding } from '@/lib/approval-readiness/types'
@@ -62,19 +62,39 @@ export default function ApprovalReadinessPage() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [reportKind, setReportKind] = useState<null | 'executive' | 'complete'>(null)
 
-  // Load project/version, and REHYDRATE a previously-run result so it persists
-  // across navigation (stored on the version via projectStore).
+  // Keep Approval Readiness bound to the CURRENT project + CURRENT version.
+  // The sidebar can change either selection without unmounting this page, so a
+  // one-time useEffect leaves the previous version's result on screen.
+  // Rehydrate every time projectStore announces a selection/data change.
   useEffect(() => {
-    const p = getActiveProject()
-    setProject(p)
-    const v = getActiveVersion(p)
-    setVersion(v)
-    setAnalysis(v?.analysis || null)
-    if (v?.approvalResult) {
-      setResult(v.approvalResult as ApprovalReadinessResult)
-      if (v.approvalResult.mode) setMode(v.approvalResult.mode)
+    function syncActiveSelection() {
+      const p = getActiveProject()
+      const v = getActiveVersion(p)
+
+      setProject(p)
+      setVersion(v)
+      setAnalysis(v?.analysis || null)
+
+      // IMPORTANT: clear old-version UI when the newly selected version has no
+      // saved Approval Readiness result. Never let one project's result bleed
+      // into another project/version.
+      if (v?.approvalResult) {
+        setResult(v.approvalResult as ApprovalReadinessResult)
+        setMode((v.approvalResult.mode as ApprovalMode) || 'PRE_SUBMISSION')
+      } else {
+        setResult(null)
+        setMode('PRE_SUBMISSION')
+      }
+
+      // Close any old finding/report state that belonged to the prior version.
+      setExpanded(null)
+      setReportKind(null)
+      setRunning(false)
+      setReady(true)
     }
-    setReady(true)
+
+    syncActiveSelection()
+    return subscribeToProjects(syncActiveSelection)
   }, [])
 
   function runCheck() {
