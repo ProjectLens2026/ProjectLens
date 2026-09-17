@@ -73,12 +73,48 @@ function externalText(value?: string): string {
     .replace(/\bControl Lens\b/gi, 'the review')
 }
 
+function externalFindingId(f: ApprovalFinding): string {
+  const n = f.id.match(/(\d+)$/)?.[1] || f.id.replace(/[^A-Za-z0-9]/g, '').slice(-3) || '001'
+  return `${approvalKind(f) === 'RECOMMENDATION' ? 'REC' : 'REV'}-${n}`
+}
+
+function externalReviewStatus(result: ApprovalReadinessResult): string {
+  if (!result.criticalGates.passed) return 'Review Complete — Critical Comments Require Resolution'
+  if (result.counts.critical > 0) return 'Review Complete — Critical Comments Identified'
+  if (result.counts.major > 0) return 'Review Complete — Corrective Comments Identified'
+  if (result.counts.minor > 0) return 'Review Complete — Minor Comments Identified'
+  if ((result.recommendationCount || 0) > 0) return 'Review Complete — Recommendations Identified'
+  return 'Review Complete — No Material Comments Identified'
+}
+
 function externalTitle(f: ApprovalFinding): string {
   if (approvalKind(f) === 'RECOMMENDATION') {
     const m = f.title.match(/^Suggested Key Milestone\s*[—-]\s*(.+)$/i)
     if (m) return `Schedule Control Recommendation — ${m[1]}`
+    return externalText(f.title)
   }
-  return externalText(f.title)
+
+  const raw = externalText(f.title)
+  const isGeneric = /(^|\s)(General)(\s|·|—|-|$)/i.test(raw) || /related condition/i.test(raw)
+  if (!isGeneric) return raw
+
+  if (/supporting predecessors finish after this completion\/readiness activity/i.test(f.whatFound || '')) {
+    return 'Completion / Readiness Milestone Not Fully Supported'
+  }
+
+  const discipline = f.discipline && !/^general$/i.test(f.discipline) ? f.discipline : ''
+  const system = f.system && !/^general$/i.test(f.system) ? f.system : ''
+  if (discipline && system) return `${discipline} — ${system} Schedule Logic Review`
+  if (system) return `${system} Schedule Logic Review`
+  if (discipline) return `${discipline} Schedule Logic Review`
+
+  const first = f.affectedActivities?.[0]?.name?.trim()
+  if (first) {
+    const short = first.length > 72 ? `${first.slice(0, 69)}…` : first
+    return `Schedule Logic Review — ${short}`
+  }
+  const count = f.evidence?.length || 1
+  return `Schedule Logic Review — ${count} Related Condition${count === 1 ? '' : 's'}`
 }
 
 export default function ApprovalReadinessPage() {
@@ -484,7 +520,7 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
               <div className="text-[20px] font-extrabold" style={{ color: gc }}>{result.grade}</div>
             </div>
             <div className="flex-1">
-              <div className="text-[14px] font-extrabold uppercase tracking-wide mb-1" style={{ color: COLORS.ink }}>{result.recommendation}</div>
+              <div className="text-[14px] font-extrabold uppercase tracking-wide mb-1" style={{ color: COLORS.ink }}>{externalReviewStatus(result)}</div>
               <div className="text-[11px] text-slate-600">
                 Critical Gates: <b style={{ color: result.criticalGates.passed ? COLORS.green : COLORS.red }}>{result.criticalGates.passed ? 'PASS' : 'FAIL'}</b>
                 {'  ·  '}Critical {result.counts.critical} · Major {result.counts.major} · Minor {result.counts.minor}
@@ -523,6 +559,9 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
               })}
             </tbody>
           </table>
+          <div className="text-[9px] text-slate-400 leading-relaxed -mt-2 mb-4">
+            Domain scores reflect the checks currently applicable to the submitted schedule and configured review framework. A full score means no score-eligible condition was identified by those checks; it does not replace project-specific reviewer verification.
+          </div>
 
           {/* ── Findings ─────────────────────────────────────────────── */}
           <SectionBar>{kind === 'executive' ? 'Material Findings' : 'All Findings — Detail & Evidence'}</SectionBar>
@@ -531,7 +570,7 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
           ) : shown.map(f => (
             <div key={f.id} className="mb-4 border border-slate-200 rounded-lg overflow-hidden print:break-inside-avoid">
               <div className="px-3 py-2 border-b border-slate-200 flex items-center gap-2" style={{ background: '#f8fafc' }}>
-                <span className="font-mono text-[10px] font-bold text-white px-1.5 py-0.5 rounded" style={{ background: COLORS.ink }}>{f.id}</span>
+                <span className="font-mono text-[10px] font-bold text-white px-1.5 py-0.5 rounded" style={{ background: COLORS.ink }}>{externalFindingId(f)}</span>
                 <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">{f.primaryDomain}</span>
                 <span className="text-[12px] font-extrabold flex-1" style={{ color: COLORS.ink }}>{externalTitle(f)}</span>
                 <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{f.ruleStrength} · sev {f.severity} · −{f.scoreDeduction}</span>
@@ -575,7 +614,7 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
               {reportRecommendations.map(f => (
                 <div key={f.id} className="mb-4 border border-blue-200 rounded-lg overflow-hidden print:break-inside-avoid">
                   <div className="px-3 py-2 border-b border-blue-100 flex items-center gap-2 bg-blue-50/50">
-                    <span className="font-mono text-[10px] font-bold text-white px-1.5 py-0.5 rounded" style={{ background: COLORS.blue }}>{f.id}</span>
+                    <span className="font-mono text-[10px] font-bold text-white px-1.5 py-0.5 rounded" style={{ background: COLORS.blue }}>{externalFindingId(f)}</span>
                     <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">{f.primaryDomain}</span>
                     <span className="text-[12px] font-extrabold flex-1" style={{ color: COLORS.ink }}>{externalTitle(f)}</span>
                     <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">Schedule Control Recommendation · no score impact</span>

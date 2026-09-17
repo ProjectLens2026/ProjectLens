@@ -36,7 +36,7 @@ export function printReport(areaId: string, opts: PrintOptions = {}): void {
     return
   }
 
-  const { title = 'ControlLens Report', pageNumbers = true, footerLabel = '' } = opts
+  const { title = 'Schedule Review Report', pageNumbers = true, footerLabel = '' } = opts
 
   // Collect the page's own styles so Tailwind classes render identically in
   // the isolated document (link tags + inline <style>).
@@ -70,6 +70,7 @@ export function printReport(areaId: string, opts: PrintOptions = {}): void {
 <head>
 <meta charset="utf-8" />
 <title>${escapeHtml(title)}</title>
+<base href="${escapeHtml(window.location.origin + '/')}" />
 ${headStyles}
 <style>${printCss}</style>
 </head>
@@ -78,7 +79,10 @@ ${headStyles}
 </body>
 </html>`
 
-  // Use a hidden iframe (more reliable than a popup — no blocker, same origin).
+  // Use srcdoc so the printable document has a neutral about:srcdoc address
+  // instead of inheriting the application's /dashboard/... URL. Browsers may
+  // still show their own header/footer when that print option is enabled, but
+  // the application route is no longer exposed there.
   const iframe = document.createElement('iframe')
   iframe.setAttribute('aria-hidden', 'true')
   iframe.style.position = 'fixed'
@@ -87,37 +91,40 @@ ${headStyles}
   iframe.style.width = '0'
   iframe.style.height = '0'
   iframe.style.border = '0'
-  document.body.appendChild(iframe)
 
-  const doc = iframe.contentWindow?.document
-  if (!doc) {
-    document.body.removeChild(iframe)
-    window.print()
-    return
+  const cleanup = () => {
+    setTimeout(() => {
+      if (iframe.parentNode) iframe.parentNode.removeChild(iframe)
+    }, 500)
   }
-  doc.open()
-  doc.write(html)
-  doc.close()
 
-  // Wait for styles/fonts to load, then print, then clean up.
-  const win = iframe.contentWindow!
-  const doPrint = () => {
-    try {
-      win.focus()
-      win.print()
-    } finally {
-      setTimeout(() => {
-        if (iframe.parentNode) iframe.parentNode.removeChild(iframe)
-      }, 500)
+  iframe.onload = () => {
+    const win = iframe.contentWindow
+    const doc = win?.document
+    if (!win || !doc) {
+      cleanup()
+      return
+    }
+
+    const doPrint = () => {
+      try {
+        win.focus()
+        win.print()
+      } finally {
+        cleanup()
+      }
+    }
+
+    if ((doc as any).fonts && (doc as any).fonts.ready) {
+      ;(doc as any).fonts.ready.then(() => setTimeout(doPrint, 150)).catch(() => setTimeout(doPrint, 400))
+    } else {
+      setTimeout(doPrint, 400)
     }
   }
 
-  // give the browser a moment to apply stylesheets + web fonts
-  if ((doc as any).fonts && (doc as any).fonts.ready) {
-    ;(doc as any).fonts.ready.then(() => setTimeout(doPrint, 150)).catch(() => setTimeout(doPrint, 400))
-  } else {
-    setTimeout(doPrint, 400)
-  }
+  iframe.srcdoc = html
+  document.body.appendChild(iframe)
+
 }
 
 function escapeHtml(s: string): string {
