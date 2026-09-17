@@ -47,6 +47,8 @@ export interface TraceTask {
   status_code: string
   task_type: string
   total_float_hr_cnt: string
+  remain_drtn_hr_cnt?: string
+  target_drtn_hr_cnt?: string
   driving_path_flag?: string
   early_start_date: string
   early_end_date: string
@@ -793,6 +795,8 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       status_code: t.status_code,
       task_type: t.task_type,
       total_float_hr_cnt: t.total_float_hr_cnt,
+      remain_drtn_hr_cnt: t.remain_drtn_hr_cnt,
+      target_drtn_hr_cnt: t.target_drtn_hr_cnt,
       driving_path_flag: t.driving_path_flag,
       early_start_date: t.early_start_date,
       early_end_date: t.early_end_date,

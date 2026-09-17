@@ -466,24 +466,51 @@ export default function ControlLensAnalysisPage() {
                           </div>
 
                           <div className="overflow-x-auto border border-slate-200 rounded-lg">
-                            <div className="grid grid-cols-12 gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-50 border-b border-slate-200 min-w-[900px]">
+                            <div className="px-3 py-2 text-[10px] text-slate-500 bg-slate-50 border-b border-slate-200">
+                              Submitted predecessors ordered by current Finish date, earliest first. Duration is the P6 remaining duration stored with the XER analysis.
+                            </div>
+                            <div className="grid grid-cols-16 gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-50 border-b border-slate-200 min-w-[1180px]">
                               <div className="col-span-1">Depth</div>
                               <div className="col-span-2">Code</div>
-                              <div className="col-span-5">Activity</div>
+                              <div className="col-span-4">Activity</div>
+                              <div className="col-span-2 text-right">Start</div>
+                              <div className="col-span-2 text-right">Finish</div>
+                              <div className="col-span-1 text-right">Duration</div>
+                              <div className="col-span-1 text-right">Float</div>
                               <div className="col-span-1 text-right">Rel</div>
                               <div className="col-span-1 text-right">Lag</div>
-                              <div className="col-span-2 text-right">Float</div>
+                              <div className="col-span-1 text-right">Status</div>
                             </div>
-                            {targetTrace.predecessors.slice(0, 150).map((n: any, i: number) => (
-                              <div key={`${n.task.task_id}-${i}`} className="grid grid-cols-12 gap-2 px-3 py-2 text-xs border-b border-slate-100 last:border-0 min-w-[900px] items-center">
-                                <div className="col-span-1 text-slate-500">{n.depth}</div>
-                                <div className="col-span-2 font-mono font-semibold text-slate-800 truncate">{n.task.task_code}</div>
-                                <div className="col-span-5 text-slate-700 truncate">{n.task.task_name}</div>
-                                <div className="col-span-1 text-right font-semibold text-slate-600">{n.relTypeLabel}</div>
-                                <div className="col-span-1 text-right text-slate-500">{n.lagDays}d</div>
-                                <div className="col-span-2 text-right font-semibold text-slate-700">{fmtFloat(n.task.total_float_hr_cnt)}</div>
-                              </div>
-                            ))}
+                            {targetTrace.predecessors
+                              .slice()
+                              .sort((a: any, b: any) => {
+                                const af = a.task.act_end_date || a.task.early_end_date || a.task.target_end_date || ''
+                                const bf = b.task.act_end_date || b.task.early_end_date || b.task.target_end_date || ''
+                                return af.localeCompare(bf)
+                              })
+                              .slice(0, 150)
+                              .map((n: any, i: number) => {
+                                const start = n.task.act_start_date || n.task.early_start_date || n.task.target_start_date || ''
+                                const finish = n.task.act_end_date || n.task.early_end_date || n.task.target_end_date || ''
+                                const duration = n.task.remain_drtn_hr_cnt != null && n.task.remain_drtn_hr_cnt !== ''
+                                  ? fmtFloat(n.task.remain_drtn_hr_cnt)
+                                  : '—'
+                                const status = n.task.status_code === 'TK_Complete' ? 'Done' : n.task.status_code === 'TK_Active' ? 'In progress' : 'Not started'
+                                return (
+                                  <div key={`${n.task.task_id}-${i}`} className="grid grid-cols-16 gap-2 px-3 py-2 text-xs border-b border-slate-100 last:border-0 min-w-[1180px] items-center">
+                                    <div className="col-span-1 text-slate-500">{n.depth}</div>
+                                    <div className="col-span-2 font-mono font-semibold text-slate-800 truncate">{n.task.task_code}</div>
+                                    <div className="col-span-4 text-slate-700 truncate">{n.task.task_name}</div>
+                                    <div className="col-span-2 text-right text-slate-600">{fmtDate(start)}</div>
+                                    <div className="col-span-2 text-right text-slate-700 font-semibold">{fmtDate(finish)}</div>
+                                    <div className="col-span-1 text-right text-slate-600">{duration}</div>
+                                    <div className="col-span-1 text-right font-semibold text-slate-700">{fmtFloat(n.task.total_float_hr_cnt)}</div>
+                                    <div className="col-span-1 text-right font-semibold text-slate-600">{n.relTypeLabel}</div>
+                                    <div className="col-span-1 text-right text-slate-500">{n.lagDays}d</div>
+                                    <div className="col-span-1 text-right text-[10px] text-slate-500">{status}</div>
+                                  </div>
+                                )
+                              })}
                           </div>
                           {targetTrace.predecessors.length > 150 && (
                             <div className="text-center text-[10px] text-slate-400 pt-2">Showing first 150 of {targetTrace.predecessors.length} traced predecessors.</div>
