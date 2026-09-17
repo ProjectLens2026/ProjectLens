@@ -255,7 +255,7 @@ export function evaluatePathCredibility(
     if (!bySystem.has(x.c.system)) bySystem.set(x.c.system, [])
     bySystem.get(x.c.system)!.push(x)
   }
-  for (const [system, rows] of bySystem) {
+  for (const [system, rows] of Array.from(bySystem.entries())) {
     const approvals = rows.filter(x => x.c.stage === 'APPROVE')
     const deliveries = rows.filter(x => x.c.stage === 'DELIVER')
     const approvalFinish = latestFinish(approvals.map(x => x.t))
