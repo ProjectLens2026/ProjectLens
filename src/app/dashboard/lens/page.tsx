@@ -14,8 +14,7 @@ import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { getActiveProject, getActiveVersion, updateVersionNarrative } from '@/lib/projectStore'
 import { analyzeMultipleFloatPaths, activityToGanttRange, type FloatPath } from '@/lib/multipleFloatPaths'
-import type { Task, Relationship, TraceTask } from '@/lib/xerParser'
-import { traceLogic } from '@/lib/traceLogic'
+import type { Task } from '@/lib/xerParser'
 import { evaluatePathCredibility, pathActivityStart, pathActivityFinish, sortPathActivitiesByFinish, type PathCredibilityResult } from '@/lib/construction/pathCredibility'
 
 export default function ControlLensAnalysisPage() {
@@ -32,7 +31,6 @@ export default function ControlLensAnalysisPage() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [narrativeError, setNarrativeError] = useState<string | null>(null)
-  const [targetActivityId, setTargetActivityId] = useState<string>('')
 
   useEffect(() => {
     refresh()
@@ -89,40 +87,6 @@ export default function ControlLensAnalysisPage() {
     () => sortPathActivitiesByFinish(analysis?.longestPathActivities || []),
     [analysis?.longestPathActivities],
   )
-  // Target back-trace uses the submitted XER relationship network exactly as authored.
-  // It is NOT a recalculated longest path. It exposes everything feeding the selected target
-  // so Control Lens can later compare the submitted network with reference prerequisites.
-  const traceRelationships: Relationship[] = analysis?.traceRelationships || []
-  const traceTasks: Record<string, TraceTask> = analysis?.traceTasks || {}
-  const hasTargetTraceData = traceRelationships.length > 0 && Object.keys(traceTasks).length > 0
-
-  const targetCandidates = useMemo(() => {
-    const all = Object.values(traceTasks)
-    return all.sort((a: TraceTask, b: TraceTask) => {
-      const aMilestone = a.task_type === 'TT_Mile' || a.task_type === 'TT_FinMile' || a.task_type === 'TT_StartMile'
-      const bMilestone = b.task_type === 'TT_Mile' || b.task_type === 'TT_FinMile' || b.task_type === 'TT_StartMile'
-      if (aMilestone !== bMilestone) return aMilestone ? -1 : 1
-      return (a.task_name || a.task_code || '').localeCompare(b.task_name || b.task_code || '')
-    })
-  }, [analysis?.traceTasks])
-
-  useEffect(() => {
-    if (!hasTargetTraceData) return
-    if (targetActivityId && traceTasks[targetActivityId]) return
-    const all = Object.values(traceTasks)
-    const preferred =
-      all.find((t: TraceTask) => /projected completion/i.test(t.task_name || '')) ||
-      all.find((t: TraceTask) => /substantial completion/i.test(t.task_name || '')) ||
-      all.find((t: TraceTask) => /contract completion/i.test(t.task_name || '')) ||
-      all.find((t: TraceTask) => /final completion/i.test(t.task_name || '')) ||
-      targetCandidates[targetCandidates.length - 1]
-    if (preferred) setTargetActivityId(preferred.task_id)
-  }, [hasTargetTraceData, analysis?.traceTasks, targetActivityId, targetCandidates])
-
-  const targetTrace = useMemo(() => {
-    if (!targetActivityId || !hasTargetTraceData) return null
-    return traceLogic(targetActivityId, traceRelationships, traceTasks, { direction: 'pred', maxDepth: 0 })
-  }, [targetActivityId, hasTargetTraceData, analysis?.traceRelationships, analysis?.traceTasks])
 
   function togglePathExpand(pathNumber: number) {
     setExpandedPaths(prev => {
@@ -308,7 +272,7 @@ export default function ControlLensAnalysisPage() {
                 <div className="flex flex-wrap gap-2 mb-5">
                   {[
                     { id: 'critical',    label: 'Critical Activities (P6)', icon: '🎯' },
-                    { id: 'longest',     label: 'Driving Path / Target Trace', icon: '📏' },
+                    { id: 'longest',     label: 'Control Lens Paths', icon: '📏' },
                     { id: 'multi-paths', label: 'Multiple Float Paths (ControlLens)',   icon: '🛤️', isNew: true },
                     { id: 'lookahead',   label: '2 Week Lookahead',       icon: '📅' },
                     { id: 'not-started', label: 'Activities Not Started', icon: '⏸️' },
@@ -409,121 +373,48 @@ export default function ControlLensAnalysisPage() {
                   </div>
                 )}
 
-                {/* DRIVING PATH / TARGET TRACE — submitted XER truth first */}
+                {/* CONTROL LENS PATHS — reserved for engineering interpretation */}
                 {scheduleFilter === 'longest' && (
                   <div>
-                    <div className="mb-5">
-                      <div className="flex items-center justify-between gap-3 mb-2">
-                        <div>
-                          <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700">P6 Driving Path Flags</div>
-                          <p className="text-xs text-slate-500 mt-1">Activities carrying <span className="font-mono">driving_path_flag = Y</span> in the uploaded XER. Control Lens displays these exactly as submitted and does not treat the flags alone as proof of a complete relationship-connected longest path.</p>
-                        </div>
-                        <div className="text-[11px] font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 whitespace-nowrap">
-                          {longestPathActivities.length} flagged
-                        </div>
-                      </div>
-
-                      {longestPathActivities.length > 0 ? (
-                        <PathActivityTable activities={longestPathActivities} showRemaining />
-                      ) : (
-                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 leading-relaxed">
-                          No activities in this XER carry the P6 driving-path flag. Control Lens will not substitute zero-float activities and call them a P6 longest path.
-                        </div>
-                      )}
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
+                      <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700 mb-1">Control Lens Path Intelligence</div>
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        This section is reserved for Control Lens' engineering interpretation of the submitted XER. Control Lens will first identify the nature of the project, expected systems and physical delivery sequence, then use the submitted activity attributes, dates, durations, float and relationship structure to evaluate credible controlling paths. It does not replace the contractor's P6 schedule or silently rewrite CPM logic.
+                      </p>
                     </div>
 
-                    <div className="border-t border-slate-200 pt-5">
-                      <div className="flex flex-wrap items-end gap-3 mb-3">
-                        <div className="flex-1 min-w-[280px]">
-                          <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700 mb-1">Control Lens Target Back-Trace</div>
-                          <p className="text-xs text-slate-500">Select the milestone or activity you want to investigate. Control Lens walks the submitted predecessor relationships backward from that target. This is the authored relationship network — not yet a Control Lens-calculated longest path.</p>
-                        </div>
-                        {hasTargetTraceData && (
-                          <div className="min-w-[320px]">
-                            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Target milestone / activity</label>
-                            <select
-                              value={targetActivityId}
-                              onChange={e => setTargetActivityId(e.target.value)}
-                              className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-800"
-                            >
-                              {targetCandidates.map((t: TraceTask) => (
-                                <option key={t.task_id} value={t.task_id}>{t.task_code} · {t.task_name}</option>
-                              ))}
-                            </select>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <div className="border border-slate-200 rounded-xl p-4 bg-white">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-lg">🎯</span>
+                          <div>
+                            <div className="text-sm font-bold text-slate-900">CL Critical Path</div>
+                            <div className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Engineering path view</div>
                           </div>
-                        )}
+                        </div>
+                        <p className="text-xs text-slate-600 leading-relaxed">
+                          The submitted activities Control Lens identifies as the necessary physical and system sequence controlling the selected completion state, based on the nature of the work and the activity attributes contained in the XER.
+                        </p>
+                        <div className="mt-3 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                          Reserved — populate after Project Understanding / Nature of Work is established.
+                        </div>
                       </div>
 
-                      {!hasTargetTraceData ? (
-                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900">
-                          Target back-trace is not available for this version because the saved relationship network is missing. Re-upload the XER to enable relationship tracing.
+                      <div className="border border-slate-200 rounded-xl p-4 bg-white">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-lg">📏</span>
+                          <div>
+                            <div className="text-sm font-bold text-slate-900">CL Longest Path</div>
+                            <div className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Credible longest chain</div>
+                          </div>
                         </div>
-                      ) : targetTrace?.root ? (
-                        <>
-                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3 text-xs text-blue-900">
-                            <div className="font-bold">Target: {targetTrace.root.task_code} — {targetTrace.root.task_name}</div>
-                            <div className="mt-1 text-blue-800">{targetTrace.predCount} predecessor activities feed this target through the submitted XER relationship network{targetTrace.truncated ? ' (trace capped for safety)' : ''}.</div>
-                          </div>
-
-                          <div className="overflow-x-auto border border-slate-200 rounded-lg">
-                            <div className="px-3 py-2 text-[10px] text-slate-500 bg-slate-50 border-b border-slate-200">
-                              Submitted predecessors ordered by current Finish date, earliest first. Duration is the P6 remaining duration stored with the XER analysis.
-                            </div>
-                            <div className="grid grid-cols-16 gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-50 border-b border-slate-200 min-w-[1180px]">
-                              <div className="col-span-1">Depth</div>
-                              <div className="col-span-2">Code</div>
-                              <div className="col-span-4">Activity</div>
-                              <div className="col-span-2 text-right">Start</div>
-                              <div className="col-span-2 text-right">Finish</div>
-                              <div className="col-span-1 text-right">Duration</div>
-                              <div className="col-span-1 text-right">Float</div>
-                              <div className="col-span-1 text-right">Rel</div>
-                              <div className="col-span-1 text-right">Lag</div>
-                              <div className="col-span-1 text-right">Status</div>
-                            </div>
-                            {targetTrace.predecessors
-                              .slice()
-                              .sort((a: any, b: any) => {
-                                const af = a.task.act_end_date || a.task.early_end_date || a.task.target_end_date || ''
-                                const bf = b.task.act_end_date || b.task.early_end_date || b.task.target_end_date || ''
-                                return af.localeCompare(bf)
-                              })
-                              .slice(0, 150)
-                              .map((n: any, i: number) => {
-                                const start = n.task.act_start_date || n.task.early_start_date || n.task.target_start_date || ''
-                                const finish = n.task.act_end_date || n.task.early_end_date || n.task.target_end_date || ''
-                                const duration = n.task.remain_drtn_hr_cnt != null && n.task.remain_drtn_hr_cnt !== ''
-                                  ? fmtFloat(n.task.remain_drtn_hr_cnt)
-                                  : '—'
-                                const status = n.task.status_code === 'TK_Complete' ? 'Done' : n.task.status_code === 'TK_Active' ? 'In progress' : 'Not started'
-                                return (
-                                  <div key={`${n.task.task_id}-${i}`} className="grid grid-cols-16 gap-2 px-3 py-2 text-xs border-b border-slate-100 last:border-0 min-w-[1180px] items-center">
-                                    <div className="col-span-1 text-slate-500">{n.depth}</div>
-                                    <div className="col-span-2 font-mono font-semibold text-slate-800 truncate">{n.task.task_code}</div>
-                                    <div className="col-span-4 text-slate-700 truncate">{n.task.task_name}</div>
-                                    <div className="col-span-2 text-right text-slate-600">{fmtDate(start)}</div>
-                                    <div className="col-span-2 text-right text-slate-700 font-semibold">{fmtDate(finish)}</div>
-                                    <div className="col-span-1 text-right text-slate-600">{duration}</div>
-                                    <div className="col-span-1 text-right font-semibold text-slate-700">{fmtFloat(n.task.total_float_hr_cnt)}</div>
-                                    <div className="col-span-1 text-right font-semibold text-slate-600">{n.relTypeLabel}</div>
-                                    <div className="col-span-1 text-right text-slate-500">{n.lagDays}d</div>
-                                    <div className="col-span-1 text-right text-[10px] text-slate-500">{status}</div>
-                                  </div>
-                                )
-                              })}
-                          </div>
-                          {targetTrace.predecessors.length > 150 && (
-                            <div className="text-center text-[10px] text-slate-400 pt-2">Showing first 150 of {targetTrace.predecessors.length} traced predecessors.</div>
-                          )}
-
-                          <div className="mt-3 bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-700 leading-relaxed">
-                            <div className="font-bold text-slate-800 mb-1">What this means</div>
-                            This back-trace answers: <strong>what does the submitted schedule connect to this target?</strong> It does not yet answer which one of those branches is the mathematically controlling path, nor whether the construction sequence is credible. Those are the next Control Lens layers.
-                          </div>
-                        </>
-                      ) : (
-                        <div className="text-center py-6 text-slate-400 text-xs">Select a target milestone to trace its submitted predecessor network.</div>
-                      )}
+                        <p className="text-xs text-slate-600 leading-relaxed">
+                          The longest credible submitted chain among the necessary work states leading to the selected milestone, using the submitted durations, dates, float and activity relationships after Control Lens understands what is actually being built.
+                        </p>
+                        <div className="mt-3 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                          Reserved — populate after Project Understanding / Nature of Work is established.
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
