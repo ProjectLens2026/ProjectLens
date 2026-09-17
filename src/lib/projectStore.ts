@@ -723,9 +723,18 @@ export function getActiveProject(): Project | null {
   return _projects.find(p => p.id === id) || null
 }
 
+// Versions visible to normal project/trend/dashboard views. Soft-deleted
+// schedule versions remain stored for restore, but must not participate in
+// project selection, trend analysis, or latest-version resolution.
+export function getVisibleVersions(project: Project | null): ScheduleVersion[] {
+  if (!project || !project.versions) return []
+  return project.versions.filter(v => !v.deletedAt)
+}
+
 export function getLatestVersion(project: Project | null): ScheduleVersion | null {
-  if (!project || !project.versions || project.versions.length === 0) return null
-  return [...project.versions].sort((a, b) =>
+  const versions = getVisibleVersions(project)
+  if (versions.length === 0) return null
+  return [...versions].sort((a, b) =>
     new Date(getVersionEffectiveDate(b)).getTime() -
     new Date(getVersionEffectiveDate(a)).getTime()
   )[0]
@@ -734,9 +743,10 @@ export function getLatestVersion(project: Project | null): ScheduleVersion | nul
 export function getActiveVersion(project?: Project | null): ScheduleVersion | null {
   const p = project || getActiveProject()
   if (!p) return null
+  const versions = getVisibleVersions(p)
   const versionId = getActiveVersionId()
   if (versionId) {
-    const found = p.versions.find(v => v.id === versionId)
+    const found = versions.find(v => v.id === versionId)
     if (found) return found
   }
   return getLatestVersion(p)
