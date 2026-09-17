@@ -265,7 +265,7 @@ export function analyzeCLPathIntelligence(analysis: any): CLPathIntelligenceResu
     `The XER contains electrical-distribution activities such as ${dist.slice(0,3).map(t=>`${codeOf(t)} — ${nameOf(t)}`).join('; ')}, but no activity explicitly identified as switchgear. Map the submitted equipment to the project electrical one-line before declaring the state missing.`,dist.slice(0,4).map(codeOf))
   for (const d of dist.filter(t=>/fabricate and delivery.*mdp|\bmdp\b/.test(textOf(t)))) {
     const reach=reachable(String(d.task_id),succ,6)
-    const downstream=[...reach].map(id=>byId.get(id)).filter(Boolean)
+    const downstream=Array.from(reach).map(id=>byId.get(id)).filter(Boolean)
     if (!downstream.some(t=>['STARTUP','TESTING','COMMISSIONING','IST'].includes(semantic(t)) || /energiz|acceptance/.test(textOf(t)))) {
       add('HIGH','Electrical distribution chain does not demonstrate energization / testing readiness',
         `${codeOf(d)} — ${nameOf(d)} has downstream installation logic, but Control Lens does not find an energization, protection/test, or commissioning state within the submitted successor chain.`,[codeOf(d),...downstream.slice(0,5).map(codeOf)])
@@ -276,7 +276,7 @@ export function analyzeCLPathIntelligence(analysis: any): CLPathIntelligenceResu
   // Generator-specific readiness.
   const genInstall=tasks.find(t=>semantic(t)==='GENERATOR' && /install/.test(textOf(t)))
   if (genInstall) {
-    const downstream=[...reachable(String(genInstall.task_id),succ,5)].map(id=>byId.get(id)).filter(Boolean)
+    const downstream=Array.from(reachable(String(genInstall.task_id),succ,5)).map(id=>byId.get(id)).filter(Boolean)
     if (!downstream.some(t=>/generator.*test|load bank|start[ -]?up|commission|ats|transfer switch|energiz/.test(textOf(t))))
       add('HIGH','Generator installation is not followed by generator-specific startup / test / acceptance logic',
         `${codeOf(genInstall)} — ${nameOf(genInstall)} is present, but its submitted downstream logic does not demonstrate generator startup, ATS/source verification, load-bank testing, energization or acceptance.`,[codeOf(genInstall),...downstream.slice(0,5).map(codeOf)])
