@@ -279,7 +279,7 @@ export default function ControlLensAnalysisPage() {
 
                 <div className="flex flex-wrap gap-2 mb-5">
                   {[
-                    { id: 'critical',    label: 'Critical Path',          icon: '🎯' },
+                    { id: 'critical',    label: 'Critical Activities (P6)', icon: '🎯' },
                     { id: 'longest',     label: 'Longest Path',           icon: '📏' },
                     { id: 'multi-paths', label: 'Multiple Float Paths (ControlLens)',   icon: '🛤️', isNew: true },
                     { id: 'lookahead',   label: '2 Week Lookahead',       icon: '📅' },
@@ -299,18 +299,29 @@ export default function ControlLensAnalysisPage() {
                   ))}
                 </div>
 
-                {/* CRITICAL PATH — P6 truth first, Control Lens review second */}
+                {/* P6 CRITICAL ACTIVITIES — submitted schedule truth only */}
                 {scheduleFilter === 'critical' && (
                   <div>
                     <div className="mb-3">
-                      <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700">P6 Critical Path</div>
-                      <p className="text-xs text-slate-500 mt-1">Activities identified by the uploaded P6/XER data as critical. Displayed exactly from the schedule data and ordered by current Finish date, earliest first.</p>
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700">P6 Critical Activities</div>
+                          <p className="text-xs text-slate-500 mt-1">Activities identified as critical by the uploaded P6/XER schedule. This is the submitted critical-activity set — not a Control Lens reconstructed path. Activities are ordered by current Finish date, earliest first.</p>
+                        </div>
+                        <div className="text-[11px] font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 whitespace-nowrap">
+                          {criticalPathActivities.length} activities
+                        </div>
+                      </div>
                     </div>
                     <PathActivityTable activities={criticalPathActivities} showRemaining />
                     {criticalPathActivities.length === 0 && (
-                      <div className="text-center py-8 text-slate-400 text-xs">No critical path activities detected.</div>
+                      <div className="text-center py-8 text-slate-400 text-xs">No P6 critical activities detected.</div>
                     )}
-                    <PathCredibilityPanel result={criticalPathCredibility} title="Control Lens Construction Path Review" />
+
+                    <div className="mt-4 bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-700 leading-relaxed">
+                      <div className="font-bold text-slate-800 mb-1">Control Lens interpretation</div>
+                      Critical activities can belong to different branches of the network and do not, by themselves, prove one continuous critical path. Control Lens therefore does not run construction-path credibility against this list as if it were one chain. Path credibility will be evaluated from a selected target milestone/activity using relationship back-trace.
+                    </div>
                   </div>
                 )}
 
