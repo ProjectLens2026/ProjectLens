@@ -36,87 +36,6 @@ function approvalKind(f: ApprovalFinding): 'FINDING' | 'RECOMMENDATION' {
   return f.kind === 'RECOMMENDATION' ? 'RECOMMENDATION' : 'FINDING'
 }
 
-function formatUsDate(value?: Date | string | null): string {
-  if (!value) return '—'
-  if (value instanceof Date) {
-    const mm = String(value.getMonth() + 1).padStart(2, '0')
-    const dd = String(value.getDate()).padStart(2, '0')
-    return `${mm}/${dd}/${value.getFullYear()}`
-  }
-  const iso = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return String(value)
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  return `${mm}/${dd}/${d.getFullYear()}`
-}
-
-function compactUsDate(value: Date): string {
-  const mm = String(value.getMonth() + 1).padStart(2, '0')
-  const dd = String(value.getDate()).padStart(2, '0')
-  return `${mm}${dd}${value.getFullYear()}`
-}
-
-function externalText(value?: string): string {
-  if (!value) return ''
-  return value
-    .replace(/Control Lens did not identify/gi, 'The submitted schedule does not clearly identify')
-    .replace(/Control Lens found/gi, 'The review identified')
-    .replace(/Control Lens traced/gi, 'The review traced')
-    .replace(/Control Lens compared/gi, 'The review compared')
-    .replace(/Control Lens identifies/gi, 'The review identifies')
-    .replace(/Control Lens recognizes/gi, 'The review recognizes')
-    .replace(/Control Lens reference/gi, 'reference')
-    .replace(/Control Lens schedule-control recommendation/gi, 'schedule-control recommendation')
-    .replace(/Control Lens recommendation only/gi, 'schedule-control recommendation')
-    .replace(/\bControl Lens\b/gi, 'the review')
-}
-
-function externalFindingId(f: ApprovalFinding): string {
-  const n = f.id.match(/(\d+)$/)?.[1] || f.id.replace(/[^A-Za-z0-9]/g, '').slice(-3) || '001'
-  return `${approvalKind(f) === 'RECOMMENDATION' ? 'REC' : 'REV'}-${n}`
-}
-
-function externalReviewStatus(result: ApprovalReadinessResult): string {
-  if (!result.criticalGates.passed) return 'Review Complete — Critical Comments Require Resolution'
-  if (result.counts.critical > 0) return 'Review Complete — Critical Comments Identified'
-  if (result.counts.major > 0) return 'Review Complete — Corrective Comments Identified'
-  if (result.counts.minor > 0) return 'Review Complete — Minor Comments Identified'
-  if ((result.recommendationCount || 0) > 0) return 'Review Complete — Recommendations Identified'
-  return 'Review Complete — No Material Comments Identified'
-}
-
-function externalTitle(f: ApprovalFinding): string {
-  if (approvalKind(f) === 'RECOMMENDATION') {
-    const m = f.title.match(/^Suggested Key Milestone\s*[—-]\s*(.+)$/i)
-    if (m) return `Schedule Control Recommendation — ${m[1]}`
-    return externalText(f.title)
-  }
-
-  const raw = externalText(f.title)
-  const isGeneric = /(^|\s)(General)(\s|·|—|-|$)/i.test(raw) || /related condition/i.test(raw)
-  if (!isGeneric) return raw
-
-  if (/supporting predecessors finish after this completion\/readiness activity/i.test(f.whatFound || '')) {
-    return 'Completion / Readiness Milestone Not Fully Supported'
-  }
-
-  const discipline = f.discipline && !/^general$/i.test(f.discipline) ? f.discipline : ''
-  const system = f.system && !/^general$/i.test(f.system) ? f.system : ''
-  if (discipline && system) return `${discipline} — ${system} Schedule Logic Review`
-  if (system) return `${system} Schedule Logic Review`
-  if (discipline) return `${discipline} Schedule Logic Review`
-
-  const first = f.affectedActivities?.[0]?.name?.trim()
-  if (first) {
-    const short = first.length > 72 ? `${first.slice(0, 69)}…` : first
-    return `Schedule Logic Review — ${short}`
-  }
-  const count = f.evidence?.length || 1
-  return `Schedule Logic Review — ${count} Related Condition${count === 1 ? '' : 's'}`
-}
-
 export default function ApprovalReadinessPage() {
   const [project, setProject] = useState<any>(null)
   const [version, setVersion] = useState<any>(null)
@@ -143,15 +62,48 @@ export default function ApprovalReadinessPage() {
     setReady(true)
   }, [])
 
-  function runCheck() {
-    if (!analysis) return
+  async function runCheck() {
+    if (running) return
     setRunning(true)
+    setExpanded(null)
+    setReportKind(null)
+
+    // IMPORTANT: a re-run must use the project/version that is active NOW, not
+    // the copy that happened to be loaded when this page first mounted. This
+    // prevents a stale cached Approval Readiness result from being re-evaluated
+    // after the user changes versions from the project/version selector.
     try {
-      const res = evaluateApprovalReadiness(analysis, { mode, projectType: 'ALL' })
+      // Give React one paint so the button visibly changes to "Running…" even
+      // though evaluateApprovalReadiness() is synchronous and often completes
+      // in the same event loop tick.
+      await new Promise<void>(resolve => {
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+          window.requestAnimationFrame(() => resolve())
+        } else {
+          setTimeout(resolve, 0)
+        }
+      })
+
+      const currentProject = getActiveProject()
+      const currentVersion = getActiveVersion(currentProject)
+      const currentAnalysis = currentVersion?.analysis || null
+
+      if (!currentProject || !currentVersion || !currentAnalysis) {
+        throw new Error('No active schedule version is available for Approval Readiness.')
+      }
+
+      // Refresh the page state from the active version before evaluating.
+      setProject(currentProject)
+      setVersion(currentVersion)
+      setAnalysis(currentAnalysis)
+
+      const res = evaluateApprovalReadiness(currentAnalysis, { mode, projectType: 'ALL' })
       setResult(res)
-      // persist so it survives leaving the page
-      if (res && project?.id && version?.id) {
-        try { updateVersionApprovalResult(project.id, version.id, res) } catch {}
+
+      // Replace the saved result for THIS active version with the fresh run.
+      if (res) {
+        const saved = updateVersionApprovalResult(currentProject.id, currentVersion.id, res)
+        if (!saved) console.warn('[approval] fresh result could not be persisted')
       }
     } catch (e) {
       console.error('[approval] evaluation failed:', e)
@@ -428,11 +380,10 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
   project: any
   onBack: () => void
 }) {
-  const now = new Date()
-  const today = formatUsDate(now)
+  const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit' })
   const code = (project?.projectId || project?.name || 'PRJ').toString().replace(/\s+/g, '').toUpperCase().slice(0, 14)
-  const reportDate = compactUsDate(now)
-  const reportNo = `SR-${code}-${kind === 'executive' ? 'EXEC' : 'FULL'}-${reportDate}`
+  const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  const reportNo = `CL-AR-${code}-${kind === 'executive' ? 'EXEC' : 'FULL'}-${ymd}`
   const voice = mode === 'PRE_SUBMISSION' ? 'Pre-Submission Check (Contractor)' : 'Reviewer Check (Owner / PM)'
   const gc = gradeColor(result.grade)
 
@@ -460,9 +411,8 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
           html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
           .ar-print-root { height: auto !important; overflow: visible !important; display: block !important; }
           .ar-print-scroll { height: auto !important; overflow: visible !important; flex: none !important; padding: 0 !important; background: #fff !important; }
-          .ar-print-doc { width: 100% !important; max-width: none !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; background: #fff !important; }
-          .report-section-bar { break-after: avoid-page !important; page-break-after: avoid !important; }
-          .report-section-bar + * { break-before: avoid-page !important; page-break-before: avoid !important; }
+          .ar-print-doc { max-width: none !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; }
+          @page { margin: 0.5in; }
         }
       `}</style>
       {/* toolbar — hidden on print */}
@@ -480,12 +430,20 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
           {/* ── Cover header ─────────────────────────────────────────── */}
           <div className="border-b-2 pb-4 mb-5" style={{ borderColor: COLORS.ink }}>
             <div className="flex items-start justify-between">
-              <div>
-                <div className="text-[18px] font-extrabold leading-tight tracking-wide" style={{ color: COLORS.ink }}>
-                  SCHEDULE REVIEW
+              <div className="flex items-start gap-3">
+                <div className="flex flex-col gap-[3px] mt-1">
+                  <span className="block h-[5px] rounded-[1px]" style={{ width: 22, background: COLORS.blue }} />
+                  <span className="block h-[5px] rounded-[1px]" style={{ width: 30, background: COLORS.red }} />
+                  <span className="block h-[5px] rounded-[1px]" style={{ width: 18, background: COLORS.green }} />
+                  <span className="block h-[5px] rounded-[1px]" style={{ width: 25, background: COLORS.slate }} />
                 </div>
-                <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500 mt-0.5">
-                  Approval Readiness
+                <div>
+                  <div className="text-[18px] font-extrabold leading-tight" style={{ color: COLORS.ink }}>
+                    CONTROL<span style={{ color: COLORS.blue }}>LENS</span>
+                  </div>
+                  <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500 mt-0.5">
+                    Approval Readiness
+                  </div>
                 </div>
               </div>
               <div className="text-right">
@@ -521,7 +479,7 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
               <div className="text-[20px] font-extrabold" style={{ color: gc }}>{result.grade}</div>
             </div>
             <div className="flex-1">
-              <div className="text-[14px] font-extrabold uppercase tracking-wide mb-1" style={{ color: COLORS.ink }}>{externalReviewStatus(result)}</div>
+              <div className="text-[14px] font-extrabold uppercase tracking-wide mb-1" style={{ color: COLORS.ink }}>{result.recommendation}</div>
               <div className="text-[11px] text-slate-600">
                 Critical Gates: <b style={{ color: result.criticalGates.passed ? COLORS.green : COLORS.red }}>{result.criticalGates.passed ? 'PASS' : 'FAIL'}</b>
                 {'  ·  '}Critical {result.counts.critical} · Major {result.counts.major} · Minor {result.counts.minor}
@@ -560,9 +518,6 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
               })}
             </tbody>
           </table>
-          <div className="text-[9px] text-slate-400 leading-relaxed -mt-2 mb-4">
-            Domain scores reflect the checks currently applicable to the submitted schedule and configured review framework. A full score means no score-eligible condition was identified by those checks; it does not replace project-specific reviewer verification.
-          </div>
 
           {/* ── Findings ─────────────────────────────────────────────── */}
           <SectionBar>{kind === 'executive' ? 'Material Findings' : 'All Findings — Detail & Evidence'}</SectionBar>
@@ -571,18 +526,18 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
           ) : shown.map(f => (
             <div key={f.id} className="mb-4 border border-slate-200 rounded-lg overflow-hidden print:break-inside-avoid">
               <div className="px-3 py-2 border-b border-slate-200 flex items-center gap-2" style={{ background: '#f8fafc' }}>
-                <span className="font-mono text-[10px] font-bold text-white px-1.5 py-0.5 rounded" style={{ background: COLORS.ink }}>{externalFindingId(f)}</span>
+                <span className="font-mono text-[10px] font-bold text-white px-1.5 py-0.5 rounded" style={{ background: COLORS.ink }}>{f.id}</span>
                 <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">{f.primaryDomain}</span>
-                <span className="text-[12px] font-extrabold flex-1" style={{ color: COLORS.ink }}>{externalTitle(f)}</span>
+                <span className="text-[12px] font-extrabold flex-1" style={{ color: COLORS.ink }}>{f.title}</span>
                 <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{f.ruleStrength} · sev {f.severity} · −{f.scoreDeduction}</span>
               </div>
               <div className="px-4 py-3 text-[11px]">
-                <Memo label="Reviewer Observation">{externalText(f.whatFound)}</Memo>
-                <Memo label="Schedule / Project Impact">{externalText(f.whyItMatters)}</Memo>
-                <Memo label={mode === 'PRE_SUBMISSION' ? 'Pre-Submission Action' : 'Contractor Action'}>
-                  {externalText(mode === 'PRE_SUBMISSION' ? f.preSubmissionNote : f.reviewerCheck)}
+                <Memo label="What Control Lens Found">{f.whatFound}</Memo>
+                <Memo label="Why This Matters">{f.whyItMatters}</Memo>
+                <Memo label={mode === 'PRE_SUBMISSION' ? 'Pre-Submission Note' : 'Reviewer Check'}>
+                  {mode === 'PRE_SUBMISSION' ? f.preSubmissionNote : f.reviewerCheck}
                 </Memo>
-                {kind === 'complete' && <Memo label="Schedule Reference">{externalText(f.referenceRequirement)}</Memo>}
+                {kind === 'complete' && <Memo label="Reference">{f.referenceRequirement}</Memo>}
                 {kind === 'complete' && f.affectedActivities.length > 0 && (
                   <>
                     <div className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500 mb-1 mt-2">Affected activities</div>
@@ -610,26 +565,26 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
 
           {reportRecommendations.length > 0 && (
             <>
-              <SectionBar>Schedule Control Recommendations</SectionBar>
+              <SectionBar>Control Lens Recommendations</SectionBar>
               <div className="text-[10px] text-slate-500 mb-3">Non-scoring schedule-control suggestions. They are not contractual requirements unless the governing contract or owner profile requires them.</div>
               {reportRecommendations.map(f => (
                 <div key={f.id} className="mb-4 border border-blue-200 rounded-lg overflow-hidden print:break-inside-avoid">
                   <div className="px-3 py-2 border-b border-blue-100 flex items-center gap-2 bg-blue-50/50">
-                    <span className="font-mono text-[10px] font-bold text-white px-1.5 py-0.5 rounded" style={{ background: COLORS.blue }}>{externalFindingId(f)}</span>
+                    <span className="font-mono text-[10px] font-bold text-white px-1.5 py-0.5 rounded" style={{ background: COLORS.blue }}>{f.id}</span>
                     <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">{f.primaryDomain}</span>
-                    <span className="text-[12px] font-extrabold flex-1" style={{ color: COLORS.ink }}>{externalTitle(f)}</span>
-                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">Schedule Control Recommendation · no score impact</span>
+                    <span className="text-[12px] font-extrabold flex-1" style={{ color: COLORS.ink }}>{f.title}</span>
+                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">Recommendation · no score impact</span>
                   </div>
                   <div className="px-4 py-3 text-[11px]">
-                    <Memo label="Reviewer Observation">{externalText(f.whatFound)}</Memo>
-                    <Memo label="Rationale">{externalText(f.whyItMatters)}</Memo>
-                    <Memo label={mode === 'PRE_SUBMISSION' ? 'Pre-Submission Action' : 'Contractor Action'}>
-                      {externalText(mode === 'PRE_SUBMISSION' ? f.preSubmissionNote : f.reviewerCheck)}
+                    <Memo label="What Control Lens Found">{f.whatFound}</Memo>
+                    <Memo label="Why This Helps">{f.whyItMatters}</Memo>
+                    <Memo label={mode === 'PRE_SUBMISSION' ? 'Pre-Submission Note' : 'Reviewer Check'}>
+                      {mode === 'PRE_SUBMISSION' ? f.preSubmissionNote : f.reviewerCheck}
                     </Memo>
-                    {kind === 'complete' && <Memo label="Schedule Reference / Suggested Action">{externalText(f.referenceRequirement)}</Memo>}
+                    {kind === 'complete' && <Memo label="Reference / Suggested Action">{f.referenceRequirement}</Memo>}
                     {kind === 'complete' && f.affectedActivities.length > 0 && (
                       <>
-                        <div className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500 mb-1 mt-2">Schedule Reference</div>
+                        <div className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500 mb-1 mt-2">Supporting XER evidence</div>
                         <table className="w-full text-[10.5px]">
                           <tbody>
                             {f.affectedActivities.map((a, i) => (
@@ -651,7 +606,7 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
 
           {/* footer */}
           <div className="flex items-center justify-between pt-3 mt-4 border-t-2 text-[10px] text-slate-400" style={{ borderColor: COLORS.ink }}>
-            <span>Review based on the submitted schedule data. The P6 schedule of record, governing contract documents, and authorized reviewer govern. The readiness score is decision-support and does not replace professional judgment.</span>
+            <span>Generated by <b style={{ color: COLORS.ink }}>ControlLens</b> — Approval Readiness. Advisory; the P6 schedule of record and the authorized reviewer govern. Score is provisional pending calibration.</span>
             <span className="font-mono">{reportNo}</span>
           </div>
         </div>
@@ -669,7 +624,7 @@ function Info({ label, value, mono }: { label: string; value: string; mono?: boo
   )
 }
 function SectionBar({ children }: { children: React.ReactNode }) {
-  return <div className="report-section-bar text-[11px] font-extrabold uppercase tracking-wide text-white px-3 py-1.5 rounded mb-3 mt-4" style={{ background: COLORS.ink }}>{children}</div>
+  return <div className="text-[11px] font-extrabold uppercase tracking-wide text-white px-3 py-1.5 rounded mb-3 mt-4" style={{ background: COLORS.ink }}>{children}</div>
 }
 function Memo({ label, children }: { label: string; children: React.ReactNode }) {
   return (
