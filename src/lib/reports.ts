@@ -74,18 +74,20 @@ export const REPORT_TITLES: Record<ReportKind, string> = {
 export const REPORT_TAGLINE = 'CONSTRUCTION SCHEDULE INTELLIGENCE'
 
 /**
- * Format a date for display in report headers and footers.
- * Always renders as "Jun 07, 2026" — short, unambiguous, no locale surprises.
+ * Format a user-facing report date as MM/DD/YYYY.
+ * Report identifiers may still use compact YYYYMMDD internally for stable sorting.
  */
 export function fmtReportDate(d: Date | string | null | undefined): string {
   if (!d) return '—'
+  if (typeof d === 'string') {
+    const iso = d.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`
+  }
   const date = typeof d === 'string' ? new Date(d) : d
   if (isNaN(date.getTime())) return '—'
-  return date.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-  })
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  return `${mm}/${dd}/${date.getFullYear()}`
 }
 
 /**

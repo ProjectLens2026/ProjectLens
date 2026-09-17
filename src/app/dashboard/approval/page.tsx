@@ -36,6 +36,51 @@ function approvalKind(f: ApprovalFinding): 'FINDING' | 'RECOMMENDATION' {
   return f.kind === 'RECOMMENDATION' ? 'RECOMMENDATION' : 'FINDING'
 }
 
+function formatUsDate(value?: Date | string | null): string {
+  if (!value) return '—'
+  if (value instanceof Date) {
+    const mm = String(value.getMonth() + 1).padStart(2, '0')
+    const dd = String(value.getDate()).padStart(2, '0')
+    return `${mm}/${dd}/${value.getFullYear()}`
+  }
+  const iso = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return String(value)
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${mm}/${dd}/${d.getFullYear()}`
+}
+
+function compactUsDate(value: Date): string {
+  const mm = String(value.getMonth() + 1).padStart(2, '0')
+  const dd = String(value.getDate()).padStart(2, '0')
+  return `${mm}${dd}${value.getFullYear()}`
+}
+
+function externalText(value?: string): string {
+  if (!value) return ''
+  return value
+    .replace(/Control Lens did not identify/gi, 'The submitted schedule does not clearly identify')
+    .replace(/Control Lens found/gi, 'The review identified')
+    .replace(/Control Lens traced/gi, 'The review traced')
+    .replace(/Control Lens compared/gi, 'The review compared')
+    .replace(/Control Lens identifies/gi, 'The review identifies')
+    .replace(/Control Lens recognizes/gi, 'The review recognizes')
+    .replace(/Control Lens reference/gi, 'reference')
+    .replace(/Control Lens schedule-control recommendation/gi, 'schedule-control recommendation')
+    .replace(/Control Lens recommendation only/gi, 'schedule-control recommendation')
+    .replace(/\bControl Lens\b/gi, 'the review')
+}
+
+function externalTitle(f: ApprovalFinding): string {
+  if (approvalKind(f) === 'RECOMMENDATION') {
+    const m = f.title.match(/^Suggested Key Milestone\s*[—-]\s*(.+)$/i)
+    if (m) return `Schedule Control Recommendation — ${m[1]}`
+  }
+  return externalText(f.title)
+}
+
 export default function ApprovalReadinessPage() {
   const [project, setProject] = useState<any>(null)
   const [version, setVersion] = useState<any>(null)
@@ -347,10 +392,11 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
   project: any
   onBack: () => void
 }) {
-  const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit' })
+  const now = new Date()
+  const today = formatUsDate(now)
   const code = (project?.projectId || project?.name || 'PRJ').toString().replace(/\s+/g, '').toUpperCase().slice(0, 14)
-  const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-  const reportNo = `CL-AR-${code}-${kind === 'executive' ? 'EXEC' : 'FULL'}-${ymd}`
+  const reportDate = compactUsDate(now)
+  const reportNo = `SR-${code}-${kind === 'executive' ? 'EXEC' : 'FULL'}-${reportDate}`
   const voice = mode === 'PRE_SUBMISSION' ? 'Pre-Submission Check (Contractor)' : 'Reviewer Check (Owner / PM)'
   const gc = gradeColor(result.grade)
 
@@ -397,20 +443,12 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
           {/* ── Cover header ─────────────────────────────────────────── */}
           <div className="border-b-2 pb-4 mb-5" style={{ borderColor: COLORS.ink }}>
             <div className="flex items-start justify-between">
-              <div className="flex items-start gap-3">
-                <div className="flex flex-col gap-[3px] mt-1">
-                  <span className="block h-[5px] rounded-[1px]" style={{ width: 22, background: COLORS.blue }} />
-                  <span className="block h-[5px] rounded-[1px]" style={{ width: 30, background: COLORS.red }} />
-                  <span className="block h-[5px] rounded-[1px]" style={{ width: 18, background: COLORS.green }} />
-                  <span className="block h-[5px] rounded-[1px]" style={{ width: 25, background: COLORS.slate }} />
+              <div>
+                <div className="text-[18px] font-extrabold leading-tight tracking-wide" style={{ color: COLORS.ink }}>
+                  SCHEDULE REVIEW
                 </div>
-                <div>
-                  <div className="text-[18px] font-extrabold leading-tight" style={{ color: COLORS.ink }}>
-                    CONTROL<span style={{ color: COLORS.blue }}>LENS</span>
-                  </div>
-                  <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500 mt-0.5">
-                    Approval Readiness
-                  </div>
+                <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500 mt-0.5">
+                  Approval Readiness
                 </div>
               </div>
               <div className="text-right">
@@ -495,16 +533,16 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
               <div className="px-3 py-2 border-b border-slate-200 flex items-center gap-2" style={{ background: '#f8fafc' }}>
                 <span className="font-mono text-[10px] font-bold text-white px-1.5 py-0.5 rounded" style={{ background: COLORS.ink }}>{f.id}</span>
                 <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">{f.primaryDomain}</span>
-                <span className="text-[12px] font-extrabold flex-1" style={{ color: COLORS.ink }}>{f.title}</span>
+                <span className="text-[12px] font-extrabold flex-1" style={{ color: COLORS.ink }}>{externalTitle(f)}</span>
                 <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{f.ruleStrength} · sev {f.severity} · −{f.scoreDeduction}</span>
               </div>
               <div className="px-4 py-3 text-[11px]">
-                <Memo label="What Control Lens Found">{f.whatFound}</Memo>
-                <Memo label="Why This Matters">{f.whyItMatters}</Memo>
-                <Memo label={mode === 'PRE_SUBMISSION' ? 'Pre-Submission Note' : 'Reviewer Check'}>
-                  {mode === 'PRE_SUBMISSION' ? f.preSubmissionNote : f.reviewerCheck}
+                <Memo label="Reviewer Observation">{externalText(f.whatFound)}</Memo>
+                <Memo label="Schedule / Project Impact">{externalText(f.whyItMatters)}</Memo>
+                <Memo label={mode === 'PRE_SUBMISSION' ? 'Pre-Submission Action' : 'Contractor Action'}>
+                  {externalText(mode === 'PRE_SUBMISSION' ? f.preSubmissionNote : f.reviewerCheck)}
                 </Memo>
-                {kind === 'complete' && <Memo label="Reference">{f.referenceRequirement}</Memo>}
+                {kind === 'complete' && <Memo label="Schedule Reference">{externalText(f.referenceRequirement)}</Memo>}
                 {kind === 'complete' && f.affectedActivities.length > 0 && (
                   <>
                     <div className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500 mb-1 mt-2">Affected activities</div>
@@ -532,26 +570,26 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
 
           {reportRecommendations.length > 0 && (
             <>
-              <SectionBar>Control Lens Recommendations</SectionBar>
+              <SectionBar>Schedule Control Recommendations</SectionBar>
               <div className="text-[10px] text-slate-500 mb-3">Non-scoring schedule-control suggestions. They are not contractual requirements unless the governing contract or owner profile requires them.</div>
               {reportRecommendations.map(f => (
                 <div key={f.id} className="mb-4 border border-blue-200 rounded-lg overflow-hidden print:break-inside-avoid">
                   <div className="px-3 py-2 border-b border-blue-100 flex items-center gap-2 bg-blue-50/50">
                     <span className="font-mono text-[10px] font-bold text-white px-1.5 py-0.5 rounded" style={{ background: COLORS.blue }}>{f.id}</span>
                     <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">{f.primaryDomain}</span>
-                    <span className="text-[12px] font-extrabold flex-1" style={{ color: COLORS.ink }}>{f.title}</span>
-                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">Recommendation · no score impact</span>
+                    <span className="text-[12px] font-extrabold flex-1" style={{ color: COLORS.ink }}>{externalTitle(f)}</span>
+                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">Schedule Control Recommendation · no score impact</span>
                   </div>
                   <div className="px-4 py-3 text-[11px]">
-                    <Memo label="What Control Lens Found">{f.whatFound}</Memo>
-                    <Memo label="Why This Helps">{f.whyItMatters}</Memo>
-                    <Memo label={mode === 'PRE_SUBMISSION' ? 'Pre-Submission Note' : 'Reviewer Check'}>
-                      {mode === 'PRE_SUBMISSION' ? f.preSubmissionNote : f.reviewerCheck}
+                    <Memo label="Reviewer Observation">{externalText(f.whatFound)}</Memo>
+                    <Memo label="Rationale">{externalText(f.whyItMatters)}</Memo>
+                    <Memo label={mode === 'PRE_SUBMISSION' ? 'Pre-Submission Action' : 'Contractor Action'}>
+                      {externalText(mode === 'PRE_SUBMISSION' ? f.preSubmissionNote : f.reviewerCheck)}
                     </Memo>
-                    {kind === 'complete' && <Memo label="Reference / Suggested Action">{f.referenceRequirement}</Memo>}
+                    {kind === 'complete' && <Memo label="Schedule Reference / Suggested Action">{externalText(f.referenceRequirement)}</Memo>}
                     {kind === 'complete' && f.affectedActivities.length > 0 && (
                       <>
-                        <div className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500 mb-1 mt-2">Supporting XER evidence</div>
+                        <div className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500 mb-1 mt-2">Schedule Reference</div>
                         <table className="w-full text-[10.5px]">
                           <tbody>
                             {f.affectedActivities.map((a, i) => (
@@ -573,7 +611,7 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
 
           {/* footer */}
           <div className="flex items-center justify-between pt-3 mt-4 border-t-2 text-[10px] text-slate-400" style={{ borderColor: COLORS.ink }}>
-            <span>Generated by <b style={{ color: COLORS.ink }}>ControlLens</b> — Approval Readiness. Advisory; the P6 schedule of record and the authorized reviewer govern. Score is provisional pending calibration.</span>
+            <span>Review based on the submitted schedule data. The P6 schedule of record, governing contract documents, and authorized reviewer govern. The readiness score is decision-support and does not replace professional judgment.</span>
             <span className="font-mono">{reportNo}</span>
           </div>
         </div>

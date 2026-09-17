@@ -397,16 +397,26 @@ export default function Sidebar({ user }: SidebarProps) {
     if (condition === 'Stable') return 'bg-green-400'
     return 'bg-slate-500'
   }
+  function formatDisplayDate(d?: string): string {
+    if (!d) return '—'
+    const iso = d.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`
+    try {
+      const dt = new Date(d)
+      if (isNaN(dt.getTime())) return '—'
+      const mm = String(dt.getMonth() + 1).padStart(2, '0')
+      const dd = String(dt.getDate()).padStart(2, '0')
+      return `${mm}/${dd}/${dt.getFullYear()}`
+    } catch { return '—' }
+  }
   function shortDate(d?: string) {
     if (!d) return ''
-    try {
-      return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    } catch { return '' }
+    return formatDisplayDate(d)
   }
-  // v14 — format a snapshot date row value. Returns '—' if missing.
+  // v14 — user-facing snapshot dates use U.S. MM/DD/YYYY format.
+  // Stored values remain unchanged for sorting/calculation.
   function fmtSnap(d?: string): string {
-    if (!d) return '—'
-    return d.slice(0, 10)  // YYYY-MM-DD as-is, no locale conversion
+    return formatDisplayDate(d)
   }
   // Per-project views — order is what the user sees in the sidebar.
   // v13: Earned Value link added between Schedule Analysis and Risks & Issues.
