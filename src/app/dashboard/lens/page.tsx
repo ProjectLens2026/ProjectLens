@@ -1,19 +1,15 @@
 'use client'
 // =============================================================================
-// Schedule Analysis page (Day 10 — Multiple Float Paths added)
+// Schedule Analysis page — focused selector + Control Lens path intelligence
 //
-// New: 'multi-paths' pill in Schedule Filter shows the top 5 driving chains
-// (Path 1 = critical, Paths 2-5 = near-critical) with inline Gantt charts
-// and plain-language explanations. Federal/commercial PMs need to see
-// near-critical paths because today's near-critical = tomorrow's critical.
-//
-// Existing functionality preserved (Critical Path, Longest Path, 2 Week
-// Lookahead, Not Started, Finished, all other tabs untouched).
+// One analysis selector replaces the prior row of competing pills.
+// Control Lens path review is summary-first: high-value reviewer concerns first,
+// detailed activity evidence only when the reviewer intentionally selects it.
 // =============================================================================
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { getActiveProject, getActiveVersion, updateVersionNarrative } from '@/lib/projectStore'
-import { analyzeMultipleFloatPaths, activityToGanttRange, type FloatPath } from '@/lib/multipleFloatPaths'
+import { activityToGanttRange, type FloatPath } from '@/lib/multipleFloatPaths'
 import type { Task } from '@/lib/xerParser'
 import { evaluatePathCredibility, pathActivityStart, pathActivityFinish, sortPathActivitiesByFinish, type PathCredibilityResult } from '@/lib/construction/pathCredibility'
 import { analyzeCLPathIntelligence } from '@/lib/construction/clPathIntelligence'
@@ -24,10 +20,8 @@ export default function ControlLensAnalysisPage() {
   const [version, setVersion] = useState<any>(null)
   const [activeTab, setActiveTab] = useState('schedule-filter')
   const [scheduleFilter, setScheduleFilter] = useState<
-    'critical' | 'longest' | 'multi-paths' | 'lookahead' | 'not-started' | 'finished'
-  >('critical')
-  const [floatThreshold, setFloatThreshold] = useState<number>(5)
-  const [expandedPaths, setExpandedPaths] = useState<Set<number>>(new Set([1, 2]))
+    'cl-summary' | 'cl-critical' | 'cl-longest' | 'critical' | 'lookahead' | 'not-started' | 'finished'
+  >('cl-summary')
   const [narrativeText, setNarrativeText] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
@@ -54,30 +48,6 @@ export default function ControlLensAnalysisPage() {
     setAnalysis(v?.analysis || null)
   }
 
-  // Compute Multiple Float Paths from the precomputed task list in analysis.
-  // Memoized so it only re-runs when threshold or version changes.
-  const multiPathsResult = useMemo(() => {
-    if (!analysis?.allTasksForPaths) return null
-    try {
-      return analyzeMultipleFloatPaths(analysis.allTasksForPaths, floatThreshold, 5)
-    } catch (e) {
-      console.error('[Lens] Multiple Float Paths failed:', e)
-      return null
-    }
-  }, [analysis?.allTasksForPaths, floatThreshold])
-
-  // Fallback: if parsedXER isn't on the analysis, build a partial result
-  // from criticalDrivers + longestPathActivities. Less rich than the full
-  // algorithm but enough to show SOMETHING for legacy versions.
-  const multiPathsFallback = useMemo(() => {
-    if (multiPathsResult || !analysis) return null
-    const drivers = analysis.criticalDrivers || []
-    const longest = analysis.longestPathActivities || []
-    if (drivers.length === 0 && longest.length === 0) return null
-    return { drivers, longest }
-  }, [multiPathsResult, analysis])
-
-
   // P6 truth is displayed first and sorted chronologically by current finish.
   // Control Lens then reviews that P6-reported path for construction credibility.
   const criticalPathActivities = useMemo(
@@ -94,14 +64,28 @@ export default function ControlLensAnalysisPage() {
     catch (e) { console.error('[Lens] CL Path Intelligence failed:', e); return null }
   }, [analysis])
 
-  function togglePathExpand(pathNumber: number) {
-    setExpandedPaths(prev => {
-      const next = new Set(prev)
-      if (next.has(pathNumber)) next.delete(pathNumber)
-      else next.add(pathNumber)
-      return next
-    })
-  }
+  const clFindingGroups = useMemo(() => {
+    if (!clPathIntelligence?.findings) return [] as any[]
+    const severityRank: Record<string, number> = { HIGH: 3, MEDIUM: 2, REVIEW: 1 }
+    const grouped = new Map<string, any>()
+    for (const f of clPathIntelligence.findings) {
+      const key = String(f.title || 'Reviewer check').trim().toLowerCase()
+      const existing = grouped.get(key)
+      if (!existing) {
+        grouped.set(key, { ...f, count: 1, evidence: Array.from(new Set(f.evidence || [])) })
+      } else {
+        existing.count += 1
+        existing.evidence = Array.from(new Set([...(existing.evidence || []), ...(f.evidence || [])]))
+        if ((severityRank[f.severity] || 0) > (severityRank[existing.severity] || 0)) existing.severity = f.severity
+      }
+    }
+    return Array.from(grouped.values()).sort((a: any, b: any) =>
+      (severityRank[b.severity] || 0) - (severityRank[a.severity] || 0) || b.count - a.count
+    )
+  }, [clPathIntelligence])
+
+  const highPriorityGroups = clFindingGroups.filter((g: any) => g.severity === 'HIGH')
+  const reviewGroups = clFindingGroups.filter((g: any) => g.severity !== 'HIGH')
 
   async function handleGenerate() {
     if (!project || !version || !analysis) return
@@ -272,29 +256,24 @@ export default function ControlLensAnalysisPage() {
           <div className="p-5">
             {activeTab === 'schedule-filter' && (
               <div className="tab-pane">
-                <h3 className="text-sm font-bold mb-1">Schedule Filters <span className="text-slate-400 font-normal">(Primavera)</span></h3>
-                <p className="text-[11px] text-slate-500 mb-3 italic">P6 filters read directly from your XER file.</p>
-
-                <div className="flex flex-wrap gap-2 mb-5">
-                  {[
-                    { id: 'critical',    label: 'Critical Activities (P6)', icon: '🎯' },
-                    { id: 'longest',     label: 'Control Lens Paths', icon: '📏' },
-                    { id: 'multi-paths', label: 'Multiple Float Paths (ControlLens)',   icon: '🛤️', isNew: true },
-                    { id: 'lookahead',   label: '2 Week Lookahead',       icon: '📅' },
-                    { id: 'not-started', label: 'Activities Not Started', icon: '⏸️' },
-                    { id: 'finished',    label: 'Activities Finished',    icon: '✅' },
-                  ].map(f => (
-                    <button key={f.id} onClick={() => setScheduleFilter(f.id as any)}
-                      className={`text-xs px-3 py-1.5 rounded-full font-semibold transition-colors flex items-center gap-1.5 ${
-                        scheduleFilter === f.id ? 'bg-blue-600 text-white'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                      }`}>
-                      {f.icon} {f.label}
-                      {(f as any).isNew && (
-                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${scheduleFilter === f.id ? 'bg-white text-blue-600' : 'bg-emerald-100 text-emerald-700'}`}>NEW</span>
-                      )}
-                    </button>
-                  ))}
+                <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3 mb-6">
+                  <div>
+                    <h3 className="text-lg font-extrabold text-slate-900">Schedule Analysis</h3>
+                    <p className="text-xs text-slate-500 mt-1">Choose exactly what you want to review. Control Lens keeps the decision summary separate from detailed schedule evidence.</p>
+                  </div>
+                  <div className="w-full lg:w-[360px]">
+                    <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">Select analysis</label>
+                    <select value={scheduleFilter} onChange={e => setScheduleFilter(e.target.value as any)}
+                      className="w-full border-2 border-slate-300 rounded-lg bg-white px-3 py-2.5 text-sm font-bold text-slate-900 shadow-sm focus:outline-none focus:border-blue-500">
+                      <option value="cl-summary">Approval Summary — Control Lens</option>
+                      <option value="cl-critical">CL Critical Path</option>
+                      <option value="cl-longest">CL Longest Path</option>
+                      <option value="critical">P6 Critical Activities</option>
+                      <option value="lookahead">2 Week Lookahead</option>
+                      <option value="not-started">Activities Not Started</option>
+                      <option value="finished">Activities Finished</option>
+                    </select>
+                  </div>
                 </div>
 
                 {/* P6 CRITICAL ACTIVITIES — submitted schedule truth only */}
@@ -318,186 +297,166 @@ export default function ControlLensAnalysisPage() {
 
                     <div className="mt-4 bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-700 leading-relaxed">
                       <div className="font-bold text-slate-800 mb-1">Control Lens interpretation</div>
-                      Critical activities can belong to different branches of the network and do not, by themselves, prove one continuous critical path. Control Lens therefore does not run construction-path credibility against this list as if it were one chain. Path credibility will be evaluated from a selected target milestone/activity using relationship back-trace.
+                      Critical activities can belong to different branches of the network and do not, by themselves, prove one continuous critical path. Control Lens therefore does not run construction-path credibility against this list as if it were one chain. Control Lens evaluates path credibility separately through its nature-of-work and readiness analysis so this P6 activity set remains submitted schedule evidence only.
                     </div>
                   </div>
                 )}
 
-                {/* MULTIPLE FLOAT PATHS (new) */}
-                {scheduleFilter === 'multi-paths' && (
+                {/* CONTROL LENS APPROVAL SUMMARY — summary first, evidence on demand */}
+                {scheduleFilter === 'cl-summary' && (
                   <div>
-                    <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                      <div className="font-bold mb-1">ControlLens Multiple Float Paths analysis</div>
-                      ControlLens ranks the top driving chains of activities by total float — beyond just the single critical path that P6 shows. <strong>Path 1 is the critical path</strong> (zero or negative float). <strong>Paths 2-5 are near-critical</strong> — today's near-critical becomes tomorrow's critical after one slip. All paths run to the final completion milestone. This is the proper Multiple Float Paths method that federal claim analysts and PM teams use for delay analysis.
-                    </div>
-
-                    {/* Threshold + summary control */}
-                    <div className="flex items-center gap-3 mb-4 p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                      <span className="text-xs font-semibold text-slate-700">Float threshold</span>
-                      <select value={floatThreshold}
-                        onChange={e => setFloatThreshold(parseInt(e.target.value, 10))}
-                        className="text-xs px-2 py-1 border border-slate-300 rounded bg-white">
-                        <option value={5}>5 days</option>
-                        <option value={10}>10 days</option>
-                        <option value={15}>15 days</option>
-                      </select>
-                      <span className="text-[11px] text-slate-500 flex-1">
-                        Paths with total float ≤ {floatThreshold} days are considered near-critical.
-                      </span>
-                      <span className="text-[11px] text-slate-600 bg-white px-2 py-1 rounded border border-slate-200">
-                        Showing top {Math.min(multiPathsResult?.paths.length || 0, 5)}
-                      </span>
-                    </div>
-
-                    {!multiPathsResult && !multiPathsFallback && (
-                      <div className="text-center py-8 text-slate-400 text-xs">
-                        Multiple float path analysis isn't available for this version. Re-upload the XER to refresh.
-                      </div>
-                    )}
-
-                    {!multiPathsResult && multiPathsFallback && (
-                      <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-3 mb-3">
-                        This version was uploaded before Multiple Float Paths was added. Re-upload the XER to enable the full ranked-path view. Showing the existing critical path drivers below.
-                      </div>
-                    )}
-
-                    {multiPathsResult && multiPathsResult.paths.length === 0 && (
-                      <div className="text-center py-8 text-slate-400 text-xs">
-                        No paths found at or below {floatThreshold} days float. Try increasing the threshold.
-                      </div>
-                    )}
-
-                    {multiPathsResult && multiPathsResult.paths.map(path => (
-                      <PathCard key={path.pathNumber} path={path}
-                        expanded={expandedPaths.has(path.pathNumber)}
-                        onToggle={() => togglePathExpand(path.pathNumber)}
-                        projectStart={multiPathsResult.projectStart}
-                        projectEnd={multiPathsResult.projectEnd}
-                        allProjectTasks={analysis?.traceTasks}
-                      />
-                    ))}
-                  </div>
-                )}
-
-                {/* CONTROL LENS PATHS — engineering interpretation of submitted XER */}
-                {scheduleFilter === 'longest' && (
-                  <div>
-                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
-                      <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700 mb-1">Control Lens Path Intelligence</div>
-                      <p className="text-xs text-slate-600 leading-relaxed">
-                        Control Lens first interprets what is being built from the submitted XER, then evaluates whether the schedule represents the physical/system readiness needed for completion. It uses the contractor&apos;s activity names, WBS, dates, durations, float and relationships as evidence. This is engineering schedule review — not a silent P6 CPM recalculation.
-                      </p>
-                    </div>
-
                     {!clPathIntelligence ? (
-                      <div className="text-center py-8 text-slate-400 text-xs">Project understanding is not available for this version. Re-upload the XER if relationship/task evidence is missing.</div>
+                      <div className="text-center py-8 text-slate-400 text-sm">Project understanding is not available for this version. Re-upload the XER if relationship/task evidence is missing.</div>
                     ) : (
                       <>
-                        {/* Project understanding */}
-                        <div className="border border-slate-200 rounded-xl bg-white p-4 mb-4">
-                          <div className="flex items-start justify-between gap-4 mb-3">
+                        <div className="rounded-xl border-2 border-slate-300 bg-white p-5 mb-4">
+                          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                             <div>
-                              <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700">Project Understanding / Nature of Work</div>
-                              <div className="text-sm font-bold text-slate-900 mt-1">{clPathIntelligence.understanding.projectNature}</div>
+                              <div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-blue-700">Control Lens Approval Summary</div>
+                              <div className="text-xl font-extrabold text-slate-950 mt-1">{clPathIntelligence.understanding.projectNature}</div>
+                              <div className="text-sm font-semibold text-slate-600 mt-2">{clPathIntelligence.understanding.deliveryNature.join(' → ')}</div>
                             </div>
                             {clPathIntelligence.understanding.completionTarget && (
-                              <div className="text-right text-[10px] text-slate-500">
-                                <div className="font-bold uppercase tracking-wider">Completion target</div>
-                                <div className="font-mono text-slate-800 mt-0.5">{clPathIntelligence.understanding.completionTarget.code}</div>
-                                <div>{fmtDate(clPathIntelligence.understanding.completionTarget.finish)}</div>
+                              <div className="rounded-lg bg-slate-950 text-white px-4 py-3 min-w-[190px]">
+                                <div className="text-[9px] font-extrabold uppercase tracking-wider text-slate-300">Completion target</div>
+                                <div className="font-mono text-sm font-bold mt-1">{clPathIntelligence.understanding.completionTarget.code}</div>
+                                <div className="text-sm font-extrabold mt-0.5">{fmtDate(clPathIntelligence.understanding.completionTarget.finish)}</div>
                               </div>
                             )}
                           </div>
-                          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 text-xs">
-                            <div className="bg-slate-50 rounded-lg p-3">
-                              <div className="text-[9px] font-extrabold uppercase tracking-wider text-slate-500 mb-1">Delivery nature</div>
-                              <div className="text-slate-700 leading-relaxed">{clPathIntelligence.understanding.deliveryNature.join(' → ')}</div>
+                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-4">
+                            <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
+                              <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Detected areas</div>
+                              <div className="text-sm font-bold text-slate-800 mt-1 leading-relaxed">{clPathIntelligence.understanding.areas.join(' · ') || 'Review Required'}</div>
                             </div>
-                            <div className="bg-slate-50 rounded-lg p-3">
-                              <div className="text-[9px] font-extrabold uppercase tracking-wider text-slate-500 mb-1">Detected areas</div>
-                              <div className="text-slate-700 leading-relaxed">{clPathIntelligence.understanding.areas.join(' · ') || 'Review Required'}</div>
-                            </div>
-                            <div className="bg-slate-50 rounded-lg p-3">
-                              <div className="text-[9px] font-extrabold uppercase tracking-wider text-slate-500 mb-1">Detected systems</div>
-                              <div className="text-slate-700 leading-relaxed">{clPathIntelligence.understanding.systems.join(' · ') || 'Review Required'}</div>
+                            <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
+                              <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Detected systems</div>
+                              <div className="text-sm font-bold text-slate-800 mt-1 leading-relaxed">{clPathIntelligence.understanding.systems.join(' · ') || 'Review Required'}</div>
                             </div>
                           </div>
                         </div>
 
-                        {/* Credibility findings */}
-                        <div className="border border-slate-200 rounded-xl bg-white p-4 mb-4">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700">Path Credibility / Missing Readiness States</div>
-                            <div className="text-[10px] text-slate-500">{clPathIntelligence.findings.length} reviewer trigger{clPathIntelligence.findings.length === 1 ? '' : 's'}</div>
-                          </div>
-                          {clPathIntelligence.findings.length === 0 ? (
-                            <div className="text-xs text-slate-500 italic">No path-credibility trigger was identified by the current reference scaffold. Reviewer verification is still required.</div>
-                          ) : (
-                            <div className="space-y-2">
-                              {clPathIntelligence.findings.map(f => {
-                                const tone = f.severity === 'HIGH' ? 'border-red-200 bg-red-50 text-red-900' : f.severity === 'MEDIUM' ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-blue-200 bg-blue-50 text-blue-900'
-                                return (
-                                  <div key={f.id} className={`border rounded-lg p-3 ${tone}`}>
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-mono text-[9px] font-bold bg-white/80 border border-current/10 rounded px-1.5 py-0.5">{f.id}</span>
-                                      <span className="text-[9px] font-extrabold uppercase tracking-wider">{f.severity}</span>
-                                      <span className="text-xs font-bold">{f.title}</span>
-                                    </div>
-                                    <div className="text-[11px] mt-1 leading-relaxed opacity-90">{f.detail}</div>
-                                    {f.evidence.length > 0 && <div className="text-[10px] mt-1.5 opacity-70"><span className="font-bold">XER evidence:</span> {f.evidence.join(' · ')}</div>}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+                          <div className="rounded-xl border-2 border-red-200 bg-red-50 p-5">
+                            <div className="flex items-center justify-between gap-3 mb-3">
+                              <div className="text-base font-extrabold text-red-950">High-Priority Concerns</div>
+                              <span className="rounded-full bg-red-700 text-white text-xs font-extrabold px-2.5 py-1">{highPriorityGroups.length}</span>
+                            </div>
+                            {highPriorityGroups.length === 0 ? (
+                              <div className="text-sm text-red-800">No high-priority path concern identified by the current scaffold.</div>
+                            ) : (
+                              <div className="space-y-3">
+                                {highPriorityGroups.slice(0, 5).map((g: any) => (
+                                  <div key={g.id} className="border-t border-red-200 pt-3 first:border-t-0 first:pt-0">
+                                    <div className="text-sm font-extrabold text-red-950">{g.title}{g.count > 1 ? ` (${g.count})` : ''}</div>
+                                    <div className="text-xs font-medium text-red-900 mt-1 leading-relaxed">{g.detail}</div>
                                   </div>
-                                )
-                              })}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* CL Critical Path */}
-                        <div className="border border-slate-200 rounded-xl p-4 bg-white mb-4">
-                          <div className="flex items-start gap-2 mb-2">
-                            <span className="text-lg">🎯</span>
-                            <div className="flex-1">
-                              <div className="text-sm font-bold text-slate-900">CL Critical Path</div>
-                              <div className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Nature-of-work / readiness path</div>
-                            </div>
-                            {clPathIntelligence.criticalPath && (
-                              <span className={`text-[9px] font-bold px-2 py-1 rounded ${clPathIntelligence.criticalPath.connectionToTarget === 'SUBMITTED' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                                {clPathIntelligence.criticalPath.connectionToTarget === 'SUBMITTED' ? 'CONNECTED' : 'LOGIC GAP'}
-                              </span>
+                                ))}
+                              </div>
                             )}
                           </div>
-                          {clPathIntelligence.criticalPath ? (
-                            <>
-                              <p className="text-xs text-slate-600 leading-relaxed mb-2">{clPathIntelligence.criticalPath.basis}</p>
-                              <div className={`text-[11px] rounded-lg px-3 py-2 mb-3 ${clPathIntelligence.criticalPath.connectionToTarget === 'SUBMITTED' ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-amber-50 border border-amber-200 text-amber-800'}`}>
-                                {clPathIntelligence.criticalPath.connectionNote}
+
+                          <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-5">
+                            <div className="flex items-center justify-between gap-3 mb-3">
+                              <div className="text-base font-extrabold text-amber-950">Review Items</div>
+                              <span className="rounded-full bg-amber-700 text-white text-xs font-extrabold px-2.5 py-1">{reviewGroups.length}</span>
+                            </div>
+                            {reviewGroups.length === 0 ? (
+                              <div className="text-sm text-amber-800">No additional review item identified.</div>
+                            ) : (
+                              <div className="space-y-3">
+                                {reviewGroups.slice(0, 5).map((g: any) => (
+                                  <div key={g.id} className="border-t border-amber-200 pt-3 first:border-t-0 first:pt-0">
+                                    <div className="text-sm font-extrabold text-amber-950">{g.title}{g.count > 1 ? ` (${g.count})` : ''}</div>
+                                    <div className="text-xs font-medium text-amber-900 mt-1 leading-relaxed">{g.count > 1 && /area completion milestone/i.test(g.title)
+                                      ? `${g.count} submitted area/building completion states occur before later readiness, startup, commissioning, training or turnover work. Review the affected completion logic rather than reading each activity as a separate issue.`
+                                      : g.detail}</div>
+                                  </div>
+                                ))}
                               </div>
-                              <PathActivityTable activities={clPathIntelligence.criticalPath.activities} showRemaining />
-                            </>
-                          ) : <div className="text-xs text-slate-400 py-4">Control Lens could not establish a credible readiness endpoint for the selected completion target.</div>}
+                            )}
+                          </div>
                         </div>
 
-                        {/* CL Longest Path */}
-                        <div className="border border-slate-200 rounded-xl p-4 bg-white">
-                          <div className="flex items-start gap-2 mb-2">
-                            <span className="text-lg">📏</span>
-                            <div className="flex-1">
-                              <div className="text-sm font-bold text-slate-900">CL Longest Path</div>
-                              <div className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Longest credible submitted work-state chain</div>
-                            </div>
-                          </div>
-                          {clPathIntelligence.longestPath ? (
-                            <>
-                              <p className="text-xs text-slate-600 leading-relaxed mb-2">{clPathIntelligence.longestPath.basis}</p>
-                              <div className={`text-[11px] rounded-lg px-3 py-2 mb-3 ${clPathIntelligence.longestPath.connectionToTarget === 'SUBMITTED' ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-amber-50 border border-amber-200 text-amber-800'}`}>
-                                {clPathIntelligence.longestPath.connectionNote}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          <button type="button" onClick={() => setScheduleFilter('cl-critical')} className="text-left rounded-xl border-2 border-blue-200 bg-blue-50 p-5 hover:border-blue-400 transition-colors">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <div className="text-base font-extrabold text-slate-950">🎯 CL Critical Path</div>
+                                <div className="text-xs font-semibold text-slate-600 mt-1">Nature-of-work / readiness path</div>
                               </div>
-                              <PathActivityTable activities={clPathIntelligence.longestPath.activities} showRemaining />
-                            </>
-                          ) : <div className="text-xs text-slate-400 py-4">Control Lens could not establish a credible longest work-state chain from the available XER evidence.</div>}
+                              <span className="text-sm font-extrabold text-blue-700">View Path →</span>
+                            </div>
+                            {clPathIntelligence.criticalPath && <div className="text-xs font-medium text-slate-700 mt-3 leading-relaxed">{clPathIntelligence.criticalPath.connectionNote}</div>}
+                          </button>
+                          <button type="button" onClick={() => setScheduleFilter('cl-longest')} className="text-left rounded-xl border-2 border-violet-200 bg-violet-50 p-5 hover:border-violet-400 transition-colors">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <div className="text-base font-extrabold text-slate-950">📏 CL Longest Path</div>
+                                <div className="text-xs font-semibold text-slate-600 mt-1">Longest credible submitted work-state chain</div>
+                              </div>
+                              <span className="text-sm font-extrabold text-violet-700">View Path →</span>
+                            </div>
+                            {clPathIntelligence.longestPath && <div className="text-xs font-medium text-slate-700 mt-3 leading-relaxed">{clPathIntelligence.longestPath.connectionNote}</div>}
+                          </button>
                         </div>
                       </>
                     )}
+                  </div>
+                )}
+
+                {/* CL CRITICAL PATH — detail only when selected */}
+                {scheduleFilter === 'cl-critical' && (
+                  <div>
+                    <button onClick={() => setScheduleFilter('cl-summary')} className="text-xs font-bold text-blue-700 mb-4">← Back to Approval Summary</button>
+                    <div className="border-2 border-blue-200 rounded-xl p-5 bg-white">
+                      <div className="flex items-start gap-3 mb-3">
+                        <span className="text-2xl">🎯</span>
+                        <div className="flex-1">
+                          <div className="text-xl font-extrabold text-slate-950">CL Critical Path</div>
+                          <div className="text-xs uppercase tracking-wider font-extrabold text-slate-500 mt-1">Nature-of-work / readiness path</div>
+                        </div>
+                        {clPathIntelligence?.criticalPath && (
+                          <span className={`text-xs font-extrabold px-3 py-1.5 rounded-full ${clPathIntelligence.criticalPath.connectionToTarget === 'SUBMITTED' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                            {clPathIntelligence.criticalPath.connectionToTarget === 'SUBMITTED' ? 'CONNECTED' : 'LOGIC GAP'}
+                          </span>
+                        )}
+                      </div>
+                      {clPathIntelligence?.criticalPath ? (
+                        <>
+                          <p className="text-sm font-semibold text-slate-700 leading-relaxed mb-3">{clPathIntelligence.criticalPath.basis}</p>
+                          <div className={`text-sm font-bold rounded-lg px-4 py-3 mb-4 ${clPathIntelligence.criticalPath.connectionToTarget === 'SUBMITTED' ? 'bg-emerald-50 border border-emerald-200 text-emerald-900' : 'bg-amber-50 border border-amber-200 text-amber-900'}`}>
+                            {clPathIntelligence.criticalPath.connectionNote}
+                          </div>
+                          <PathActivityTable activities={clPathIntelligence.criticalPath.activities} showRemaining />
+                        </>
+                      ) : <div className="text-sm text-slate-400 py-6">Control Lens could not establish a credible readiness endpoint for the selected completion target.</div>}
+                    </div>
+                  </div>
+                )}
+
+                {/* CL LONGEST PATH — detail only when selected */}
+                {scheduleFilter === 'cl-longest' && (
+                  <div>
+                    <button onClick={() => setScheduleFilter('cl-summary')} className="text-xs font-bold text-blue-700 mb-4">← Back to Approval Summary</button>
+                    <div className="border-2 border-violet-200 rounded-xl p-5 bg-white">
+                      <div className="flex items-start gap-3 mb-3">
+                        <span className="text-2xl">📏</span>
+                        <div className="flex-1">
+                          <div className="text-xl font-extrabold text-slate-950">CL Longest Path</div>
+                          <div className="text-xs uppercase tracking-wider font-extrabold text-slate-500 mt-1">Longest credible submitted work-state chain</div>
+                        </div>
+                      </div>
+                      {clPathIntelligence?.longestPath ? (
+                        <>
+                          <p className="text-sm font-semibold text-slate-700 leading-relaxed mb-3">{clPathIntelligence.longestPath.basis}</p>
+                          <div className={`text-sm font-bold rounded-lg px-4 py-3 mb-4 ${clPathIntelligence.longestPath.connectionToTarget === 'SUBMITTED' ? 'bg-emerald-50 border border-emerald-200 text-emerald-900' : 'bg-amber-50 border border-amber-200 text-amber-900'}`}>
+                            {clPathIntelligence.longestPath.connectionNote}
+                          </div>
+                          <PathActivityTable activities={clPathIntelligence.longestPath.activities} showRemaining />
+                        </>
+                      ) : <div className="text-sm text-slate-400 py-6">Control Lens could not establish a credible longest work-state chain from the available XER evidence.</div>}
+                    </div>
                   </div>
                 )}
 
