@@ -45,7 +45,7 @@ export function pathActivityFinish(t: any): string {
   return t?.act_end_date || t?.early_end_date || t?.target_end_date || ''
 }
 
-export function sortPathActivitiesByFinish<T extends any>(activities: T[]): T[] {
+export function sortPathActivitiesByFinish<T extends { task_code?: string | number | null }>(activities: T[]): T[] {
   return [...(activities || [])].sort((a, b) => {
     const af = toMs(pathActivityFinish(a))
     const bf = toMs(pathActivityFinish(b))
