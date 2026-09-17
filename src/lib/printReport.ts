@@ -58,17 +58,6 @@ export function printReport(areaId: string, opts: PrintOptions = {}): void {
     * { box-sizing: border-box !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     html, body { width: 100% !important; height: auto !important; overflow: visible !important; margin: 0 !important; padding: 0 !important; background: #fff !important; color: #111827 !important; }
     #__print_root { max-width: none !important; width: 100% !important; min-width: 0 !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; background: #fff !important; }
-    .print-page-frame {
-      position: fixed !important;
-      top: 0.22in !important;
-      right: 0.22in !important;
-      bottom: 0.22in !important;
-      left: 0.22in !important;
-      border: 0.6pt solid #d1d5db !important;
-      pointer-events: none !important;
-      z-index: 9999 !important;
-      background: transparent !important;
-    }
     #__print_root .print\\:hidden, #__print_root .no-print { display: none !important; }
     [class*="rounded"] { border-radius: 0 !important; }
     [class*="shadow"] { box-shadow: none !important; }
@@ -92,7 +81,6 @@ ${headStyles}
 <style>${printCss}</style>
 </head>
 <body>
-<div class="print-page-frame" aria-hidden="true"></div>
 <div id="__print_root">${source.innerHTML}</div>
 </body>
 </html>`
