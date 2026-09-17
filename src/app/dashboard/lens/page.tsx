@@ -15,6 +15,7 @@ import Link from 'next/link'
 import { getActiveProject, getActiveVersion, updateVersionNarrative } from '@/lib/projectStore'
 import { analyzeMultipleFloatPaths, activityToGanttRange, type FloatPath } from '@/lib/multipleFloatPaths'
 import type { Task } from '@/lib/xerParser'
+import { evaluatePathCredibility, pathActivityStart, pathActivityFinish, sortPathActivitiesByFinish, type PathCredibilityResult } from '@/lib/construction/pathCredibility'
 
 export default function ControlLensAnalysisPage() {
   const [analysis, setAnalysis] = useState<any>(null)
@@ -74,6 +75,26 @@ export default function ControlLensAnalysisPage() {
     if (drivers.length === 0 && longest.length === 0) return null
     return { drivers, longest }
   }, [multiPathsResult, analysis])
+
+
+  // P6 truth is displayed first and sorted chronologically by current finish.
+  // Control Lens then reviews that P6-reported path for construction credibility.
+  const criticalPathActivities = useMemo(
+    () => sortPathActivitiesByFinish(analysis?.criticalDrivers || []),
+    [analysis?.criticalDrivers],
+  )
+  const longestPathActivities = useMemo(
+    () => sortPathActivitiesByFinish(analysis?.longestPathActivities || []),
+    [analysis?.longestPathActivities],
+  )
+  const criticalPathCredibility = useMemo(
+    () => evaluatePathCredibility(criticalPathActivities, analysis?.traceTasks),
+    [criticalPathActivities, analysis?.traceTasks],
+  )
+  const longestPathCredibility = useMemo(
+    () => evaluatePathCredibility(longestPathActivities, analysis?.traceTasks),
+    [longestPathActivities, analysis?.traceTasks],
+  )
 
   function togglePathExpand(pathNumber: number) {
     setExpandedPaths(prev => {
@@ -278,24 +299,18 @@ export default function ControlLensAnalysisPage() {
                   ))}
                 </div>
 
-                {/* CRITICAL PATH (existing) */}
+                {/* CRITICAL PATH — P6 truth first, Control Lens review second */}
                 {scheduleFilter === 'critical' && (
                   <div>
-                    <p className="text-xs text-slate-500 mb-4">The critical path is the chain of activities controlling project completion. If any of these slips, the whole project slips by that same amount.</p>
-                    <div className="space-y-2">
-                      {(a.criticalDrivers || []).slice(0, 12).map((t: any, i: number) => (
-                        <div key={i} className="flex items-center gap-3 py-2 border-b border-slate-100 last:border-0 text-xs">
-                          <div className="font-mono font-semibold text-slate-900 w-32 flex-shrink-0">{t.task_code}</div>
-                          <div className="flex-1 text-slate-700">{t.task_name}</div>
-                          <div className="text-red-600 font-bold w-14 text-right">{fmtFloat(t.total_float_hr_cnt)}</div>
-                          <div className="w-16 text-slate-500">{fmtFloat(t.remain_drtn_hr_cnt)}</div>
-                          <div className="w-20"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${t.status_code === 'TK_Complete' ? 'bg-green-100 text-green-700' : t.status_code === 'TK_Active' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{t.status_code === 'TK_Complete' ? 'Done' : t.status_code === 'TK_Active' ? `${t.phys_complete_pct}%` : 'Not started'}</span></div>
-                        </div>
-                      ))}
-                      {(!a.criticalDrivers || a.criticalDrivers.length === 0) && (
-                        <div className="text-center py-8 text-slate-400 text-xs">No critical path activities detected.</div>
-                      )}
+                    <div className="mb-3">
+                      <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700">P6 Critical Path</div>
+                      <p className="text-xs text-slate-500 mt-1">Activities identified by the uploaded P6/XER data as critical. Displayed exactly from the schedule data and ordered by current Finish date, earliest first.</p>
                     </div>
+                    <PathActivityTable activities={criticalPathActivities} showRemaining />
+                    {criticalPathActivities.length === 0 && (
+                      <div className="text-center py-8 text-slate-400 text-xs">No critical path activities detected.</div>
+                    )}
+                    <PathCredibilityPanel result={criticalPathCredibility} title="Control Lens Construction Path Review" />
                   </div>
                 )}
 
@@ -349,65 +364,31 @@ export default function ControlLensAnalysisPage() {
                         onToggle={() => togglePathExpand(path.pathNumber)}
                         projectStart={multiPathsResult.projectStart}
                         projectEnd={multiPathsResult.projectEnd}
+                        allProjectTasks={analysis?.traceTasks}
                       />
                     ))}
                   </div>
                 )}
 
-                {/* LONGEST PATH (existing) */}
+                {/* LONGEST PATH — P6 truth first, Control Lens review second */}
                 {scheduleFilter === 'longest' && (
                   <div>
-                    {(a.longestPathActivities && a.longestPathActivities.length > 0) ? (
+                    {(longestPathActivities.length > 0) ? (
                       <>
                         <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                          The longest path is the chain of activities that determines when the project finishes — the path with the greatest total duration from start to end. P6 flags these activities with the <span className="font-mono">driving_path_flag</span>.
+                          <div className="font-bold mb-1">P6 Longest Path</div>
+                          These activities are flagged by P6 with the <span className="font-mono">driving_path_flag</span>. Control Lens does not recalculate or alter that result here. The list is ordered by current Finish date, earliest first.
                         </div>
-                        <div className="space-y-2">
-                          <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-500 uppercase border-b border-slate-200 pb-2">
-                            <div className="col-span-1">Code</div>
-                            <div className="col-span-5">Activity</div>
-                            <div className="col-span-2 text-right">Start</div>
-                            <div className="col-span-2 text-right">Finish</div>
-                            <div className="col-span-1 text-right">Float</div>
-                            <div className="col-span-1 text-right">Status</div>
-                          </div>
-                          {a.longestPathActivities.slice(0, 50).map((t: any, i: number) => {
-                            const fl = Math.round(parseFloat(t.total_float_hr_cnt || '0') / 8)
-                            const pct = parseFloat(t.phys_complete_pct || '0')
-                            return (
-                              <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 last:border-0 text-xs items-center">
-                                <div className="col-span-1 font-mono font-semibold text-slate-800 truncate">{t.task_code}</div>
-                                <div className="col-span-5 text-slate-700 truncate">{t.task_name}</div>
-                                <div className="col-span-2 text-right text-slate-600">{fmtDate((t.early_start_date || t.target_start_date || t.act_start_date || ''))}</div>
-                                <div className="col-span-2 text-right text-slate-600 font-semibold">{fmtDate((t.early_end_date || t.target_end_date || t.act_end_date || ''))}</div>
-                                <div className={`col-span-1 text-right font-bold ${fl < 0 ? 'text-red-600' : fl === 0 ? 'text-amber-600' : 'text-green-600'}`}>{fl}d</div>
-                                <div className="col-span-1 text-right">
-                                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${t.status_code === 'TK_Complete' ? 'bg-green-100 text-green-700' : t.status_code === 'TK_Active' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>{t.status_code === 'TK_Complete' ? 'Done' : t.status_code === 'TK_Active' ? `${pct}%` : 'Not started'}</span>
-                                </div>
-                              </div>
-                            )
-                          })}
-                          {a.longestPathActivities.length > 50 && (
-                            <div className="text-center text-[10px] text-slate-400 pt-3">Showing first 50 of {a.longestPathActivities.length} activities</div>
-                          )}
-                        </div>
+                        <PathActivityTable activities={longestPathActivities} showRemaining />
+                        <PathCredibilityPanel result={longestPathCredibility} title="Control Lens Construction Path Review" />
                       </>
                     ) : (
                       <>
                         <div className="bg-amber-50 border-l-4 border-amber-500 p-3 text-xs text-amber-900 mb-4 leading-relaxed">
-                          <strong>P6 has not calculated a longest path for this schedule.</strong> No activities have the driving_path_flag set. Try the new Multiple Float Paths view for a richer analysis.
+                          <strong>P6 has not calculated a longest path for this schedule.</strong> No activities have the driving_path_flag set. Control Lens will not fabricate a P6 longest path.
                         </div>
-                        <div className="space-y-2">
-                          {(a.criticalDrivers || []).slice(0, 12).map((t: any, i: number) => (
-                            <div key={i} className="flex items-center gap-3 py-2 border-b border-slate-100 last:border-0 text-xs">
-                              <div className="font-mono font-semibold text-slate-900 w-32 flex-shrink-0">{t.task_code}</div>
-                              <div className="flex-1 text-slate-700">{t.task_name}</div>
-                              <div className="text-red-600 font-bold w-14 text-right">{fmtFloat(t.total_float_hr_cnt)}</div>
-                              <div className="w-16 text-slate-500">{fmtFloat(t.remain_drtn_hr_cnt)}</div>
-                              <div className="w-20"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${t.status_code === 'TK_Complete' ? 'bg-green-100 text-green-700' : t.status_code === 'TK_Active' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{t.status_code === 'TK_Complete' ? 'Done' : t.status_code === 'TK_Active' ? `${t.phys_complete_pct}%` : 'Not started'}</span></div>
-                            </div>
-                          ))}
-                        </div>
+                        <PathActivityTable activities={criticalPathActivities} showRemaining />
+                        <PathCredibilityPanel result={criticalPathCredibility} title="Control Lens Review of Available Critical Activities" />
                       </>
                     )}
                   </div>
@@ -433,8 +414,8 @@ export default function ControlLensAnalysisPage() {
                             <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 last:border-0 text-xs items-center">
                               <div className="col-span-1 font-mono font-semibold text-slate-800 truncate">{t.task_code}</div>
                               <div className="col-span-5 text-slate-700 truncate">{t.task_name}</div>
-                              <div className="col-span-2 text-right text-slate-600">{fmtDate((t.early_start_date || t.target_start_date || ''))}</div>
-                              <div className="col-span-2 text-right text-slate-600 font-semibold">{fmtDate((t.early_end_date || t.target_end_date || ''))}</div>
+                              <div className="col-span-2 text-right text-slate-600">{fmtDate(pathActivityStart(t))}</div>
+                              <div className="col-span-2 text-right text-slate-600 font-semibold">{fmtDate(pathActivityFinish(t))}</div>
                               <div className="col-span-1 text-right text-slate-600">{pct}%</div>
                               <div className={`col-span-1 text-right font-bold ${fl < 0 ? 'text-red-600' : fl <= 14 ? 'text-amber-600' : 'text-green-600'}`}>{fl}d</div>
                             </div>
@@ -465,8 +446,8 @@ export default function ControlLensAnalysisPage() {
                             <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 last:border-0 text-xs items-center">
                               <div className="col-span-1 font-mono font-semibold text-slate-800 truncate">{t.task_code}</div>
                               <div className="col-span-5 text-slate-700 truncate">{t.task_name}</div>
-                              <div className="col-span-2 text-right text-slate-600">{fmtDate((t.early_start_date || t.target_start_date || '')) || '—'}</div>
-                              <div className="col-span-2 text-right text-slate-600">{fmtDate((t.early_end_date || t.target_end_date || '')) || '—'}</div>
+                              <div className="col-span-2 text-right text-slate-600">{fmtDate(pathActivityStart(t)) || '—'}</div>
+                              <div className="col-span-2 text-right text-slate-600">{fmtDate(pathActivityFinish(t)) || '—'}</div>
                               <div className="col-span-1 text-right text-slate-600">{dur}d</div>
                               <div className={`col-span-1 text-right font-bold ${fl < 0 ? 'text-red-600' : fl <= 14 ? 'text-amber-600' : 'text-green-600'}`}>{fl}d</div>
                             </div>
@@ -766,6 +747,87 @@ export default function ControlLensAnalysisPage() {
 }
 
 // =============================================================================
+// PathActivityTable — P6/XER path truth. No Control Lens interpretation here.
+// =============================================================================
+function PathActivityTable({ activities, showRemaining = false }: { activities: any[]; showRemaining?: boolean }) {
+  const ordered = sortPathActivitiesByFinish(activities || [])
+  return (
+    <div className="mb-5">
+      <div className="grid grid-cols-12 gap-2 text-[10px] font-bold text-slate-500 uppercase border-b border-slate-200 pb-2">
+        <div className="col-span-1">Code</div>
+        <div className="col-span-4">Activity</div>
+        <div className="col-span-2 text-right">Start</div>
+        <div className="col-span-2 text-right">Finish</div>
+        <div className="col-span-1 text-right">Float</div>
+        {showRemaining ? <div className="col-span-1 text-right">Remain</div> : <div className="col-span-1" />}
+        <div className="col-span-1 text-right">Status</div>
+      </div>
+      {ordered.map((t: any, i: number) => {
+        const fl = Math.round(parseFloat(t.total_float_hr_cnt || '0') / 8)
+        const pct = parseFloat(t.phys_complete_pct || '0')
+        return (
+          <div key={`${t.task_id || t.task_code}-${i}`} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 last:border-0 text-xs items-center">
+            <div className="col-span-1 font-mono font-semibold text-slate-800 truncate" title={t.task_code}>{t.task_code}</div>
+            <div className="col-span-4 text-slate-700" title={t.task_name}>{t.task_name}</div>
+            <div className="col-span-2 text-right text-slate-600">{fmtDate(pathActivityStart(t))}</div>
+            <div className="col-span-2 text-right text-slate-700 font-semibold">{fmtDate(pathActivityFinish(t))}</div>
+            <div className={`col-span-1 text-right font-bold ${fl < 0 ? 'text-red-600' : fl === 0 ? 'text-amber-700' : 'text-emerald-600'}`}>{fl}d</div>
+            {showRemaining
+              ? <div className="col-span-1 text-right text-slate-500">{Math.round(parseFloat(t.remain_drtn_hr_cnt || '0') / 8)}d</div>
+              : <div className="col-span-1" />}
+            <div className="col-span-1 text-right">
+              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${t.status_code === 'TK_Complete' ? 'bg-green-100 text-green-700' : t.status_code === 'TK_Active' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+                {t.status_code === 'TK_Complete' ? 'Done' : t.status_code === 'TK_Active' ? `${pct}%` : 'Not started'}
+              </span>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function PathCredibilityPanel({ result, title, compact = false }: { result: PathCredibilityResult; title: string; compact?: boolean }) {
+  const status = result.status
+  const tone = status === 'SEQUENCE_CONFLICT'
+    ? { box: 'bg-red-50 border-red-200', text: 'text-red-900', badge: 'bg-red-700 text-white', label: 'SEQUENCE CONFLICT' }
+    : status === 'REVIEW_REQUIRED'
+      ? { box: 'bg-amber-50 border-amber-200', text: 'text-amber-900', badge: 'bg-amber-600 text-white', label: 'REVIEW REQUIRED' }
+      : { box: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-900', badge: 'bg-emerald-700 text-white', label: 'NO PATH CONFLICT FOUND' }
+
+  return (
+    <div className={`border rounded-lg ${compact ? 'mt-3 p-3' : 'mt-5 p-4'} ${tone.box}`}>
+      <div className="flex items-center gap-2 mb-2">
+        <div className={`text-[10px] font-bold px-2 py-1 rounded ${tone.badge}`}>{tone.label}</div>
+        <div className={`text-xs font-extrabold ${tone.text}`}>{title}</div>
+        <div className="ml-auto text-[10px] text-slate-500">{result.checkedActivities} path activities checked</div>
+      </div>
+      {result.findings.length === 0 ? (
+        <div className="text-[11px] text-slate-600 leading-relaxed">
+          Control Lens checked the reported path against the currently authored construction-sequence rules and did not identify a path-level conflict. This does not replace project-specific reviewer judgment.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {result.findings.map(f => (
+            <div key={f.id} className="bg-white/80 border border-white rounded p-2.5">
+              <div className="flex items-center gap-2">
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${f.level === 'CONFLICT' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{f.level}</span>
+                <span className="text-[11px] font-bold text-slate-800">{f.title}</span>
+                <span className="text-[9px] text-slate-400 uppercase">{f.confidence} confidence</span>
+              </div>
+              <div className="text-[11px] text-slate-600 mt-1 leading-relaxed">{f.detail}</div>
+              {f.evidence.length > 0 && (
+                <div className="text-[10px] text-slate-500 mt-1.5"><span className="font-semibold">Evidence:</span> {f.evidence.join(' · ')}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// =============================================================================
 // fmtDate — format dates as "Jan 06, 2026" everywhere on this page.
 // Module-scope so both the main component and the PathCard sub-component use it.
 // Accepts the various forms P6 XER hands us ('2026-01-06 00:00', '2026-01-06', etc.)
@@ -786,13 +848,17 @@ function fmtDate(d?: string | null): string {
 // PathCard — renders a single Float Path with Gantt chart, name, explanation,
 // and expandable activity list.
 // =============================================================================
-function PathCard({ path, expanded, onToggle, projectStart, projectEnd }: {
+function PathCard({ path, expanded, onToggle, projectStart, projectEnd, allProjectTasks }: {
   path: FloatPath
   expanded: boolean
   onToggle: () => void
   projectStart: string
   projectEnd: string
+  allProjectTasks?: Record<string, any>
 }) {
+  const orderedActivities = sortPathActivitiesByFinish(path.activities || [])
+  const credibility = evaluatePathCredibility(orderedActivities, allProjectTasks)
+
   const tagColor = path.isCritical
     ? 'bg-red-700 text-white'
     : path.isNearCritical
@@ -825,7 +891,7 @@ function PathCard({ path, expanded, onToggle, projectStart, projectEnd }: {
         </span>
         <span className="text-base font-semibold text-slate-900 flex-1 truncate">{path.pathName}</span>
         <span className="text-xs text-slate-600">
-          {path.activities.length} activities · {floatLabel} · drives to <span className="font-semibold">FINAL COMPLETION</span>
+          {orderedActivities.length} activities · {floatLabel} · drives to <span className="font-semibold">FINAL COMPLETION</span>
         </span>
         <span className="text-slate-400 ml-1 text-sm">{expanded ? '▾' : '▸'}</span>
       </button>
@@ -857,7 +923,7 @@ function PathCard({ path, expanded, onToggle, projectStart, projectEnd }: {
 
             {/* Gantt bars */}
             <div className="space-y-1.5">
-              {path.activities.slice(0, 12).map((t, i) => {
+              {orderedActivities.slice(0, 12).map((t, i) => {
                 const range = activityToGanttRange(t, projectStart, projectEnd)
                 return (
                   <div key={i} className="flex items-center gap-2">
@@ -884,8 +950,8 @@ function PathCard({ path, expanded, onToggle, projectStart, projectEnd }: {
                   </div>
                 )
               })}
-              {path.activities.length > 12 && (
-                <div className="text-center text-[11px] text-slate-500 pt-2">Showing first 12 of {path.activities.length} activities · scroll the table below for full list</div>
+              {orderedActivities.length > 12 && (
+                <div className="text-center text-[11px] text-slate-500 pt-2">Showing first 12 of {orderedActivities.length} activities · scroll the table below for full list</div>
               )}
             </div>
 
@@ -908,19 +974,21 @@ function PathCard({ path, expanded, onToggle, projectStart, projectEnd }: {
               <div className="col-span-2 text-right">Finish</div>
               <div className="col-span-1 text-right">Float</div>
             </div>
-            {path.activities.slice(0, 30).map((t, i) => {
+            {orderedActivities.map((t, i) => {
               const fl = Math.round(parseFloat(t.total_float_hr_cnt || '0') / 8)
               return (
                 <div key={i} className="grid grid-cols-12 gap-2 py-1.5 border-b border-slate-100 text-xs items-center last:border-0">
                   <div className="col-span-2 font-mono font-semibold text-slate-800 truncate">{t.task_code}</div>
                   <div className="col-span-5 text-slate-700 truncate">{t.task_name}</div>
-                  <div className="col-span-2 text-right text-slate-600">{fmtDate((t.early_start_date || t.target_start_date || ''))}</div>
-                  <div className="col-span-2 text-right text-slate-600">{fmtDate((t.early_end_date || t.target_end_date || ''))}</div>
+                  <div className="col-span-2 text-right text-slate-600">{fmtDate(pathActivityStart(t))}</div>
+                  <div className="col-span-2 text-right text-slate-600">{fmtDate(pathActivityFinish(t))}</div>
                   <div className={`col-span-1 text-right font-bold ${fl < 0 ? 'text-red-600' : fl === 0 ? 'text-amber-700' : 'text-emerald-600'}`}>{fl}d</div>
                 </div>
               )
             })}
           </div>
+
+          <PathCredibilityPanel result={credibility} title="Control Lens Construction Path Review" compact />
         </>
       )}
     </div>
