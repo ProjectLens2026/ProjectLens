@@ -32,6 +32,21 @@ function gradeColor(grade: string): string {
   return COLORS.red
 }
 
+function readinessColor(status?: string): string {
+  if (status === 'READY') return COLORS.green
+  if (status === 'READY_WITH_COMMENTS') return COLORS.amber
+  if (status === 'REVIEW_REQUIRED') return COLORS.amber
+  if (status === 'NOT_READY') return COLORS.red
+  return COLORS.slate
+}
+
+function shortDate(value?: string): string {
+  if (!value) return '—'
+  const d = new Date(value.replace(' ', 'T'))
+  if (Number.isNaN(d.getTime())) return value.slice(0, 10)
+  return d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
+}
+
 function approvalKind(f: ApprovalFinding): 'FINDING' | 'RECOMMENDATION' {
   return f.kind === 'RECOMMENDATION' ? 'RECOMMENDATION' : 'FINDING'
 }
@@ -62,48 +77,15 @@ export default function ApprovalReadinessPage() {
     setReady(true)
   }, [])
 
-  async function runCheck() {
-    if (running) return
+  function runCheck() {
+    if (!analysis) return
     setRunning(true)
-    setExpanded(null)
-    setReportKind(null)
-
-    // IMPORTANT: a re-run must use the project/version that is active NOW, not
-    // the copy that happened to be loaded when this page first mounted. This
-    // prevents a stale cached Approval Readiness result from being re-evaluated
-    // after the user changes versions from the project/version selector.
     try {
-      // Give React one paint so the button visibly changes to "Running…" even
-      // though evaluateApprovalReadiness() is synchronous and often completes
-      // in the same event loop tick.
-      await new Promise<void>(resolve => {
-        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-          window.requestAnimationFrame(() => resolve())
-        } else {
-          setTimeout(resolve, 0)
-        }
-      })
-
-      const currentProject = getActiveProject()
-      const currentVersion = getActiveVersion(currentProject)
-      const currentAnalysis = currentVersion?.analysis || null
-
-      if (!currentProject || !currentVersion || !currentAnalysis) {
-        throw new Error('No active schedule version is available for Approval Readiness.')
-      }
-
-      // Refresh the page state from the active version before evaluating.
-      setProject(currentProject)
-      setVersion(currentVersion)
-      setAnalysis(currentAnalysis)
-
-      const res = evaluateApprovalReadiness(currentAnalysis, { mode, projectType: 'ALL' })
+      const res = evaluateApprovalReadiness(analysis, { mode, projectType: 'ALL' })
       setResult(res)
-
-      // Replace the saved result for THIS active version with the fresh run.
-      if (res) {
-        const saved = updateVersionApprovalResult(currentProject.id, currentVersion.id, res)
-        if (!saved) console.warn('[approval] fresh result could not be persisted')
+      // persist so it survives leaving the page
+      if (res && project?.id && version?.id) {
+        try { updateVersionApprovalResult(project.id, version.id, res) } catch {}
       }
     } catch (e) {
       console.error('[approval] evaluation failed:', e)
@@ -184,43 +166,130 @@ export default function ApprovalReadinessPage() {
 
       {result && (
         <>
-          {/* Score header — 30-second understanding */}
+          {/* Reviewer-first decision summary. The status leads; the score supports. */}
           <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4 print:break-inside-avoid">
-            <div className="flex flex-wrap items-center gap-6">
-              <div className="text-center">
-                <div className="font-mono text-[44px] font-extrabold leading-none" style={{ color: gradeColor(result.grade) }}>
-                  {result.totalScore}<span className="text-[20px] text-slate-400">/100</span>
+            <div className="flex flex-wrap items-start gap-5">
+              <div className="flex-1 min-w-[320px]">
+                <div className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-slate-500 mb-1">Control Lens Readiness Status</div>
+                <div className="text-[24px] md:text-[28px] font-black leading-tight" style={{ color: readinessColor(result.readinessStatus) }}>
+                  {result.readinessLabel || result.recommendation}
                 </div>
-                <div className="text-[22px] font-extrabold mt-1" style={{ color: gradeColor(result.grade) }}>{result.grade}</div>
-              </div>
-              <div className="flex-1 min-w-[200px]">
-                <div className="text-[15px] font-extrabold uppercase tracking-wide" style={{ color: COLORS.ink }}>
-                  {result.recommendation}
+                <div className="text-[12px] text-slate-600 leading-relaxed mt-2 max-w-[720px]">
+                  {result.readinessReason || 'Control Lens combines schedule logic, sequencing, path credibility and readiness evidence. The authorized reviewer makes the final approval decision.'}
                 </div>
-                <div className="flex flex-wrap gap-2 mt-2">
+                <div className="flex flex-wrap gap-2 mt-3">
                   <Chip label={`Critical Gates: ${result.criticalGates.passed ? 'PASS' : 'FAIL'}`} color={result.criticalGates.passed ? COLORS.green : COLORS.red} />
                   <Chip label={`Critical: ${result.counts.critical}`} color={result.counts.critical ? COLORS.red : COLORS.slate} />
                   <Chip label={`Major: ${result.counts.major}`} color={result.counts.major ? COLORS.amber : COLORS.slate} />
                   <Chip label={`Minor: ${result.counts.minor}`} color={COLORS.slate} />
                 </div>
                 {!result.criticalGates.passed && (
-                  <div className="mt-2 text-[11px]" style={{ color: COLORS.red }}>
+                  <div className="mt-2 text-[11px] font-semibold" style={{ color: COLORS.red }}>
                     {result.criticalGates.failed.map(g => `✗ ${g.label}`).join('  ·  ')}
                   </div>
                 )}
               </div>
-              <div className="flex flex-col gap-2 flex-shrink-0">
-                <button onClick={() => setReportKind('executive')}
-                  className="text-[11px] font-bold px-3 py-2 rounded-lg text-white" style={{ background: COLORS.ink }}>
-                  📄 Executive Report
-                </button>
-                <button onClick={() => setReportKind('complete')}
-                  className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">
-                  📑 Complete Review
-                </button>
+
+              <div className="flex items-center gap-4 flex-shrink-0">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-center min-w-[120px]">
+                  <div className="text-[9px] uppercase tracking-wide font-extrabold text-slate-500">Readiness Score</div>
+                  <div className="font-mono text-[30px] font-extrabold leading-none mt-1" style={{ color: gradeColor(result.grade) }}>
+                    {result.totalScore}<span className="text-[13px] text-slate-400">/100</span>
+                  </div>
+                  <div className="text-[13px] font-extrabold mt-1" style={{ color: gradeColor(result.grade) }}>{result.grade}</div>
+                  <div className="text-[8.5px] text-slate-400 mt-1">supporting indicator</div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <button onClick={() => setReportKind('executive')}
+                    className="text-[11px] font-bold px-3 py-2 rounded-lg text-white" style={{ background: COLORS.ink }}>
+                    📄 Executive Report
+                  </button>
+                  <button onClick={() => setReportKind('complete')}
+                    className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">
+                    📑 Complete Review
+                  </button>
+                </div>
               </div>
             </div>
           </div>
+
+          {/* What Control Lens understands about the submitted work */}
+          {result.projectUnderstanding && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
+              <div className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-blue-600 mb-1">Project Understanding / Nature of Work</div>
+              <div className="text-[18px] font-black leading-snug" style={{ color: COLORS.ink }}>{result.projectUnderstanding.projectNature}</div>
+              <div className="text-[12px] font-semibold text-slate-600 mt-1">{result.projectUnderstanding.deliveryNature.join(' → ')}</div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                  <div className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500">Completion Target</div>
+                  <div className="text-[12px] font-bold mt-1" style={{ color: COLORS.ink }}>{result.projectUnderstanding.completionTarget?.code || '—'} · {result.projectUnderstanding.completionTarget?.name || 'Not resolved'}</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">{shortDate(result.projectUnderstanding.completionTarget?.finish)}</div>
+                </div>
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                  <div className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500">Detected Areas</div>
+                  <div className="text-[11px] font-semibold text-slate-700 mt-1 leading-relaxed">{result.projectUnderstanding.areas.join(' · ') || '—'}</div>
+                </div>
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                  <div className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500">Detected Systems</div>
+                  <div className="text-[11px] font-semibold text-slate-700 mt-1 leading-relaxed">{result.projectUnderstanding.systems.join(' · ') || '—'}</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Path credibility is now a first-class approval question. */}
+          {result.pathReview && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
+              <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-700 mb-1">Control Path Credibility</div>
+              <div className="text-[11px] text-slate-500 mb-3">Control Lens evaluates whether the submitted XER represents the work that should actually control completion. This is engineering schedule review — not a silent P6 CPM recalculation.</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {[result.pathReview.criticalPath, result.pathReview.longestPath].filter(Boolean).map((p: any) => {
+                  const c = p.status === 'CREDIBLE' ? COLORS.green : p.status === 'REVIEW_REQUIRED' ? COLORS.red : COLORS.amber
+                  return (
+                    <div key={p.label} className="rounded-xl border p-4" style={{ borderColor: `${c}55`, background: `${c}08` }}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-[14px] font-extrabold" style={{ color: COLORS.ink }}>{p.label}</div>
+                        <span className="text-[9px] font-extrabold uppercase tracking-wide px-2 py-1 rounded" style={{ background: `${c}18`, color: c }}>{p.status.replace('_', ' ')}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-600 leading-relaxed mt-2">{p.note}</div>
+                      <div className="text-[9px] text-slate-400 mt-2">{p.activityCount} submitted activities in the CL review chain</div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Priority findings — what the reviewer should read first. */}
+          {(() => {
+            const priority = result.findings.filter(f => approvalKind(f) === 'FINDING' && (f.criticalGate || f.severity >= 4)).slice(0, 5)
+            if (!priority.length) return null
+            return (
+              <div className="rounded-2xl border border-red-200 bg-red-50/30 p-5 mb-4">
+                <div className="flex items-end justify-between gap-3 mb-3">
+                  <div>
+                    <div className="text-[11px] font-extrabold uppercase tracking-wide text-red-700">Priority Review</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">Read these first. Detailed evidence remains below.</div>
+                  </div>
+                  <div className="text-[11px] font-bold text-red-700">{priority.length} material item{priority.length === 1 ? '' : 's'}</div>
+                </div>
+                <div className="space-y-2">
+                  {priority.map(f => (
+                    <button key={f.id} onClick={() => setExpanded(expanded === f.id ? null : f.id)} className="w-full text-left rounded-lg border border-red-100 bg-white px-3 py-3 hover:border-red-200">
+                      <div className="flex items-start gap-2">
+                        <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded bg-red-100 text-red-700 flex-shrink-0">{f.primaryDomain}</span>
+                        <div className="flex-1">
+                          <div className="text-[13px] font-extrabold leading-snug" style={{ color: COLORS.ink }}>{f.title}</div>
+                          <div className="text-[11px] text-slate-600 leading-relaxed mt-1">{f.whatFound}</div>
+                        </div>
+                        <span className="text-[10px] text-slate-400 flex-shrink-0">View detail ›</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
 
           {/* Domain scores */}
           <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
@@ -255,10 +324,10 @@ export default function ApprovalReadinessPage() {
             return (
               <div className="space-y-4">
                 <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                  <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-700 mb-1">What requires your attention</div>
-                  <div className="text-[11px] text-slate-400 mb-3">{scoringFindings.length} consolidated finding{scoringFindings.length === 1 ? '' : 's'} · voice: {mode === 'PRE_SUBMISSION' ? 'Pre-Submission' : 'Reviewer'}</div>
+                  <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-700 mb-1">Detailed Review</div>
+                  <div className="text-[11px] text-slate-400 mb-3">{scoringFindings.length} consolidated finding{scoringFindings.length === 1 ? '' : 's'} · expand only when evidence is needed</div>
                   {scoringFindings.length === 0 ? (
-                    <div className="text-[12px] text-slate-500 italic py-4">No material triggers. Schedule reads as approval-ready.</div>
+                    <div className="text-[12px] text-slate-500 italic py-4">No material concern detected by the current checks. Reviewer confirmation still governs.</div>
                   ) : (
                     <div className="space-y-2">
                       {scoringFindings.map(f => (
@@ -302,13 +371,13 @@ function FindingRow({ f, mode, open, onToggle }: { f: ApprovalFinding; mode: App
       <button onClick={onToggle} className="w-full text-left px-3 py-2.5 flex items-center gap-2 hover:bg-slate-50">
         <span className="font-mono text-[10px] font-bold text-white px-1.5 py-0.5 rounded" style={{ background: COLORS.ink }}>{f.id}</span>
         <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded" style={{ background: `${sevColor}22`, color: sevColor }}>{f.primaryDomain}</span>
-        <span className="text-[12px] font-semibold flex-1 truncate" style={{ color: COLORS.ink }}>{f.title}</span>
+        <span className="text-[13px] font-extrabold flex-1 leading-snug" style={{ color: COLORS.ink }}>{f.title}</span>
         {isRecommendation ? (
           <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">Recommendation · no score impact</span>
         ) : (
           <>
-            <span className="font-mono text-[10px] text-slate-400">−{f.scoreDeduction}</span>
             <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{f.ruleStrength}</span>
+            <span className="font-mono text-[9px] text-slate-400">score −{f.scoreDeduction}</span>
           </>
         )}
         <span className="text-slate-400 text-[11px]">{open ? '▾' : '▸'}</span>
@@ -471,27 +540,68 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
 
           {/* ── Executive summary block (both reports) ───────────────── */}
           <SectionBar>Executive Summary</SectionBar>
-          <div className="flex items-center gap-6 mb-4 print:break-inside-avoid">
-            <div className="text-center">
-              <div className="font-mono text-[40px] font-extrabold leading-none" style={{ color: gc }}>
-                {result.totalScore}<span className="text-[18px] text-slate-400">/100</span>
-              </div>
-              <div className="text-[20px] font-extrabold" style={{ color: gc }}>{result.grade}</div>
-            </div>
+          <div className="flex items-start gap-6 mb-4 print:break-inside-avoid">
             <div className="flex-1">
-              <div className="text-[14px] font-extrabold uppercase tracking-wide mb-1" style={{ color: COLORS.ink }}>{result.recommendation}</div>
-              <div className="text-[11px] text-slate-600">
+              <div className="text-[9px] font-extrabold uppercase tracking-[0.14em] text-slate-500 mb-1">Control Lens Readiness Status</div>
+              <div className="text-[18px] font-black uppercase tracking-wide mb-1" style={{ color: readinessColor(result.readinessStatus) }}>
+                {result.readinessLabel || result.recommendation}
+              </div>
+              <div className="text-[10.5px] text-slate-600 leading-relaxed mb-2">{result.readinessReason || result.recommendation}</div>
+              <div className="text-[10.5px] text-slate-600">
                 Critical Gates: <b style={{ color: result.criticalGates.passed ? COLORS.green : COLORS.red }}>{result.criticalGates.passed ? 'PASS' : 'FAIL'}</b>
                 {'  ·  '}Critical {result.counts.critical} · Major {result.counts.major} · Minor {result.counts.minor}
                 {reportRecommendations.length > 0 ? ` · Recommendations ${reportRecommendations.length}` : ''}
               </div>
               {!result.criticalGates.passed && (
-                <div className="text-[10px] mt-1" style={{ color: COLORS.red }}>
+                <div className="text-[10px] mt-1 font-semibold" style={{ color: COLORS.red }}>
                   {result.criticalGates.failed.map(g => `✗ ${g.label} — ${g.reason}`).join('  ·  ')}
                 </div>
               )}
             </div>
+            <div className="text-center rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 min-w-[110px]">
+              <div className="text-[8px] font-extrabold uppercase tracking-wide text-slate-500">Readiness Score</div>
+              <div className="font-mono text-[28px] font-extrabold leading-none mt-1" style={{ color: gc }}>
+                {result.totalScore}<span className="text-[12px] text-slate-400">/100</span>
+              </div>
+              <div className="text-[12px] font-extrabold mt-1" style={{ color: gc }}>{result.grade}</div>
+              <div className="text-[7.5px] text-slate-400 mt-1">supporting indicator</div>
+            </div>
           </div>
+
+          {(result.projectUnderstanding || result.pathReview) && (
+            <>
+              <SectionBar>Engineering Readiness Snapshot</SectionBar>
+              <div className="border border-slate-200 rounded-lg p-3 mb-5 print:break-inside-avoid">
+                {result.projectUnderstanding && (
+                  <div className="mb-3">
+                    <div className="text-[12px] font-extrabold" style={{ color: COLORS.ink }}>{result.projectUnderstanding.projectNature}</div>
+                    <div className="text-[10px] text-slate-600 mt-0.5">{result.projectUnderstanding.deliveryNature.join(' → ')}</div>
+                    <div className="grid grid-cols-3 gap-3 mt-2 text-[9.5px]">
+                      <div><b>Target:</b> {result.projectUnderstanding.completionTarget?.code || '—'} · {result.projectUnderstanding.completionTarget?.name || 'Not resolved'} {result.projectUnderstanding.completionTarget?.finish ? `(${shortDate(result.projectUnderstanding.completionTarget.finish)})` : ''}</div>
+                      <div><b>Areas:</b> {result.projectUnderstanding.areas.join(' · ') || '—'}</div>
+                      <div><b>Systems:</b> {result.projectUnderstanding.systems.join(' · ') || '—'}</div>
+                    </div>
+                  </div>
+                )}
+                {result.pathReview && (
+                  <div className="grid grid-cols-2 gap-3">
+                    {[result.pathReview.criticalPath, result.pathReview.longestPath].filter(Boolean).map((p: any) => {
+                      const c = p.status === 'CREDIBLE' ? COLORS.green : p.status === 'REVIEW_REQUIRED' ? COLORS.red : COLORS.amber
+                      return (
+                        <div key={p.label} className="rounded border p-2" style={{ borderColor: `${c}55` }}>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10.5px] font-extrabold" style={{ color: COLORS.ink }}>{p.label}</span>
+                            <span className="text-[8px] font-extrabold uppercase" style={{ color: c }}>{p.status.replace('_', ' ')}</span>
+                          </div>
+                          <div className="text-[9px] text-slate-600 leading-relaxed mt-1">{p.note}</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
 
           {/* domain table */}
           <SectionBar>Approval Domains</SectionBar>
