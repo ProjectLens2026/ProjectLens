@@ -43,7 +43,8 @@ export default function ApprovalReadinessReportPage() {
   const recommendations = result.findings.filter(f => f.kind === 'RECOMMENDATION')
 
   return (
-    <div className="p-4 md:p-6 max-w-[1180px] mx-auto">
+    <div className="h-full min-h-0 overflow-y-auto overscroll-contain bg-slate-50 print:h-auto print:overflow-visible print:bg-white">
+      <div className="p-4 md:p-6 max-w-[1180px] mx-auto pb-16 print:p-0 print:max-w-none">
       <div className="print:hidden flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 mb-4">
         <Link href="/dashboard/reports" className="text-[11px] font-semibold text-slate-500 hover:text-slate-900">‹ Reports</Link>
         <span className="text-[12px] font-extrabold text-slate-900">Approval Readiness Report</span>
@@ -99,6 +100,7 @@ export default function ApprovalReadinessReportPage() {
         ) : null}
 
         <NeutralReportFooter reportNo={reportNo} />
+      </div>
       </div>
     </div>
   )

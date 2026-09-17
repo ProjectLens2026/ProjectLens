@@ -49,7 +49,8 @@ export default function LogicTraceReportPage() {
   const hasTraceData = relationships.length > 0 && Object.keys(tasks).length > 0
 
   return (
-    <div className="p-4 md:p-6 max-w-[1180px] mx-auto">
+    <div className="h-full min-h-0 overflow-y-auto overscroll-contain bg-slate-50 print:h-auto print:overflow-visible print:bg-white">
+      <div className="p-4 md:p-6 max-w-[1180px] mx-auto pb-16 print:p-0 print:max-w-none">
       <div className="print:hidden rounded-2xl border border-slate-200 bg-white p-4 mb-4">
         <div className="flex flex-wrap items-center gap-3 mb-3">
           <Link href="/dashboard/reports" className="text-[11px] font-semibold text-slate-500 hover:text-slate-900">‹ Reports</Link>
@@ -107,6 +108,7 @@ export default function LogicTraceReportPage() {
       ) : (
         hasTraceData ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-[11px] text-slate-500">Select an activity or milestone above to build the report.</div> : null
       )}
+      </div>
     </div>
   )
 }

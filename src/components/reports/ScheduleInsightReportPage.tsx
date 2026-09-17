@@ -75,7 +75,8 @@ export default function ScheduleInsightReportPage({ mode }: { mode: Mode }) {
       : []
 
   return (
-    <div className="p-4 md:p-6 max-w-[1180px] mx-auto">
+    <div className="h-full min-h-0 overflow-y-auto overscroll-contain bg-slate-50 print:h-auto print:overflow-visible print:bg-white">
+      <div className="p-4 md:p-6 max-w-[1180px] mx-auto pb-16 print:p-0 print:max-w-none">
       <ReportToolbar title={cfg.title} reportNo={reportNo} />
 
       <div id="schedule-insight-report" className="rounded-2xl border border-slate-200 bg-white p-6">
@@ -118,6 +119,7 @@ export default function ScheduleInsightReportPage({ mode }: { mode: Mode }) {
         )}
 
         <NeutralReportFooter reportNo={reportNo} />
+      </div>
       </div>
     </div>
   )

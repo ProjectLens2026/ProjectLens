@@ -98,7 +98,8 @@ export default function ReportsPage() {
   const dataDate = version?.analysis?.dataDate || version?.dataDate || version?.uploadedAt
 
   return (
-    <div className="p-4 md:p-6 max-w-[1280px] mx-auto">
+    <div className="h-full min-h-0 overflow-y-auto overscroll-contain bg-slate-50">
+      <div className="p-4 md:p-6 max-w-[1280px] mx-auto pb-16">
       <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
         <div>
           <div className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-slate-400">Project Reports</div>
@@ -141,6 +142,7 @@ export default function ReportsPage() {
           </div>
         </section>
       </div>
+    </div>
     </div>
   )
 }
