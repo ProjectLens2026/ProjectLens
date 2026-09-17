@@ -3,208 +3,160 @@
 // =============================================================================
 // src/app/dashboard/reports/page.tsx
 // =============================================================================
-// The Reports hub — the front door to ControlLens's reporting library.
-//
-// Customers come here when they want a polished, printable document to
-// share with owners, contracting officers, or executives. Each card opens
-// a dedicated branded report with Print / Save-as-PDF and (eventually) Word.
-//
-// Pattern matches EstimateLens's /reports hub: 2-column responsive grid,
-// each card has a tag chip, a title, a description, and a Ready/Planned
-// status pill.
+// Report center. Sidebar views are working spaces; this page packages those
+// results into focused, individually printable reports. The complete package is
+// deliberately optional rather than the default experience.
 // =============================================================================
 
-import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { getActiveProject, Project } from '@/lib/projectStore'
+import Link from 'next/link'
+import { getActiveProject, getActiveVersion } from '@/lib/projectStore'
+import { fmtReportDate } from '@/lib/reports'
 
-interface ReportCard {
-  href: string                    // route when Ready, '#' when Planned
+type Card = {
   title: string
-  desc: string
-  live: boolean
-  tag: string
+  description: string
+  href: string
+  icon: string
+  note?: string
 }
 
-export default function ReportsHubPage() {
-  const [project, setProject] = useState<Project | null>(null)
+type Group = {
+  label: string
+  description: string
+  cards: Card[]
+}
+
+const GROUPS: Group[] = [
+  {
+    label: 'Management & Review',
+    description: 'Decision-ready summaries and formal schedule review outputs.',
+    cards: [
+      { title: 'Executive Summary', description: 'High-level schedule position, key dates, performance, and major risks.', href: '/dashboard/reports/executive', icon: '◫' },
+      { title: 'Schedule Review Report', description: 'Deep diagnostic of schedule health, path exposure, float, logic, and delivery readiness.', href: '/dashboard/reports/full', icon: '▤' },
+      { title: 'Approval Readiness Report', description: 'Approval domains, reviewer observations, recommendations, and supporting schedule references.', href: '/dashboard/reports/approval-readiness', icon: '✓' },
+    ],
+  },
+  {
+    label: 'Schedule Paths & Logic',
+    description: 'Focused path, network, and schedule-quality reports.',
+    cards: [
+      { title: 'Critical Path Report', description: 'Critical activities and the schedule chain currently controlling completion.', href: '/dashboard/reports/critical-path', icon: '◎' },
+      { title: 'Longest Path Report', description: 'Activities identified on the XER longest path, presented as a standalone report.', href: '/dashboard/reports/longest-path', icon: '↦' },
+      { title: 'Near-Critical / Multiple Float Paths', description: 'Ranked low-float paths that may become critical if further slippage occurs.', href: '/dashboard/reports/near-critical', icon: '≋' },
+      { title: 'Logic Trace Report', description: 'Choose an activity or milestone and document its predecessor/successor thread.', href: '/dashboard/reports/logic-trace', icon: '⌁' },
+      { title: 'Schedule Quality Report', description: 'Open logic conditions, out-of-sequence work, and negative-float exposure.', href: '/dashboard/reports/schedule-quality', icon: '◇' },
+      { title: 'Out-of-Sequence Report', description: 'Detailed activity/relationship evidence for detected out-of-sequence conditions.', href: '/dashboard/reports/oos', icon: '↯' },
+    ],
+  },
+  {
+    label: 'Risk & Delivery',
+    description: 'Schedule risks and delivery-readiness reports.',
+    cards: [
+      { title: 'Risk Register', description: 'Detected schedule risk categories, severity, evidence, and reviewer actions.', href: '/dashboard/reports/risks', icon: '⚠' },
+      { title: 'Procurement & Long-Lead', description: 'Long-lead activities, delivery exposure, and available float.', href: '/dashboard/reports/long-lead', icon: '▱' },
+      { title: 'Submittals Report', description: 'Schedule submittal activities, approval timing, and float exposure.', href: '/dashboard/reports/submittals', icon: '▧' },
+    ],
+  },
+  {
+    label: 'Performance & Change Over Time',
+    description: 'Performance, update-to-update movement, and delay-analysis reports.',
+    cards: [
+      { title: 'Performance & EVM Report', description: 'Planned value, earned value, actual cost, SPI/CPI, and forecast metrics where available.', href: '/dashboard/reports/evm', icon: '$' },
+      { title: 'Schedule Trends Report', description: 'Movement in completion, float, health, and other metrics across schedule versions.', href: '/dashboard/reports/trend', icon: '↗' },
+      { title: 'Time Impact Analysis', description: 'Delay-event documentation and schedule impact comparison.', href: '/dashboard/reports/tia', icon: '∆' },
+    ],
+  },
+]
+
+export default function ReportsPage() {
+  const [project, setProject] = useState<any>(null)
+  const [version, setVersion] = useState<any>(null)
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    setProject(getActiveProject())
+    const p = getActiveProject()
+    setProject(p)
+    setVersion(getActiveVersion(p))
     setReady(true)
   }, [])
 
-  // Cards in the order customers think about them — exec first, then
-  // detailed analyses, then deliverables (book) last.
-  const reports: ReportCard[] = [
-    {
-      href: '/dashboard/reports/executive',
-      title: 'Executive Summary',
-      desc: 'Schedule health, key dates, top risks, and the planned-vs-actual curve. For owners and execs who want the shape of the project in one page.',
-      live: true,
-      tag: 'EXEC',
-    },
-    {
-      href: '/dashboard/reports/full',
-      title: 'Full Analysis Report',
-      desc: 'Every diagnostic the Lens engine produces — critical path drivers, float distribution, logic anomalies, activity-level risk, and TIA evidence.',
-      live: true,
-      tag: 'FULL',
-    },
-    {
-      href: '/dashboard/reports/risks',
-      title: 'Risk Register',
-      desc: 'Every detected risk grouped by severity (Critical / High / Medium) with the activity, the cause in plain English, and the recommended action.',
-      live: true,
-      tag: 'RISK',
-    },
-    {
-      href: '/dashboard/reports/oos',
-      title: 'Out-of-Sequence Report',
-      desc: 'The exact activities P6 Schedule Log would flag — successors actualized before their predecessors. Matches the federal audit convention.',
-      live: true,
-      tag: 'OOS',
-    },
-    {
-      href: '/dashboard/reports/tia',
-      title: 'Time Impact Analysis',
-      desc: 'Quantifies the delay caused by a fragnet or schedule change. Shows the un-impacted vs impacted path with the day-by-day variance.',
-      live: true,
-      tag: 'TIA',
-    },
-    {
-      href: '/dashboard/reports/trend',
-      title: 'Trend & Variance Report',
-      desc: 'Compare any two schedule versions side-by-side — added, removed, and changed activities, milestone movement, and logic deltas.',
-      live: true,
-      tag: 'TREND',
-    },
-    {
-      href: '/dashboard/reports/long-lead',
-      title: 'Long-Lead & Procurement',
-      desc: 'Long-lead items, procurement activities, and their float exposure. Surfaces what could trip up the construction sequence weeks out.',
-      live: true,
-      tag: 'LEAD',
-    },
-    {
-      href: '/dashboard/reports/evm',
-      title: 'Earned Value Report',
-      desc: 'PV, EV, AC, SV, CV, CPI, SPI with time-phased curves. Construction-only activities; LOE and milestone work excluded by default.',
-      live: true,
-      tag: 'EVM',
-    },
-    {
-      href: '/dashboard/reports/submittals',
-      title: 'Submittals & RFI Impact',
-      desc: 'Outstanding submittals and RFIs mapped to the activities they hold up. Shows which schedule risks trace back to a paperwork bottleneck.',
-      live: true,
-      tag: 'SUB',
-    },
-    {
-      href: '/dashboard/report',
-      title: 'Complete Project Report',
-      desc: 'Everything in one printable document — executive summary, critical path, longest path, multiple float paths, sequence problems, long lead, submittals, milestones, lookahead, EVM, and appendices. One PDF for the owner.',
-      live: true,
-      tag: 'BOOK',
-    },
-  ]
+  if (!ready) return <div className="p-6 text-sm text-slate-500">Loading reports…</div>
 
-  // Loading state — projectStore reads from IndexedDB asynchronously
-  if (!ready) {
-    return <div className="p-6 text-sm text-slate-500">Loading reports…</div>
-  }
-
-  // No project loaded — direct them to upload
-  if (!project) {
+  if (!project || !version) {
     return (
-      <div className="flex flex-col items-center justify-center h-full bg-slate-50 p-6">
-        <div className="bg-white border border-slate-200 rounded-xl p-12 text-center max-w-md">
-          <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 rounded-2xl flex items-center justify-center">
-            <span className="text-3xl">📄</span>
-          </div>
-          <div className="text-lg font-bold text-slate-700 mb-2">No project loaded</div>
-          <div className="text-sm text-slate-500 mb-4">
-            Upload a P6 XER file to generate reports. The reports library opens once a project is active.
-          </div>
-          <Link href="/dashboard/upload" className="inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2 rounded-lg">
-            Upload Schedule
-          </Link>
+      <div className="p-6">
+        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
+          <div className="text-2xl mb-2">📄</div>
+          <div className="text-sm font-bold text-slate-900">Select a project and schedule version</div>
+          <div className="text-xs text-slate-500 mt-1">Reports are generated from the active schedule version.</div>
         </div>
       </div>
     )
   }
 
+  const dataDate = version?.analysis?.dataDate || version?.dataDate || version?.uploadedAt
+
   return (
-    <div className="p-6 max-w-[1100px] mx-auto">
-      {/* Page header */}
-      <div className="mb-6">
-        <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500 mb-1">
-          Project · {project.projectId || project.name}
+    <div className="p-4 md:p-6 max-w-[1280px] mx-auto">
+      <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
+        <div>
+          <div className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-slate-400">Project Reports</div>
+          <h1 className="text-xl font-extrabold text-slate-900 mt-0.5">Reports</h1>
+          <p className="text-xs text-slate-500 mt-1 max-w-2xl">
+            Open only the report you need. Each report has its own page and can be reviewed or exported independently.
+          </p>
         </div>
-        <h1 className="text-[26px] font-extrabold leading-tight" style={{ color: '#13202e' }}>
-          Reports
-        </h1>
-        <p className="text-[13px] text-slate-500 mt-1.5 max-w-[680px] leading-relaxed">
-          Branded, printable documents for the active project. Each report uses
-          the latest schedule version. Click a card to open it, then Print /
-          Save as PDF or download as Word.
-        </p>
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] text-slate-500">
+          <div><span className="font-semibold text-slate-700">{project.projectId || project.name}</span></div>
+          <div>{version.versionLabel || version.fileName || 'Active version'} · Data Date {fmtReportDate(dataDate)}</div>
+        </div>
       </div>
 
-      {/* Card grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {reports.map((r) =>
-          r.live ? (
-            <Link
-              key={r.title}
-              href={r.href}
-              className="rounded-2xl border border-slate-200 bg-white p-5 hover:border-blue-400 hover:shadow-sm transition-all group"
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <span
-                  className="font-mono text-[10px] font-bold text-white rounded px-1.5 py-0.5 tracking-wide"
-                  style={{ background: '#13202e' }}
-                >
-                  {r.tag}
-                </span>
-                <span className="text-[14px] font-extrabold" style={{ color: '#13202e' }}>
-                  {r.title}
-                </span>
-                <span
-                  className="ml-auto text-[10px] font-bold uppercase tracking-wide rounded px-2 py-0.5"
-                  style={{ background: '#e6f5ee', color: '#1f9d63' }}
-                >
-                  Ready
-                </span>
-              </div>
-              <p className="text-[12px] text-slate-500 leading-relaxed">{r.desc}</p>
-            </Link>
-          ) : (
-            <div
-              key={r.title}
-              className="rounded-2xl border border-dashed border-slate-300 bg-white p-5 opacity-80"
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <span className="font-mono text-[10px] font-bold text-slate-500 rounded px-1.5 py-0.5 bg-slate-100 tracking-wide">
-                  {r.tag}
-                </span>
-                <span className="text-[14px] font-extrabold text-slate-600">{r.title}</span>
-                <span className="ml-auto text-[10px] font-bold uppercase tracking-wide rounded px-2 py-0.5 bg-slate-100 text-slate-500">
-                  Planned
-                </span>
-              </div>
-              <p className="text-[12px] text-slate-400 leading-relaxed">{r.desc}</p>
+      <div className="space-y-6">
+        {GROUPS.map(group => (
+          <section key={group.label}>
+            <div className="mb-2.5">
+              <h2 className="text-[11px] font-extrabold uppercase tracking-[0.12em] text-slate-700">{group.label}</h2>
+              <p className="text-[10.5px] text-slate-400 mt-0.5">{group.description}</p>
             </div>
-          )
-        )}
-      </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {group.cards.map(card => <ReportCard key={card.href} card={card} />)}
+            </div>
+          </section>
+        ))}
 
-      {/* Footer note */}
-      <div className="mt-6 text-[11px] text-slate-400 leading-relaxed border-t border-slate-200 pt-4">
-        <span className="font-bold text-slate-500">Generated by ControlLens</span> — analysis is advisory; the P6 schedule of record governs.
-        New reports ship monthly. Tell us which one you need next at <a href="mailto:support@control-lens.com" className="text-blue-600 hover:underline">support@control-lens.com</a>.
+        <section className="pt-1">
+          <div className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-4 flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <div className="text-[11px] font-extrabold uppercase tracking-[0.1em] text-slate-700">Complete Report Package</div>
+              <div className="text-[10.5px] text-slate-500 mt-1 max-w-2xl">
+                Optional. Use this only when a stakeholder wants the full combined schedule-review package rather than an individual report.
+              </div>
+            </div>
+            <Link href="/dashboard/reports/complete"
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-[11px] font-bold text-slate-800 hover:bg-slate-100">
+              📚 Open complete package
+            </Link>
+          </div>
+        </section>
       </div>
     </div>
+  )
+}
+
+function ReportCard({ card }: { card: Card }) {
+  return (
+    <Link href={card.href}
+      className="group rounded-xl border border-slate-200 bg-white p-4 hover:border-blue-300 hover:bg-blue-50/30 transition-colors min-h-[128px] flex flex-col">
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center text-lg flex-shrink-0 group-hover:bg-blue-100 group-hover:text-blue-700">{card.icon}</div>
+        <div className="min-w-0">
+          <div className="text-[12px] font-extrabold text-slate-900">{card.title}</div>
+          <div className="text-[10.5px] text-slate-500 leading-relaxed mt-1">{card.description}</div>
+        </div>
+      </div>
+      <div className="mt-auto pt-3 text-[10px] font-bold text-blue-600">Open report →</div>
+    </Link>
   )
 }

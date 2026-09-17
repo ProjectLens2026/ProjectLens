@@ -4,8 +4,8 @@
 // Reporting helpers for ControlLens. Mirrors EstimateLens conventions so the
 // two products share a visual + naming language.
 //
-// Report number format: CL-{PROJECT_CODE}-{KIND}-{YYYYMMDD}
-//   e.g.  CL-040ADV-26-R-EXEC-20260607
+// External report number format: SR-{PROJECT_CODE}-{KIND}-{YYYYMMDD}
+//   e.g.  SR-040ADV-26-R-EXEC-20260607
 // =============================================================================
 
 /**
@@ -21,8 +21,14 @@ export type ReportKind =
   | 'TREND'   // Trend & Variance
   | 'LEAD'    // Long-Lead & Procurement
   | 'EVM'     // Earned Value
-  | 'SUB'     // Submittals & RFI Impact
-  | 'BOOK'    // Complete ControlLens Report
+  | 'SUB'     // Submittals
+  | 'APP'     // Approval Readiness
+  | 'CP'      // Critical Path
+  | 'LP'      // Longest Path
+  | 'NCP'     // Near-Critical / Multiple Float Paths
+  | 'TRACE'   // Logic Trace
+  | 'QUAL'    // Schedule Quality
+  | 'BOOK'    // Complete Schedule Review Package
 
 /**
  * Generate the report number shown in the header and footer of every report.
@@ -47,7 +53,7 @@ export function reportNumber(
     `${d.getFullYear()}` +
     `${String(d.getMonth() + 1).padStart(2, '0')}` +
     `${String(d.getDate()).padStart(2, '0')}`
-  return `CL-${code}-${kind}-${ymd}`
+  return `SR-${code}-${kind}-${ymd}`
 }
 
 /**
@@ -63,15 +69,21 @@ export const REPORT_TITLES: Record<ReportKind, string> = {
   TREND: 'Trend & Variance Report',
   LEAD:  'Long-Lead & Procurement',
   EVM:   'Earned Value Report',
-  SUB:   'Submittals & RFI Impact',
-  BOOK:  'Complete ControlLens Report',
+  SUB:   'Submittals Report',
+  APP:   'Approval Readiness Report',
+  CP:    'Critical Path Report',
+  LP:    'Longest Path Report',
+  NCP:   'Near-Critical / Multiple Float Paths Report',
+  TRACE: 'Logic Trace Report',
+  QUAL:  'Schedule Quality Report',
+  BOOK:  'Complete Schedule Review Package',
 }
 
 /**
  * Short tagline shown in the cover sheet — mirrors EstimateLens convention
  * of having a one-line product positioning under the wordmark.
  */
-export const REPORT_TAGLINE = 'CONSTRUCTION SCHEDULE INTELLIGENCE'
+export const REPORT_TAGLINE = 'SCHEDULE CONTROL REVIEW'
 
 /**
  * Format a user-facing report date as MM/DD/YYYY.
@@ -95,6 +107,10 @@ export function fmtReportDate(d: Date | string | null | undefined): string {
  */
 export function fmtShortDate(d: Date | string | null | undefined): string {
   if (!d) return '—'
+  if (typeof d === 'string') {
+    const iso = d.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`
+  }
   const date = typeof d === 'string' ? new Date(d) : d
   if (isNaN(date.getTime())) return '—'
   const mm = String(date.getMonth() + 1).padStart(2, '0')

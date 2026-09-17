@@ -425,20 +425,27 @@ export default function Sidebar({ user }: SidebarProps) {
   // Phase 3D — Viewer lockdown: EVM, Trend, TIA, and Upload are hidden for
   // Viewers (read-only role). Lens (Schedule Analysis) stays — it's view-only.
   const allViews = activeProject ? [
-    { href: '/dashboard', icon: '⊞', label: 'Overview', requires: 'view' as const },
-    { href: '/dashboard/report', icon: '📄', label: 'Complete Report', requires: 'view' as const },
-    { href: '/dashboard/lens', icon: '🔍', label: 'Schedule Analysis', requires: 'view' as const },
-    { href: '/dashboard/trace', icon: '🧭', label: 'Trace Logic', requires: 'view' as const },
-    { href: '/dashboard/approval', icon: '✅', label: 'Approval Readiness', requires: 'view' as const },
-    { href: '/dashboard/evm', icon: '💰', label: 'Earned Value', requires: 'advanced' as const },
-    { href: '/dashboard/risks', icon: '⚠', label: 'Risks & Issues', requires: 'view' as const },
-    { href: '/dashboard/procurement', icon: '🚚', label: 'Procurement', requires: 'view' as const },
-    { href: '/dashboard/rfis', icon: '❓', label: 'RFIs', badge: activeProject.rfis.length > 0 ? String(activeProject.rfis.length) : null, requires: 'view' as const },
-    { href: '/dashboard/submittals', icon: '📋', label: 'Submittals', requires: 'view' as const },
-    { href: '/dashboard/changes', icon: '🔄', label: 'Change Orders', requires: 'view' as const },
-    { href: '/dashboard/upload', icon: '⬆', label: 'Upload Version', requires: 'upload' as const },
-    { href: '/dashboard/trend', icon: '📈', label: 'Trend Analysis', requires: 'advanced' as const },
-    { href: '/dashboard/tia', icon: '📑', label: 'TIA Comparison', requires: 'advanced' as const },
+    // PROJECT — orient first, then package/export results.
+    { href: '/dashboard', icon: '⊞', label: 'Project Overview', group: 'PROJECT', requires: 'view' as const },
+    { href: '/dashboard/reports', icon: '📄', label: 'Reports', group: 'PROJECT', requires: 'view' as const },
+
+    // SCHEDULE REVIEW — working analysis views.
+    { href: '/dashboard/lens', icon: '🔍', label: 'Schedule Analysis', group: 'SCHEDULE REVIEW', requires: 'view' as const },
+    { href: '/dashboard/trace', icon: '🧭', label: 'Logic Trace', group: 'SCHEDULE REVIEW', requires: 'view' as const },
+    { href: '/dashboard/approval', icon: '✅', label: 'Approval Readiness', group: 'SCHEDULE REVIEW', requires: 'view' as const },
+
+    // PROJECT CONTROLS — schedule-focused controls only. RFIs and Change Orders
+    // intentionally remain out of the primary rail; their legacy routes/data are
+    // preserved so this navigation change is non-destructive.
+    { href: '/dashboard/risks', icon: '⚠', label: 'Risks & Issues', group: 'PROJECT CONTROLS', requires: 'view' as const },
+    { href: '/dashboard/procurement', icon: '🚚', label: 'Procurement', group: 'PROJECT CONTROLS', requires: 'view' as const },
+    { href: '/dashboard/submittals', icon: '📋', label: 'Submittals', group: 'PROJECT CONTROLS', requires: 'view' as const },
+    { href: '/dashboard/evm', icon: '💰', label: 'Performance & EVM', group: 'PROJECT CONTROLS', requires: 'advanced' as const },
+    { href: '/dashboard/trend', icon: '📈', label: 'Schedule Trends', group: 'PROJECT CONTROLS', requires: 'advanced' as const },
+    { href: '/dashboard/tia', icon: '📑', label: 'Time Impact Analysis', group: 'PROJECT CONTROLS', requires: 'advanced' as const },
+
+    // SCHEDULE — data/version administration stays last.
+    { href: '/dashboard/upload', icon: '⬆', label: 'Upload Schedule', group: 'SCHEDULE', requires: 'upload' as const },
   ] : []
   const views = allViews.filter(v => {
     if (v.requires === 'advanced') return perms.can.runAdvancedAnalytics
@@ -973,24 +980,33 @@ export default function Sidebar({ user }: SidebarProps) {
                   <div className="ml-5 pl-2 border-l border-white/5 mt-1.5 mb-1">
                     <div className="text-white/30 text-[9px] uppercase tracking-widest px-2 py-1 truncate"
                       title={activeVersion?.versionLabel || 'No version selected'}>
-                      Views {activeVersion?.versionLabel ? `· ${activeVersion.versionLabel}` : ''}
+                      Project {activeVersion?.versionLabel ? `· ${activeVersion.versionLabel}` : ''}
                     </div>
-                    {views.map(item => {
-                      const active = pathname === item.href
+                    {views.map((item, idx) => {
+                      // Keep Reports highlighted while the user is inside any
+                      // /dashboard/reports/* child page. Dashboard root remains exact.
+                      const active = item.href === '/dashboard'
+                        ? pathname === item.href
+                        : pathname === item.href || pathname.startsWith(item.href + '/')
+                      const showGroup = idx === 0 || views[idx - 1]?.group !== item.group
                       return (
-                        <Link key={item.href} href={item.href}
-                          className={clsx(
-                            'flex items-center gap-2.5 px-2 py-1 rounded text-[11px] font-medium border-l-2 my-0.5',
-                            active
-                              ? 'bg-blue-600/20 text-white border-blue-500'
-                              : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
-                          )}>
-                          <span className="text-sm w-4 text-center">{item.icon}</span>
-                          <span className="flex-1">{item.label}</span>
-                          {(item as any).badge && (
-                            <span className="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">{(item as any).badge}</span>
+                        <div key={item.href}>
+                          {showGroup && (
+                            <div className="text-white/25 text-[8px] font-bold uppercase tracking-[0.14em] px-2 pt-2 pb-0.5">
+                              {item.group}
+                            </div>
                           )}
-                        </Link>
+                          <Link href={item.href}
+                            className={clsx(
+                              'flex items-center gap-2.5 px-2 py-1 rounded text-[11px] font-medium border-l-2 my-0.5',
+                              active
+                                ? 'bg-blue-600/20 text-white border-blue-500'
+                                : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
+                            )}>
+                            <span className="text-sm w-4 text-center">{item.icon}</span>
+                            <span className="flex-1">{item.label}</span>
+                          </Link>
+                        </div>
                       )
                     })}
                   </div>

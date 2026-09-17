@@ -3,16 +3,12 @@
 // =============================================================================
 // src/components/reports/SubmittalsReport.tsx
 // =============================================================================
-// Submittals & RFI Impact Report — shows the paperwork that holds up
-// construction. Two data sources:
-//   1. Submittal activity pairs from the schedule (a.submittals[])
-//   2. RFI items tracked at the project level (project.rfis[])
-//
-// Cross-references submittals/RFIs against critical path activities to show
-// which paperwork items pose schedule risk.
+// Submittals Report — schedule-relevant submit / review / approval activities.
+// Focuses only on submittals detected in the schedule. RFI tracking is intentionally
+// outside this report and outside the primary Control Lens navigation.
 // =============================================================================
 
-import ReportHeader from '@/components/ReportHeader'
+import ReportHeader from '@/components/reports/ReviewerReportHeader'
 import PrintButton from '@/components/PrintButton'
 import WordButton from '@/components/WordButton'
 import { fmtShortDate } from '@/lib/reports'
@@ -40,12 +36,13 @@ export interface SubmittalsReportProps {
   dataDate?: string
   // Submittal activity pairs from the schedule
   submittals: any[]
-  // RFI items from the project (project.rfis) — opaque structure
-  rfis: any[]
+  // Kept optional for backward compatibility with existing page wrappers.
+  // It is intentionally not rendered in this report.
+  rfis?: any[]
 }
 
 export default function SubmittalsReport(p: SubmittalsReportProps) {
-  const { submittals, rfis } = p
+  const { submittals } = p
 
   // Submittal exposure
   const subActive = submittals.filter(s => s.status_code !== 'TK_Complete')
@@ -59,27 +56,19 @@ export default function SubmittalsReport(p: SubmittalsReportProps) {
   })
   const subCompleted = submittals.filter(s => s.status_code === 'TK_Complete')
 
-  // RFI counts — defensively handle whatever shape they're in
-  const rfiTotal = rfis.length
-  // Try common field names for status / open state
-  const rfiOpen = rfis.filter(r => {
-    const status = String(r?.status || r?.state || '').toLowerCase()
-    return status && !['closed', 'answered', 'resolved', 'complete', 'completed'].includes(status)
-  }).length
-  const rfiClosed = rfiTotal - rfiOpen
 
   // Summary banner color
-  const exposed = subCritical.length + subAtRisk.length + rfiOpen
+  const exposed = subAtRisk.length
   const banner =
     subCritical.length > 0 ? { bg: '#fee2e2', color: COLORS.red } :
-    subAtRisk.length > 0 || rfiOpen > 0 ? { bg: '#fef3c7', color: COLORS.amber } :
+    subAtRisk.length > 0 ? { bg: '#fef3c7', color: COLORS.amber } :
     { bg: '#e6f5ee', color: COLORS.green }
 
   return (
     <div>
       <div className="print:hidden flex items-center justify-between gap-3 flex-wrap rounded-2xl border border-slate-200 bg-white p-3 mb-4">
         <span className="text-[12px] text-slate-500">
-          Paperwork bottlenecks — submittals from the schedule and open RFIs.
+          Schedule-relevant submittals, approval timing, and float exposure.
         </span>
         <span className="flex items-center gap-2">
           <WordButton enabled={false} />
@@ -89,7 +78,7 @@ export default function SubmittalsReport(p: SubmittalsReportProps) {
 
       <div className="rounded-2xl border border-slate-200 bg-white p-6">
         <ReportHeader
-          title="Submittals & RFI Impact Report"
+          title="Submittals Report"
           reportNo={p.reportNo}
           versionLabel={p.versionLabel}
           orgName={p.orgName}
@@ -106,28 +95,23 @@ export default function SubmittalsReport(p: SubmittalsReportProps) {
           <div className="flex-1">
             <div className="text-[14px] font-extrabold" style={{ color: COLORS.ink }}>
               {exposed === 0
-                ? 'No paperwork bottlenecks detected'
-                : `${exposed} paperwork ${exposed === 1 ? 'item' : 'items'} pose schedule risk`}
+                ? 'No submittal timing concerns detected'
+                : `${exposed} submittal ${exposed === 1 ? 'item has' : 'items have'} limited float`}
             </div>
             <div className="text-[11px] text-slate-600 leading-relaxed mt-0.5">
-              {submittals.length} submittal {submittals.length === 1 ? 'pair' : 'pairs'} ·
-              {rfiTotal} {rfiTotal === 1 ? 'RFI' : 'RFIs'} on file
+              {submittals.length} submittal {submittals.length === 1 ? 'pair' : 'pairs'}
               {p.dataDate && <> · data date <span className="font-mono font-bold">{fmtShortDate(p.dataDate)}</span></>}
             </div>
           </div>
         </div>
 
         {/* ──── Methodology ───────────────────────────────────────────── */}
-        <SectionBar tag="METH" title="What's Included" />
+        <SectionBar tag="METH" title="What’s Included" />
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 mb-4 print:break-inside-avoid">
           <ul className="text-[11.5px] text-slate-700 leading-relaxed list-disc pl-5 space-y-1.5">
-            <li><b>Submittal activities</b> — ControlLens detects Submit + Review/Approval
-              activity pairs in the P6 schedule by activity name. Exposure is classified
-              by remaining total float.</li>
-            <li><b>RFI items</b> — Tracked at the project level (RFIs page in the sidebar).
-              Open RFIs are included; closed RFIs are noted in totals for context.</li>
-            <li><b>Schedule impact</b> — Any submittal or RFI with ≤14 days of float, or
-              with a missed due date, is flagged as a paperwork bottleneck.</li>
+            <li><b>Submittal activities</b> — submit, review, and approval activities identified in the schedule.</li>
+            <li><b>Schedule exposure</b> — active submittals are grouped by remaining total float so the reviewer can see which approvals may constrain downstream work.</li>
+            <li><b>Schedule reference</b> — activity IDs, dates, status, and float remain visible so each comment can be checked against the XER.</li>
           </ul>
         </div>
 
@@ -141,9 +125,8 @@ export default function SubmittalsReport(p: SubmittalsReportProps) {
               No submittal activities detected in the schedule
             </div>
             <div className="text-[10px] text-slate-500 mt-1 max-w-md mx-auto leading-relaxed">
-              ControlLens scans activity names for Submit/Review/Approval patterns.
-              If your schedule uses different naming conventions, submittals may not
-              be auto-detected.
+              Activity names are reviewed for Submit/Review/Approval patterns.
+              If the schedule uses different naming conventions, some submittals may require reviewer verification.
             </div>
           </div>
         ) : (
@@ -192,67 +175,20 @@ export default function SubmittalsReport(p: SubmittalsReportProps) {
           </>
         )}
 
-        {/* ──── RFIs section ──────────────────────────────────────────── */}
-        <SectionBar tag="RFI" title="Requests for Information" rightMeta={`${rfiTotal} on file · ${rfiOpen} open`} />
-
-        {rfiTotal === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center mb-4">
-            <div className="text-2xl mb-2">❓</div>
-            <div className="text-[12px] font-bold" style={{ color: COLORS.ink }}>
-              No RFIs tracked for this project
-            </div>
-            <div className="text-[10px] text-slate-500 mt-1 max-w-md mx-auto leading-relaxed">
-              Use the RFIs page in the sidebar to log requests for information.
-              Once logged, they'll appear here with status and exposure details.
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-3 gap-2 mb-4 print:break-inside-avoid">
-              <ExposureCard label="Total" count={rfiTotal} total={rfiTotal} color={COLORS.blue} caption="on file" />
-              <ExposureCard label="Open" count={rfiOpen} total={rfiTotal} color={rfiOpen > 0 ? COLORS.amber : COLORS.green} caption="awaiting response" />
-              <ExposureCard label="Closed" count={rfiClosed} total={rfiTotal} color={COLORS.slate} caption="resolved" />
-            </div>
-
-            {/* RFI table — render whatever fields are available */}
-            {rfis.length > 0 && (
-              <>
-                <SubLabel>RFI register</SubLabel>
-                <RFITable rows={rfis.slice(0, 20)} />
-                {rfis.length > 20 && (
-                  <div className="text-[9px] text-slate-400 italic mb-3">
-                    Showing first 20 of {rfis.length} RFIs.
-                  </div>
-                )}
-              </>
-            )}
-          </>
-        )}
-
-        {/* ──── Recommended actions ───────────────────────────────────── */}
+        {/* ──── Reviewer actions ───────────────────────────────────── */}
         {exposed > 0 && (
           <>
-            <SectionBar tag="ACT" title="Recommended Actions" />
+            <SectionBar tag="ACT" title="Reviewer Actions" />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4 print:break-inside-avoid">
               <ActionCard
                 tone="red"
-                title="Overdue submittals · today"
-                body="Every overdue submittal is consuming critical path float. Call the responsible team immediately. Escalate to executive level if no commitment is forthcoming."
+                title="Critical / overdue submittals"
+                body="Confirm the responsible party, planned response date, and the downstream activity that depends on approval. Escalate where the available float has been exhausted."
               />
               <ActionCard
                 tone="amber"
-                title="Tight-float submittals · this week"
-                body="Set firm in-house deadlines well before each submittal's float is exhausted. Build in review cycles and engineer markup time."
-              />
-              <ActionCard
-                tone="blue"
-                title="Open RFIs · weekly cadence"
-                body="Run an RFI standup with the design team weekly. Track response time; escalate any RFI over 14 days old. Document every late response for TIA evidence."
-              />
-              <ActionCard
-                tone="green"
-                title="Document for claims"
-                body="Every late submittal response or RFI answer is potential time impact evidence. Log dates, durations, and downstream activity impacts in the RFIs page."
+                title="Tight-float submittals"
+                body="Verify that the remaining review cycle is realistic and that approval is logically tied to procurement, fabrication, delivery, or installation activities as applicable."
               />
             </div>
           </>
@@ -261,8 +197,7 @@ export default function SubmittalsReport(p: SubmittalsReportProps) {
         {/* Footer */}
         <div className="flex items-center justify-between pt-3 mt-6 border-t-2 text-[10px] text-slate-400" style={{ borderColor: COLORS.ink }}>
           <span>
-            Generated by <b style={{ color: COLORS.ink }}>ControlLens</b> —
-            analysis is advisory; the P6 schedule of record governs.
+            Schedule review output — the schedule of record and governing contract documents control.
           </span>
           <span className="font-mono">{p.reportNo}</span>
         </div>
@@ -351,47 +286,6 @@ function SubmittalTable({ rows }: { rows: any[] }) {
   )
 }
 
-function RFITable({ rows }: { rows: any[] }) {
-  return (
-    <table className="w-full text-[10.5px] mb-3">
-      <thead>
-        <tr className="text-left text-[8.5px] uppercase tracking-wider text-slate-500 border-b-2 border-slate-200">
-          <th className="py-1.5 px-2 w-[10%]">RFI #</th>
-          <th className="py-1.5 px-2">Subject / Title</th>
-          <th className="py-1.5 px-2 w-[14%]">Submitted</th>
-          <th className="py-1.5 px-2 w-[14%]">Due / Needed By</th>
-          <th className="py-1.5 px-2 w-[12%]">Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r: any, i: number) => {
-          // Defensive field reads — RFIs may have many possible shapes
-          const number = r?.number || r?.id || r?.rfiNumber || (i + 1)
-          const title = r?.title || r?.subject || r?.question || r?.description || '—'
-          const submitted = r?.submittedDate || r?.dateSubmitted || r?.createdAt || r?.date
-          const due = r?.dueDate || r?.neededBy || r?.requestedResponseDate || r?.responseDate
-          const status = r?.status || r?.state || (r?.closed ? 'Closed' : 'Open')
-          const isOpen = !['closed', 'answered', 'resolved', 'complete', 'completed'].includes(String(status).toLowerCase())
-          const statusColor = isOpen ? COLORS.amber : COLORS.green
-          return (
-            <tr key={i} className="border-b border-slate-100 print:break-inside-avoid">
-              <td className="py-1.5 px-2 font-mono font-bold" style={{ color: COLORS.ink }}>{String(number).slice(0, 12)}</td>
-              <td className="py-1.5 px-2 text-slate-700">{trunc(String(title), 60)}</td>
-              <td className="py-1.5 px-2 font-mono text-slate-600">{shortDate(submitted)}</td>
-              <td className="py-1.5 px-2 font-mono text-slate-600">{shortDate(due)}</td>
-              <td className="py-1.5 px-2">
-                <span className="font-mono text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide" style={{ background: `${statusColor}22`, color: statusColor }}>
-                  {String(status).slice(0, 12)}
-                </span>
-              </td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
-  )
-}
-
 function trunc(s: string | undefined, max: number): string {
   if (!s) return '—'
   return s.length > max ? s.slice(0, max - 1) + '…' : s
@@ -399,10 +293,14 @@ function trunc(s: string | undefined, max: number): string {
 function shortDate(d?: any): string {
   if (!d) return '—'
   try {
-    const s = typeof d === 'string' ? d : String(d)
-    const dt = new Date(s.replace(' ', 'T'))
+    const raw = typeof d === 'string' ? d : String(d)
+    const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`
+    const dt = new Date(raw.replace(' ', 'T'))
     if (isNaN(dt.getTime())) return '—'
-    return dt.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' })
+    const mm = String(dt.getMonth() + 1).padStart(2, '0')
+    const dd = String(dt.getDate()).padStart(2, '0')
+    return `${mm}/${dd}/${dt.getFullYear()}`
   } catch { return '—' }
 }
 function statusLabel(code?: string): string {
