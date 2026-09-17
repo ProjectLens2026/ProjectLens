@@ -5,7 +5,7 @@ import Link from 'next/link'
 import {
   loadProjects, deleteProject, renameProject, deleteVersion,
   moveVersionToProject,
-  setActiveProjectId, setActiveVersionId, getLatestVersion,
+  setActiveProjectId, setActiveVersionId, getLatestVersion, getVisibleVersions,
   migrateLegacyData, Project, ScheduleVersion
 } from '@/lib/projectStore'
 
@@ -43,7 +43,11 @@ export default function ProjectsPage() {
   }
 
   function handleDeleteVersion(projectId: string, versionId: string) {
-    deleteVersion(projectId, versionId)
+    const result = deleteVersion(projectId, versionId)
+    if (!result.ok) {
+      window.alert(result.error || 'Unable to delete this version.')
+      return
+    }
     refresh()
   }
 
@@ -140,6 +144,7 @@ export default function ProjectsPage() {
       <div className="flex-1 overflow-y-auto p-5 bg-slate-50">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-6xl mx-auto">
           {projects.map(p => {
+            const visibleVersions = getVisibleVersions(p)
             const latest = getLatestVersion(p)
             const analysis = latest?.analysis
             const cond = conditionStyle(analysis?.condition)
@@ -178,7 +183,7 @@ export default function ProjectsPage() {
                           <div className="text-[10px] font-mono text-blue-600 mt-0.5">{p.projectId}</div>
                         )}
                         <div className="text-[10px] text-slate-400 mt-0.5">
-                          {p.versions.length} version{p.versions.length > 1 ? 's' : ''} ·
+                          {visibleVersions.length} version{visibleVersions.length > 1 ? 's' : ''} ·
                           {' '}{p.rfis.length} RFI{p.rfis.length !== 1 ? 's' : ''} ·
                           {' '}Updated {relativeTime(p.updatedAt)}
                         </div>
@@ -236,17 +241,17 @@ export default function ProjectsPage() {
                     </div>
 
                     {/* Version history toggle */}
-                    {p.versions.length > 1 && (
+                    {visibleVersions.length > 1 && (
                       <button onClick={() => setExpandedId(isExpanded ? null : p.id)}
                         className="w-full text-[10px] text-slate-500 hover:text-blue-600 mb-2 font-semibold">
-                        {isExpanded ? '▼ Hide version history' : `▶ Show ${p.versions.length} versions`}
+                        {isExpanded ? '▼ Hide version history' : `▶ Show ${visibleVersions.length} versions`}
                       </button>
                     )}
 
                     {/* Version list */}
                     {isExpanded && (
                       <div className="space-y-1 mb-3 bg-slate-50 rounded-lg p-2 max-h-64 overflow-y-auto">
-                        {[...p.versions]
+                        {[...visibleVersions]
                           .sort((a, b) =>
                             new Date(versionEffectiveDate(b)).getTime() -
                             new Date(versionEffectiveDate(a)).getTime()
@@ -265,7 +270,7 @@ export default function ProjectsPage() {
                                   {v.fileName || 'untitled.xer'} · {shortDate(versionEffectiveDate(v))}
                                   {!hasRealDataDate(v) && <span className="italic"> (from upload)</span>}
                                 </div>
-                                <div className="text-[9px] text-red-700 mb-2">This will permanently remove the version and its analysis. This cannot be undone.</div>
+                                <div className="text-[9px] text-red-700 mb-2">This removes the version from the active project, dashboards, and trend analysis. It can be restored from Deleted Items.</div>
                                 <div className="flex gap-2">
                                   <button onClick={() => { handleDeleteVersion(p.id, v.id); setConfirmDeleteVersion(null); }}
                                     className="text-[10px] bg-red-600 text-white px-3 py-1 rounded font-bold">Delete</button>
@@ -331,7 +336,7 @@ export default function ProjectsPage() {
                                   title="Move to different project"
                                   className="text-slate-400 hover:text-blue-600 font-bold px-1">⇄</button>
                               )}
-                              {p.versions.length > 1 && (
+                              {visibleVersions.length > 1 && (
                                 <button onClick={() => setConfirmDeleteVersion(v.id)}
                                   title="Delete this version"
                                   className="text-slate-300 hover:text-red-500">×</button>

@@ -717,9 +717,18 @@ export function getActiveProject(): Project | null {
   return _projects.find(p => p.id === id) || null
 }
 
+/** Active/visible schedule versions only. Soft-deleted versions stay in the
+ * project for restore/audit purposes but MUST NOT participate in normal project
+ * navigation, latest-version selection, trend analysis, or reporting. */
+export function getVisibleVersions(project: Project | null): ScheduleVersion[] {
+  if (!project?.versions) return []
+  return project.versions.filter(v => !v.deletedAt)
+}
+
 export function getLatestVersion(project: Project | null): ScheduleVersion | null {
-  if (!project || !project.versions || project.versions.length === 0) return null
-  return [...project.versions].sort((a, b) =>
+  const visible = getVisibleVersions(project)
+  if (visible.length === 0) return null
+  return [...visible].sort((a, b) =>
     new Date(getVersionEffectiveDate(b)).getTime() -
     new Date(getVersionEffectiveDate(a)).getTime()
   )[0]
@@ -730,8 +739,10 @@ export function getActiveVersion(project?: Project | null): ScheduleVersion | nu
   if (!p) return null
   const versionId = getActiveVersionId()
   if (versionId) {
-    const found = p.versions.find(v => v.id === versionId)
+    const found = getVisibleVersions(p).find(v => v.id === versionId)
     if (found) return found
+    // Stale pointer can remain after a version was deleted on another screen/device.
+    setActiveVersionId(null)
   }
   return getLatestVersion(p)
 }
@@ -1129,16 +1140,35 @@ export function restoreVersion(projectId: string, versionId: string): { ok: bool
 }
 
 /**
- * permanentlyDeleteVersion — Day 10. Owner/Admin only. Removes the version
- * row entirely from local + Supabase. No recovery.
+ * permanentlyDeleteVersion — Day 10. Owner/Admin only.
+ *
+ * IMPORTANT: a permanent delete must be durable in BOTH stores. We remove the
+ * version locally for immediate UI feedback, then confirm the Supabase delete.
+ * If the cloud delete fails/returns false, we roll the version back into the
+ * Deleted Items state (deletedAt preserved) instead of allowing a future cloud
+ * hydrate to resurrect it as an active project version.
+ *
+ * The public return shape stays synchronous for backward compatibility with the
+ * existing Deleted Items UI. Cloud confirmation happens in the background.
  */
 export function permanentlyDeleteVersion(projectId: string, versionId: string): { ok: boolean; error?: string } {
   const idx = _projects.findIndex(p => p.id === projectId)
   if (idx === -1) return { ok: false, error: 'Project not found' }
 
+  const projectBeforeDelete = _projects[idx]
+  const versionBeforeDelete = projectBeforeDelete.versions.find(v => v.id === versionId)
+  if (!versionBeforeDelete) return { ok: false, error: 'Version not found' }
+
+  // Permanent delete is only valid from Deleted Items. Keep the tombstone if a
+  // cloud failure requires rollback so the version NEVER leaks back to active views.
+  const deletedVersionSnapshot: ScheduleVersion = {
+    ...versionBeforeDelete,
+    deletedAt: versionBeforeDelete.deletedAt || new Date().toISOString(),
+  }
+
   const updated: Project = {
-    ..._projects[idx],
-    versions: _projects[idx].versions.filter(v => v.id !== versionId),
+    ...projectBeforeDelete,
+    versions: projectBeforeDelete.versions.filter(v => v.id !== versionId),
     updatedAt: new Date().toISOString(),
   }
   _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
@@ -1146,9 +1176,36 @@ export function permanentlyDeleteVersion(projectId: string, versionId: string): 
   idbPutProject(updated).catch(err => {
     console.error('[ControlLens] permanentlyDeleteVersion: IndexedDB persist failed:', err)
   })
-  deleteVersionFromSupabase(projectId, versionId).catch(err => {
-    console.error('[ControlLens] permanentlyDeleteVersion: Supabase failed:', err)
-  })
+
+  const rollbackToDeletedItems = (reason: unknown) => {
+    console.error('[ControlLens] permanentlyDeleteVersion: cloud delete not confirmed; restoring tombstone in Deleted Items:', reason)
+    const currentIdx = _projects.findIndex(p => p.id === projectId)
+    if (currentIdx === -1) return
+    const current = _projects[currentIdx]
+    // Do not duplicate it if another refresh/action has already restored the row.
+    if (current.versions.some(v => v.id === versionId)) return
+    const rolledBack: Project = {
+      ...current,
+      versions: [...current.versions, deletedVersionSnapshot],
+      updatedAt: new Date().toISOString(),
+    }
+    _projects = [..._projects.slice(0, currentIdx), rolledBack, ..._projects.slice(currentIdx + 1)]
+    notifyListeners()
+    idbPutProject(rolledBack).catch(err => {
+      console.error('[ControlLens] permanentlyDeleteVersion: rollback persist failed:', err)
+    })
+  }
+
+  deleteVersionFromSupabase(projectId, versionId)
+    .then(ok => {
+      if (!ok) {
+        rollbackToDeletedItems('Supabase delete returned false')
+        return
+      }
+      console.log('[ControlLens] permanentlyDeleteVersion: Supabase delete confirmed for', versionId)
+    })
+    .catch(err => rollbackToDeletedItems(err))
+
   if (getActiveVersionId() === versionId) {
     setActiveVersionId(null)
   }

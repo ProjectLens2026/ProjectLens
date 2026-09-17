@@ -1,6 +1,6 @@
 // Trend Analysis Engine — analyzes multiple schedule versions to detect patterns
 
-import { Project, ScheduleVersion } from './projectStore'
+import { Project, ScheduleVersion, getVisibleVersions } from './projectStore'
 
 export interface VersionDataPoint {
   versionLabel: string
@@ -285,13 +285,13 @@ function generateRecommendation(dataPoints: VersionDataPoint[], changes: Version
 
 // Main entry point
 export function analyzeProjectTrend(project: Project): TrendAnalysisResult | null {
-  if (!project || !project.versions || project.versions.length < 2) return null
+  const visibleVersions = getVisibleVersions(project)
+  if (visibleVersions.length < 2) return null
 
-  // Sort versions oldest to newest by their EFFECTIVE date (schedule data date
-  // when available, else upload time). This is what makes "v1 → v2 → v3"
-  // represent the schedule's actual chronological progression, regardless of
-  // the order in which the user happened to upload files.
-  const sortedVersions = [...project.versions].sort((a, b) =>
+  // Sort ACTIVE versions oldest to newest by their EFFECTIVE date (schedule data
+  // date when available, else upload time). Soft-deleted versions are retained
+  // for restore/audit purposes but must not distort trend calculations.
+  const sortedVersions = [...visibleVersions].sort((a, b) =>
     new Date(versionEffectiveDate(a)).getTime() -
     new Date(versionEffectiveDate(b)).getTime()
   )
