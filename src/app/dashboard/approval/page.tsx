@@ -460,8 +460,9 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
           html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
           .ar-print-root { height: auto !important; overflow: visible !important; display: block !important; }
           .ar-print-scroll { height: auto !important; overflow: visible !important; flex: none !important; padding: 0 !important; background: #fff !important; }
-          .ar-print-doc { max-width: none !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; }
-          @page { margin: 0.5in; }
+          .ar-print-doc { width: 100% !important; max-width: none !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; background: #fff !important; }
+          .report-section-bar { break-after: avoid-page !important; page-break-after: avoid !important; }
+          .report-section-bar + * { break-before: avoid-page !important; page-break-before: avoid !important; }
         }
       `}</style>
       {/* toolbar — hidden on print */}
@@ -668,7 +669,7 @@ function Info({ label, value, mono }: { label: string; value: string; mono?: boo
   )
 }
 function SectionBar({ children }: { children: React.ReactNode }) {
-  return <div className="text-[11px] font-extrabold uppercase tracking-wide text-white px-3 py-1.5 rounded mb-3 mt-4" style={{ background: COLORS.ink }}>{children}</div>
+  return <div className="report-section-bar text-[11px] font-extrabold uppercase tracking-wide text-white px-3 py-1.5 rounded mb-3 mt-4" style={{ background: COLORS.ink }}>{children}</div>
 }
 function Memo({ label, children }: { label: string; children: React.ReactNode }) {
   return (

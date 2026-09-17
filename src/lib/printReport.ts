@@ -45,22 +45,28 @@ export function printReport(areaId: string, opts: PrintOptions = {}): void {
     headStyles += node.outerHTML
   })
 
-  // Print-only rules that own the whole page: no browser chrome dependence,
-  // A4/letter margins, keep-together on cards, and our footer via @page.
+  // Lock every exported report to US Letter portrait.  The previous print path
+  // left page size to the browser, which could produce different scaling / margins
+  // between pages and printers.  Keep all printable geometry owned here.
   const footerCss = pageNumbers
-    ? `@page { margin: 12mm 12mm 16mm 12mm; }
+    ? `@page { size: Letter portrait; margin: 0.48in 0.52in 0.58in 0.52in; }
        @page { @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 8pt; color: #9ca3af; } }
        ${footerLabel ? `@page { @bottom-left { content: ${JSON.stringify(footerLabel)}; font-size: 8pt; color: #9ca3af; } }` : ''}`
-    : `@page { margin: 12mm; }`
+    : `@page { size: Letter portrait; margin: 0.5in; }`
 
   const printCss = `
-    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    html, body { height: auto !important; overflow: visible !important; margin: 0 !important; padding: 0 !important; background: #fff !important; }
-    #__print_root { max-width: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; }
+    * { box-sizing: border-box !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    html, body { width: 100% !important; height: auto !important; overflow: visible !important; margin: 0 !important; padding: 0 !important; background: #fff !important; color: #111827 !important; }
+    #__print_root { max-width: none !important; width: 100% !important; min-width: 0 !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; background: #fff !important; }
     #__print_root .print\\:hidden, #__print_root .no-print { display: none !important; }
     [class*="rounded"] { border-radius: 0 !important; }
     [class*="shadow"] { box-shadow: none !important; }
     .print-break-inside-avoid, [class*="break-inside-avoid"] { break-inside: avoid; page-break-inside: avoid; }
+    .report-section-bar { break-after: avoid-page !important; page-break-after: avoid !important; }
+    .report-section-bar + * { break-before: avoid-page !important; page-break-before: avoid !important; }
+    table { width: 100% !important; max-width: 100% !important; table-layout: fixed !important; border-collapse: collapse !important; }
+    td, th, div, span { overflow-wrap: anywhere; word-break: normal; }
+    img, svg { max-width: 100% !important; }
     ${footerCss}
   `
 
