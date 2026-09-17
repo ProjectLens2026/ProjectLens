@@ -16,6 +16,7 @@ import { getActiveProject, getActiveVersion, updateVersionNarrative } from '@/li
 import { analyzeMultipleFloatPaths, activityToGanttRange, type FloatPath } from '@/lib/multipleFloatPaths'
 import type { Task } from '@/lib/xerParser'
 import { evaluatePathCredibility, pathActivityStart, pathActivityFinish, sortPathActivitiesByFinish, type PathCredibilityResult } from '@/lib/construction/pathCredibility'
+import { analyzeCLPathIntelligence } from '@/lib/construction/clPathIntelligence'
 
 export default function ControlLensAnalysisPage() {
   const [analysis, setAnalysis] = useState<any>(null)
@@ -87,6 +88,11 @@ export default function ControlLensAnalysisPage() {
     () => sortPathActivitiesByFinish(analysis?.longestPathActivities || []),
     [analysis?.longestPathActivities],
   )
+
+  const clPathIntelligence = useMemo(() => {
+    try { return analyzeCLPathIntelligence(analysis) }
+    catch (e) { console.error('[Lens] CL Path Intelligence failed:', e); return null }
+  }, [analysis])
 
   function togglePathExpand(pathNumber: number) {
     setExpandedPaths(prev => {
@@ -373,49 +379,125 @@ export default function ControlLensAnalysisPage() {
                   </div>
                 )}
 
-                {/* CONTROL LENS PATHS — reserved for engineering interpretation */}
+                {/* CONTROL LENS PATHS — engineering interpretation of submitted XER */}
                 {scheduleFilter === 'longest' && (
                   <div>
                     <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
                       <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700 mb-1">Control Lens Path Intelligence</div>
                       <p className="text-xs text-slate-600 leading-relaxed">
-                        This section is reserved for Control Lens' engineering interpretation of the submitted XER. Control Lens will first identify the nature of the project, expected systems and physical delivery sequence, then use the submitted activity attributes, dates, durations, float and relationship structure to evaluate credible controlling paths. It does not replace the contractor's P6 schedule or silently rewrite CPM logic.
+                        Control Lens first interprets what is being built from the submitted XER, then evaluates whether the schedule represents the physical/system readiness needed for completion. It uses the contractor&apos;s activity names, WBS, dates, durations, float and relationships as evidence. This is engineering schedule review — not a silent P6 CPM recalculation.
                       </p>
                     </div>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                      <div className="border border-slate-200 rounded-xl p-4 bg-white">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="text-lg">🎯</span>
-                          <div>
-                            <div className="text-sm font-bold text-slate-900">CL Critical Path</div>
-                            <div className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Engineering path view</div>
+                    {!clPathIntelligence ? (
+                      <div className="text-center py-8 text-slate-400 text-xs">Project understanding is not available for this version. Re-upload the XER if relationship/task evidence is missing.</div>
+                    ) : (
+                      <>
+                        {/* Project understanding */}
+                        <div className="border border-slate-200 rounded-xl bg-white p-4 mb-4">
+                          <div className="flex items-start justify-between gap-4 mb-3">
+                            <div>
+                              <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700">Project Understanding / Nature of Work</div>
+                              <div className="text-sm font-bold text-slate-900 mt-1">{clPathIntelligence.understanding.projectNature}</div>
+                            </div>
+                            {clPathIntelligence.understanding.completionTarget && (
+                              <div className="text-right text-[10px] text-slate-500">
+                                <div className="font-bold uppercase tracking-wider">Completion target</div>
+                                <div className="font-mono text-slate-800 mt-0.5">{clPathIntelligence.understanding.completionTarget.code}</div>
+                                <div>{fmtDate(clPathIntelligence.understanding.completionTarget.finish)}</div>
+                              </div>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 text-xs">
+                            <div className="bg-slate-50 rounded-lg p-3">
+                              <div className="text-[9px] font-extrabold uppercase tracking-wider text-slate-500 mb-1">Delivery nature</div>
+                              <div className="text-slate-700 leading-relaxed">{clPathIntelligence.understanding.deliveryNature.join(' → ')}</div>
+                            </div>
+                            <div className="bg-slate-50 rounded-lg p-3">
+                              <div className="text-[9px] font-extrabold uppercase tracking-wider text-slate-500 mb-1">Detected areas</div>
+                              <div className="text-slate-700 leading-relaxed">{clPathIntelligence.understanding.areas.join(' · ') || 'Review Required'}</div>
+                            </div>
+                            <div className="bg-slate-50 rounded-lg p-3">
+                              <div className="text-[9px] font-extrabold uppercase tracking-wider text-slate-500 mb-1">Detected systems</div>
+                              <div className="text-slate-700 leading-relaxed">{clPathIntelligence.understanding.systems.join(' · ') || 'Review Required'}</div>
+                            </div>
                           </div>
                         </div>
-                        <p className="text-xs text-slate-600 leading-relaxed">
-                          The submitted activities Control Lens identifies as the necessary physical and system sequence controlling the selected completion state, based on the nature of the work and the activity attributes contained in the XER.
-                        </p>
-                        <div className="mt-3 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                          Reserved — populate after Project Understanding / Nature of Work is established.
-                        </div>
-                      </div>
 
-                      <div className="border border-slate-200 rounded-xl p-4 bg-white">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="text-lg">📏</span>
-                          <div>
-                            <div className="text-sm font-bold text-slate-900">CL Longest Path</div>
-                            <div className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Credible longest chain</div>
+                        {/* Credibility findings */}
+                        <div className="border border-slate-200 rounded-xl bg-white p-4 mb-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700">Path Credibility / Missing Readiness States</div>
+                            <div className="text-[10px] text-slate-500">{clPathIntelligence.findings.length} reviewer trigger{clPathIntelligence.findings.length === 1 ? '' : 's'}</div>
                           </div>
+                          {clPathIntelligence.findings.length === 0 ? (
+                            <div className="text-xs text-slate-500 italic">No path-credibility trigger was identified by the current reference scaffold. Reviewer verification is still required.</div>
+                          ) : (
+                            <div className="space-y-2">
+                              {clPathIntelligence.findings.map(f => {
+                                const tone = f.severity === 'HIGH' ? 'border-red-200 bg-red-50 text-red-900' : f.severity === 'MEDIUM' ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-blue-200 bg-blue-50 text-blue-900'
+                                return (
+                                  <div key={f.id} className={`border rounded-lg p-3 ${tone}`}>
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono text-[9px] font-bold bg-white/80 border border-current/10 rounded px-1.5 py-0.5">{f.id}</span>
+                                      <span className="text-[9px] font-extrabold uppercase tracking-wider">{f.severity}</span>
+                                      <span className="text-xs font-bold">{f.title}</span>
+                                    </div>
+                                    <div className="text-[11px] mt-1 leading-relaxed opacity-90">{f.detail}</div>
+                                    {f.evidence.length > 0 && <div className="text-[10px] mt-1.5 opacity-70"><span className="font-bold">XER evidence:</span> {f.evidence.join(' · ')}</div>}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
                         </div>
-                        <p className="text-xs text-slate-600 leading-relaxed">
-                          The longest credible submitted chain among the necessary work states leading to the selected milestone, using the submitted durations, dates, float and activity relationships after Control Lens understands what is actually being built.
-                        </p>
-                        <div className="mt-3 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                          Reserved — populate after Project Understanding / Nature of Work is established.
+
+                        {/* CL Critical Path */}
+                        <div className="border border-slate-200 rounded-xl p-4 bg-white mb-4">
+                          <div className="flex items-start gap-2 mb-2">
+                            <span className="text-lg">🎯</span>
+                            <div className="flex-1">
+                              <div className="text-sm font-bold text-slate-900">CL Critical Path</div>
+                              <div className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Nature-of-work / readiness path</div>
+                            </div>
+                            {clPathIntelligence.criticalPath && (
+                              <span className={`text-[9px] font-bold px-2 py-1 rounded ${clPathIntelligence.criticalPath.connectionToTarget === 'SUBMITTED' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                {clPathIntelligence.criticalPath.connectionToTarget === 'SUBMITTED' ? 'CONNECTED' : 'LOGIC GAP'}
+                              </span>
+                            )}
+                          </div>
+                          {clPathIntelligence.criticalPath ? (
+                            <>
+                              <p className="text-xs text-slate-600 leading-relaxed mb-2">{clPathIntelligence.criticalPath.basis}</p>
+                              <div className={`text-[11px] rounded-lg px-3 py-2 mb-3 ${clPathIntelligence.criticalPath.connectionToTarget === 'SUBMITTED' ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-amber-50 border border-amber-200 text-amber-800'}`}>
+                                {clPathIntelligence.criticalPath.connectionNote}
+                              </div>
+                              <PathActivityTable activities={clPathIntelligence.criticalPath.activities} showRemaining />
+                            </>
+                          ) : <div className="text-xs text-slate-400 py-4">Control Lens could not establish a credible readiness endpoint for the selected completion target.</div>}
                         </div>
-                      </div>
-                    </div>
+
+                        {/* CL Longest Path */}
+                        <div className="border border-slate-200 rounded-xl p-4 bg-white">
+                          <div className="flex items-start gap-2 mb-2">
+                            <span className="text-lg">📏</span>
+                            <div className="flex-1">
+                              <div className="text-sm font-bold text-slate-900">CL Longest Path</div>
+                              <div className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Longest credible submitted work-state chain</div>
+                            </div>
+                          </div>
+                          {clPathIntelligence.longestPath ? (
+                            <>
+                              <p className="text-xs text-slate-600 leading-relaxed mb-2">{clPathIntelligence.longestPath.basis}</p>
+                              <div className={`text-[11px] rounded-lg px-3 py-2 mb-3 ${clPathIntelligence.longestPath.connectionToTarget === 'SUBMITTED' ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-amber-50 border border-amber-200 text-amber-800'}`}>
+                                {clPathIntelligence.longestPath.connectionNote}
+                              </div>
+                              <PathActivityTable activities={clPathIntelligence.longestPath.activities} showRemaining />
+                            </>
+                          ) : <div className="text-xs text-slate-400 py-4">Control Lens could not establish a credible longest work-state chain from the available XER evidence.</div>}
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
 
