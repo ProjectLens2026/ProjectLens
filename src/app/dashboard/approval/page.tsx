@@ -15,7 +15,8 @@
 // hardcodes scoring numbers — they come from the evaluator/framework.
 // =============================================================================
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { discoverUSProject, type USProjectDiscoveryResult, type DiscoveryEvidence } from '@/lib/construction/projectDiscovery'
 import Link from 'next/link'
 import { getActiveProject, getActiveVersion, subscribeToProjects, updateVersionApprovalResult } from '@/lib/projectStore'
 import { evaluateApprovalReadiness } from '@/lib/approval-readiness/evaluator'
@@ -51,6 +52,69 @@ function approvalKind(f: ApprovalFinding): 'FINDING' | 'RECOMMENDATION' {
   return f.kind === 'RECOMMENDATION' ? 'RECOMMENDATION' : 'FINDING'
 }
 
+// Saved results can still contain the old category-only titles.
+function findingTitle(f: ApprovalFinding): string {
+  if (!/related conditions?$/.test(f.title)) return f.title
+  return f.whatFound || 'Finding description unavailable — run the check again'
+}
+
+function discoveryLabel(value?: string): string {
+  if (!value || /^(general|unknown|unclassified)$/i.test(value)) return 'Not identified'
+  return value.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2')
+}
+
+function DiscoveryEvidenceList({ evidence }: { evidence: DiscoveryEvidence[] }) {
+  return <ul className="mt-2 space-y-2 text-[11px] text-slate-600">
+    {evidence.map((e, i) => <li key={i} className="border-l-2 border-slate-200 pl-2 break-words">
+      <div>{e.taskCode || e.source}: {e.taskName || e.matchedText}</div>
+      {e.wbsPath?.length ? <div>WBS: {e.wbsPath.join(' / ')}</div> : null}
+      <div className="text-slate-500">Evidence rule: {e.ruleId}</div>
+    </li>)}
+    {!evidence.length && <li>No supporting XER evidence listed.</li>}
+  </ul>
+}
+
+function ProjectDiscoveryPanel({ discovery }: { discovery: USProjectDiscoveryResult | null }) {
+  if (!discovery) return <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 mb-4 text-sm">Project discovery unavailable. Re-upload the XER to provide activity and WBS evidence.</div>
+  const signals = [discovery.archetype, discovery.ownerOverlay, discovery.projectCondition]
+  const sections = [
+    { title: 'Buildings, levels and areas', items: discovery.locations },
+    { title: 'Systems', items: discovery.systems },
+    { title: 'Procurement packages', items: discovery.procurementPackages },
+    { title: 'Commissioning states', items: discovery.commissioningStates },
+    { title: 'Completion targets', items: discovery.completionTargets },
+  ]
+  return <section className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
+    <h2 className="font-bold text-slate-800">Project Discovery — U.S. scope</h2>
+    <p className="text-xs text-slate-600 mt-1 mb-3">Detected from this version’s XER. Expand an item to inspect its evidence. Detection does not establish compliance or readiness and does not change the score.</p>
+    <div className="grid md:grid-cols-3 gap-3">
+      {signals.map((s, i) => <details key={i} className="border rounded-lg p-3">
+        <summary className="cursor-pointer text-sm font-semibold">{['Project type', 'Owner overlay', 'Construction condition'][i]}: {s.label}</summary>
+        <div className="text-xs mt-1">{s.status} · {s.confidence} confidence</div>
+        <DiscoveryEvidenceList evidence={s.evidence} />
+      </details>)}
+    </div>
+    <p className="text-xs text-slate-500 my-3">{discovery.summary.taskCount} activities · {discovery.summary.wbsNodeCount} WBS nodes · {discovery.summary.classifiedActivityCount} activities classified</p>
+    <div className="grid md:grid-cols-2 gap-3">
+      {sections.map(section => <div key={section.title} className="border rounded-lg p-3">
+        <h3 className="text-sm font-bold mb-2">{section.title}</h3>
+        {!section.items.length && <p className="text-xs text-amber-700">Not identified in the available evidence; this does not prove absence.</p>}
+        {section.items.map(s => <details key={s.key} className="py-1">
+          <summary className="cursor-pointer text-xs">{discoveryLabel(s.label)} — {s.confidence} confidence</summary>
+          <DiscoveryEvidenceList evidence={s.evidence} />
+        </details>)}
+      </div>)}
+      <div className="border rounded-lg p-3"><h3 className="text-sm font-bold mb-2">Project phases</h3>
+        {discovery.phases.map(p => <details key={p.phase} className="py-1"><summary className="cursor-pointer text-xs">{p.label}: {p.activityCount} activities</summary><DiscoveryEvidenceList evidence={p.evidence} /></details>)}
+      </div>
+    </div>
+    <h3 className="text-sm font-bold mt-4">Selected reference scaffolds — verify applicability</h3>
+    {discovery.applicableScaffolds.map(s => <details key={s.id} className="py-2 text-xs"><summary className="cursor-pointer font-semibold">{s.label}</summary><p className="mt-1">{s.basis}</p><ul className="list-disc pl-4 mt-2">{s.sections.map(x => <li key={x.id}>{x.label}: {x.purpose}</li>)}</ul><DiscoveryEvidenceList evidence={s.evidence} /></details>)}
+    <p className="text-xs text-slate-500 mt-2">{discovery.jurisdictionNote}</p>
+    {discovery.unresolved.length > 0 && <div className="mt-3 text-xs text-amber-800"><b>Unresolved discovery questions</b><ul className="list-disc pl-4">{discovery.unresolved.map((x, i) => <li key={i}>{x}</li>)}</ul></div>}
+  </section>
+}
+
 export default function ApprovalReadinessPage() {
   const [project, setProject] = useState<any>(null)
   const [version, setVersion] = useState<any>(null)
@@ -61,6 +125,14 @@ export default function ApprovalReadinessPage() {
   const [running, setRunning] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [reportKind, setReportKind] = useState<null | 'executive' | 'complete'>(null)
+  // Recompute for older saved versions too; no re-upload or score mutation.
+  const discovery = useMemo(() => {
+    if (!analysis?.traceTasks) return null
+    try { return discoverUSProject(analysis) } catch (error) {
+      console.error('[approval] discovery failed:', error)
+      return null
+    }
+  }, [analysis])
 
   // Keep Approval Readiness bound to the CURRENT project + CURRENT version.
   // The sidebar can change either selection without unmounting this page, so a
@@ -150,11 +222,12 @@ export default function ApprovalReadinessPage() {
   // When a report is requested, render the print-optimized document instead
   // of the interactive workspace. Built from the same structured result.
   if (reportKind && result) {
-    return <ApprovalReport result={result} mode={mode} kind={reportKind} project={project} onBack={() => setReportKind(null)} />
+    return <ApprovalReport result={result} mode={mode} kind={reportKind} project={project} discovery={discovery} onBack={() => setReportKind(null)} />
   }
 
   return (
     <Shell project={project}>
+      <ProjectDiscoveryPanel discovery={discovery} />
       {/* Mode select + run */}
       <div className="rounded-2xl border border-slate-200 bg-white p-4 mb-4">
         <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-700 mb-2">Select mode</div>
@@ -299,7 +372,7 @@ export default function ApprovalReadinessPage() {
                       <div className="flex items-start gap-2">
                         <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded bg-red-100 text-red-700 flex-shrink-0">{f.primaryDomain}</span>
                         <div className="flex-1">
-                          <div className="text-[13px] font-extrabold leading-snug" style={{ color: COLORS.ink }}>{f.title}</div>
+                          <div className="text-[13px] font-extrabold leading-snug" style={{ color: COLORS.ink }}>{findingTitle(f)}</div>
                           <div className="text-[11px] text-slate-600 leading-relaxed mt-1">{f.whatFound}</div>
                         </div>
                         <span className="text-[10px] text-slate-400 flex-shrink-0">View detail ›</span>
@@ -391,7 +464,7 @@ function FindingRow({ f, mode, open, onToggle }: { f: ApprovalFinding; mode: App
       <button onClick={onToggle} className="w-full text-left px-3 py-2.5 flex items-center gap-2 hover:bg-slate-50">
         <span className="font-mono text-[10px] font-bold text-white px-1.5 py-0.5 rounded" style={{ background: COLORS.ink }}>{f.id}</span>
         <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded" style={{ background: `${sevColor}22`, color: sevColor }}>{f.primaryDomain}</span>
-        <span className="text-[13px] font-extrabold flex-1 leading-snug" style={{ color: COLORS.ink }}>{f.title}</span>
+        <span className="text-[13px] font-extrabold flex-1 leading-snug" style={{ color: COLORS.ink }}>{findingTitle(f)}</span>
         {isRecommendation ? (
           <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">Recommendation · no score impact</span>
         ) : (
@@ -410,6 +483,16 @@ function FindingRow({ f, mode, open, onToggle }: { f: ApprovalFinding; mode: App
             {mode === 'PRE_SUBMISSION' ? f.preSubmissionNote : f.reviewerCheck}
           </MemoSection>
           <MemoSection label="Reference">{f.referenceRequirement}</MemoSection>
+          <MemoSection label="Activity classification and source evidence">
+            <p className="text-slate-500 mb-2">Inferred labels require review. An unidentified system is not evidence of missing work.</p>
+            {(f.evidence || []).map((e, i) => <div key={i} className="border rounded p-2 mb-2">
+              <div className="font-semibold">{e.activityCode} — {e.activityName}</div>
+              <div>{e.headline}</div>
+              <div>Discipline: {discoveryLabel(e.discipline)} · System: {discoveryLabel(e.system)}</div>
+              <div>WBS: {(Array.isArray(e.wbsPath) ? e.wbsPath.join(' / ') : e.wbsPath) || 'Not supplied'}</div>
+              {e.predecessor && <div>Predecessor: {e.predecessor.code} — {e.predecessor.name} · {e.predecessor.relationship} · lag {e.predecessor.lagHours ?? 'not supplied'} hours</div>}
+            </div>)}
+          </MemoSection>
 
           <div className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500 mb-1 mt-3">Affected activities</div>
           <div className="rounded border border-slate-100">
@@ -462,11 +545,12 @@ function Chip({ label, color }: { label: string; color: string }) {
 // Save-as-PDF uses the browser print dialog; the dashboard layout hides the
 // sidebar on print, and the toolbar below is print-hidden.
 // =============================================================================
-function ApprovalReport({ result, mode, kind, project, onBack }: {
+function ApprovalReport({ result, mode, kind, project, discovery, onBack }: {
   result: ApprovalReadinessResult
   mode: ApprovalMode
   kind: 'executive' | 'complete'
   project: any
+  discovery: USProjectDiscoveryResult | null
   onBack: () => void
 }) {
   const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit' })
@@ -552,6 +636,14 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
           </div>
 
           {/* project strip */}
+          {discovery && <section className="border rounded-lg p-3 mb-4 text-xs">
+            <h2 className="font-bold mb-2">Project Discovery — U.S. scope (non-scoring)</h2>
+            <p>{discovery.archetype.label} ({discovery.archetype.confidence}) · {discovery.ownerOverlay.label} ({discovery.ownerOverlay.confidence}) · {discovery.projectCondition.label} ({discovery.projectCondition.confidence})</p>
+            <p className="mt-1">Buildings / areas: {discovery.locations.map(x => x.label).join('; ') || 'Not identified'}</p>
+            <p className="mt-1">Systems: {discovery.systems.map(x => discoveryLabel(x.label)).join('; ') || 'Not identified'}</p>
+            <p className="mt-1">Reference scaffolds: {discovery.applicableScaffolds.map(x => x.label).join('; ')}. Applicability requires review.</p>
+            {discovery.unresolved.map((x, i) => <p key={i} className="mt-1">Unresolved: {x}</p>)}
+          </section>}
           <div className="grid grid-cols-3 gap-6 mb-5">
             <Info label="Project" value={project?.name || '—'} />
             <Info label="Project Code" value={project?.projectId || '—'} mono />
@@ -658,7 +750,7 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
               <div className="px-3 py-2 border-b border-slate-200 flex items-center gap-2" style={{ background: '#f8fafc' }}>
                 <span className="font-mono text-[10px] font-bold text-white px-1.5 py-0.5 rounded" style={{ background: COLORS.ink }}>{f.id}</span>
                 <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">{f.primaryDomain}</span>
-                <span className="text-[12px] font-extrabold flex-1" style={{ color: COLORS.ink }}>{f.title}</span>
+                <span className="text-[12px] font-extrabold flex-1" style={{ color: COLORS.ink }}>{findingTitle(f)}</span>
                 <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{f.ruleStrength} · sev {f.severity} · −{f.scoreDeduction}</span>
               </div>
               <div className="px-4 py-3 text-[11px]">
@@ -702,7 +794,7 @@ function ApprovalReport({ result, mode, kind, project, onBack }: {
                   <div className="px-3 py-2 border-b border-blue-100 flex items-center gap-2 bg-blue-50/50">
                     <span className="font-mono text-[10px] font-bold text-white px-1.5 py-0.5 rounded" style={{ background: COLORS.blue }}>{f.id}</span>
                     <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">{f.primaryDomain}</span>
-                    <span className="text-[12px] font-extrabold flex-1" style={{ color: COLORS.ink }}>{f.title}</span>
+                    <span className="text-[12px] font-extrabold flex-1" style={{ color: COLORS.ink }}>{findingTitle(f)}</span>
                     <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">Recommendation · no score impact</span>
                   </div>
                   <div className="px-4 py-3 text-[11px]">

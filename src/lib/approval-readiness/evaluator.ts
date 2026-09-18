@@ -155,8 +155,6 @@ export function evaluateApprovalReadiness(
       }
     }
 
-    const disc = rep.discipline || 'General'
-    const sysLabel = rep.system || 'General'
     findings.push({
       id: `CL-${String(++n).padStart(3, '0')}`,
       kind,
@@ -169,9 +167,8 @@ export function evaluateApprovalReadiness(
       confidence: rep.confidence,
       criticalGate,
       scoreDeduction: deduction,
-      title: kind === 'RECOMMENDATION'
-        ? rep.headline
-        : `${disc} · ${sysLabel} — ${evidence.length} related condition${evidence.length === 1 ? '' : 's'}`,
+      // Lead with the issue. Discipline/system are metadata, not a diagnosis.
+      title: rep.headline,
       whatFound: rep.headline + (evidence.length > 1 ? ` (plus ${evidence.length - 1} related)` : ''),
       whyItMatters: rep.detail,
       reviewerCheck: kind === 'RECOMMENDATION'
