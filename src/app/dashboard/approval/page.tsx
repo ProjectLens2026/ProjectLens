@@ -74,7 +74,13 @@ function DiscoveryEvidenceList({ evidence }: { evidence: DiscoveryEvidence[] }) 
   </ul>
 }
 
-function ProjectDiscoveryPanel({ discovery }: { discovery: USProjectDiscoveryResult | null }) {
+function DiscoveryItem({ expanded, title, children }: { expanded: boolean; title: React.ReactNode; children: React.ReactNode }) {
+  // Reports use ordinary content so printing never depends on disclosure state.
+  if (expanded) return <div className="py-2"><div className="text-xs font-semibold">{title}</div>{children}</div>
+  return <details className="py-1"><summary className="cursor-pointer text-xs font-semibold">{title}</summary>{children}</details>
+}
+
+function ProjectDiscoveryPanel({ discovery, expanded = false }: { discovery: USProjectDiscoveryResult | null; expanded?: boolean }) {
   if (!discovery) return <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 mb-4 text-sm">Project discovery unavailable. Re-upload the XER to provide activity and WBS evidence.</div>
   const signals = [discovery.archetype, discovery.ownerOverlay, discovery.projectCondition]
   const sections = [
@@ -86,30 +92,28 @@ function ProjectDiscoveryPanel({ discovery }: { discovery: USProjectDiscoveryRes
   ]
   return <section className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
     <h2 className="font-bold text-slate-800">Project Discovery — U.S. scope</h2>
-    <p className="text-xs text-slate-600 mt-1 mb-3">Detected from this version’s XER. Expand an item to inspect its evidence. Detection does not establish compliance or readiness and does not change the score.</p>
-    <div className="grid md:grid-cols-3 gap-3">
-      {signals.map((s, i) => <details key={i} className="border rounded-lg p-3">
-        <summary className="cursor-pointer text-sm font-semibold">{['Project type', 'Owner overlay', 'Construction condition'][i]}: {s.label}</summary>
+    <p className="text-xs text-slate-600 mt-1 mb-3">Detected from this version’s XER. {expanded ? 'Available supporting evidence is listed below; evidence lists may be sampled by the discovery engine.' : 'Expand an item to inspect its evidence.'} Detection does not establish compliance or readiness and does not change the score.</p>
+    <div className={expanded ? 'space-y-3' : 'grid md:grid-cols-3 gap-3'}>
+      {signals.map((s, i) => <DiscoveryItem key={i} expanded={expanded} title={<>{['Project type', 'Owner overlay', 'Construction condition'][i]}: {s.label}</>}>
         <div className="text-xs mt-1">{s.status} · {s.confidence} confidence</div>
         <DiscoveryEvidenceList evidence={s.evidence} />
-      </details>)}
+      </DiscoveryItem>)}
     </div>
     <p className="text-xs text-slate-500 my-3">{discovery.summary.taskCount} activities · {discovery.summary.wbsNodeCount} WBS nodes · {discovery.summary.classifiedActivityCount} activities classified</p>
-    <div className="grid md:grid-cols-2 gap-3">
+    <div className={expanded ? 'space-y-3' : 'grid md:grid-cols-2 gap-3 items-start'}>
       {sections.map(section => <div key={section.title} className="border rounded-lg p-3">
         <h3 className="text-sm font-bold mb-2">{section.title}</h3>
         {!section.items.length && <p className="text-xs text-amber-700">Not identified in the available evidence; this does not prove absence.</p>}
-        {section.items.map(s => <details key={s.key} className="py-1">
-          <summary className="cursor-pointer text-xs">{discoveryLabel(s.label)} — {s.confidence} confidence</summary>
+        {section.items.map(s => <DiscoveryItem key={s.key} expanded={expanded} title={<>{discoveryLabel(s.label)} — {s.confidence} confidence</>}>
           <DiscoveryEvidenceList evidence={s.evidence} />
-        </details>)}
+        </DiscoveryItem>)}
       </div>)}
       <div className="border rounded-lg p-3"><h3 className="text-sm font-bold mb-2">Project phases</h3>
-        {discovery.phases.map(p => <details key={p.phase} className="py-1"><summary className="cursor-pointer text-xs">{p.label}: {p.activityCount} activities</summary><DiscoveryEvidenceList evidence={p.evidence} /></details>)}
+        {discovery.phases.map(p => <DiscoveryItem key={p.phase} expanded={expanded} title={<>{p.label}: {p.activityCount} activities</>}><DiscoveryEvidenceList evidence={p.evidence} /></DiscoveryItem>)}
       </div>
     </div>
     <h3 className="text-sm font-bold mt-4">Selected reference scaffolds — verify applicability</h3>
-    {discovery.applicableScaffolds.map(s => <details key={s.id} className="py-2 text-xs"><summary className="cursor-pointer font-semibold">{s.label}</summary><p className="mt-1">{s.basis}</p><ul className="list-disc pl-4 mt-2">{s.sections.map(x => <li key={x.id}>{x.label}: {x.purpose}</li>)}</ul><DiscoveryEvidenceList evidence={s.evidence} /></details>)}
+    {discovery.applicableScaffolds.map(s => <DiscoveryItem key={s.id} expanded={expanded} title={s.label}><p className="mt-1 text-xs">{s.basis}</p><ul className="list-disc pl-4 mt-2 text-xs">{s.sections.map(x => <li key={x.id}>{x.label}: {x.purpose}</li>)}</ul><DiscoveryEvidenceList evidence={s.evidence} /></DiscoveryItem>)}
     <p className="text-xs text-slate-500 mt-2">{discovery.jurisdictionNote}</p>
     {discovery.unresolved.length > 0 && <div className="mt-3 text-xs text-amber-800"><b>Unresolved discovery questions</b><ul className="list-disc pl-4">{discovery.unresolved.map((x, i) => <li key={i}>{x}</li>)}</ul></div>}
   </section>
@@ -227,6 +231,14 @@ export default function ApprovalReadinessPage() {
 
   return (
     <Shell project={project}>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 mb-4">
+        <div className="text-xs text-slate-600">Complete Review includes discovery sections and available supporting evidence.</div>
+        <div className="flex gap-2">
+          <button disabled={!result} onClick={() => setReportKind('executive')} className="text-[11px] font-bold px-3 py-2 rounded-lg text-white disabled:opacity-40" style={{ background: COLORS.ink }}>Executive Report</button>
+          <button disabled={!result} onClick={() => setReportKind('complete')} className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200 disabled:opacity-40">Complete Review</button>
+        </div>
+        {!result && <p className="text-xs text-slate-500">Run the check below to enable reports.</p>}
+      </div>
       <ProjectDiscoveryPanel discovery={discovery} />
       {/* Mode select + run */}
       <div className="rounded-2xl border border-slate-200 bg-white p-4 mb-4">
@@ -291,16 +303,6 @@ export default function ApprovalReadinessPage() {
                   </div>
                   <div className="text-[13px] font-extrabold mt-1" style={{ color: gradeColor(result.grade) }}>{result.grade}</div>
                   <div className="text-[8.5px] text-slate-400 mt-1">supporting indicator</div>
-                </div>
-                <div className="flex flex-col gap-2">
-                  <button onClick={() => setReportKind('executive')}
-                    className="text-[11px] font-bold px-3 py-2 rounded-lg text-white" style={{ background: COLORS.ink }}>
-                    📄 Executive Report
-                  </button>
-                  <button onClick={() => setReportKind('complete')}
-                    className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">
-                    📑 Complete Review
-                  </button>
                 </div>
               </div>
             </div>
@@ -373,7 +375,7 @@ export default function ApprovalReadinessPage() {
                         <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded bg-red-100 text-red-700 flex-shrink-0">{f.primaryDomain}</span>
                         <div className="flex-1">
                           <div className="text-[13px] font-extrabold leading-snug" style={{ color: COLORS.ink }}>{findingTitle(f)}</div>
-                          <div className="text-[11px] text-slate-600 leading-relaxed mt-1">{f.whatFound}</div>
+                          {f.whatFound !== findingTitle(f) && <div className="text-[11px] text-slate-600 leading-relaxed mt-1">{f.whatFound}</div>}
                         </div>
                         <span className="text-[10px] text-slate-400 flex-shrink-0">View detail ›</span>
                       </div>
@@ -636,7 +638,8 @@ function ApprovalReport({ result, mode, kind, project, discovery, onBack }: {
           </div>
 
           {/* project strip */}
-          {discovery && <section className="border rounded-lg p-3 mb-4 text-xs">
+          {kind === 'complete' && <ProjectDiscoveryPanel discovery={discovery} expanded />}
+          {kind === 'executive' && discovery && <section className="border rounded-lg p-3 mb-4 text-xs">
             <h2 className="font-bold mb-2">Project Discovery — U.S. scope (non-scoring)</h2>
             <p>{discovery.archetype.label} ({discovery.archetype.confidence}) · {discovery.ownerOverlay.label} ({discovery.ownerOverlay.confidence}) · {discovery.projectCondition.label} ({discovery.projectCondition.confidence})</p>
             <p className="mt-1">Buildings / areas: {discovery.locations.map(x => x.label).join('; ') || 'Not identified'}</p>
