@@ -22,7 +22,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   createEmptyProject, loadProjects,
-  ContractDates,
+  ContractDates, ContractMilestone,
 } from '@/lib/projectStore'
 import {
   sanitizeProjectId, sanitizeProjectIdLive, validateProjectId,
@@ -48,6 +48,7 @@ export default function CreateProjectModal({
   const [ntp, setNtp] = useState('')
   const [substantialCompletion, setSubstantialCompletion] = useState('')
   const [originalCompletion, setOriginalCompletion] = useState('')
+  const [contractMilestones, setContractMilestones] = useState<ContractMilestone[]>([])
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -60,6 +61,7 @@ export default function CreateProjectModal({
       setNtp('')
       setSubstantialCompletion('')
       setOriginalCompletion('')
+      setContractMilestones([])
       setError('')
       setSubmitting(false)
     }
@@ -77,6 +79,30 @@ export default function CreateProjectModal({
 
   function updateProjectIdLive(raw: string) {
     setProjectId(sanitizeProjectIdLive(raw))
+    setError('')
+  }
+
+  function addContractMilestone() {
+    setContractMilestones(rows => [
+      ...rows,
+      {
+        id: 'cms_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        name: '',
+        date: '',
+      },
+    ])
+    setError('')
+  }
+
+  function updateContractMilestone(id: string, field: 'name' | 'date', value: string) {
+    setContractMilestones(rows => rows.map(row => (
+      row.id === id ? { ...row, [field]: value } : row
+    )))
+    setError('')
+  }
+
+  function removeContractMilestone(id: string) {
+    setContractMilestones(rows => rows.filter(row => row.id !== id))
     setError('')
   }
 
@@ -114,14 +140,27 @@ export default function CreateProjectModal({
       setError('Original Final Completion cannot be before Original Substantial Completion.')
       return
     }
+    const incompleteMilestone = contractMilestones.find(row => !row.name.trim() || !row.date)
+    if (incompleteMilestone) {
+      setError('Each contract milestone requires both a milestone name and date.')
+      return
+    }
+    const normalizedMilestoneNames = contractMilestones.map(row => row.name.trim().toLowerCase())
+    if (new Set(normalizedMilestoneNames).size !== normalizedMilestoneNames.length) {
+      setError('Contract milestone names must be unique.')
+      return
+    }
 
     setSubmitting(true)
     try {
-      const contractDates: ContractDates | undefined = (ntp || substantialCompletion || originalCompletion)
+      const contractDates: ContractDates | undefined = (ntp || substantialCompletion || originalCompletion || contractMilestones.length > 0)
         ? {
             ntp: ntp || '',
             substantialCompletion: substantialCompletion || '',
             originalContractCompletion: originalCompletion || '',
+            contractMilestones: contractMilestones.length > 0
+              ? contractMilestones.map(row => ({ ...row, name: row.name.trim() }))
+              : undefined,
           }
         : undefined
 
@@ -267,6 +306,65 @@ export default function CreateProjectModal({
                   className="w-full px-2.5 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
               </div>
             </div>
+          </div>
+
+          {/* Optional contractual milestones / phase completions */}
+          <div className="border border-slate-200 rounded-lg p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+                  Contract Milestones &amp; Phases
+                </div>
+                <div className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                  Add only dates required by the contract, such as Phase 1 Turnover or Beneficial Occupancy.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={addContractMilestone}
+                className="shrink-0 px-2.5 py-1.5 text-[10px] font-bold text-blue-700 border border-blue-200 rounded-md hover:bg-blue-50">
+                + Add milestone
+              </button>
+            </div>
+
+            {contractMilestones.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {contractMilestones.map((milestone, index) => (
+                  <div key={milestone.id} className="grid grid-cols-[1fr_132px_28px] gap-2 items-end">
+                    <div>
+                      <label className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                        Milestone {index + 1}
+                      </label>
+                      <input
+                        type="text"
+                        value={milestone.name}
+                        onChange={e => updateContractMilestone(milestone.id, 'name', e.target.value)}
+                        placeholder="e.g. Phase 1 Turnover"
+                        maxLength={100}
+                        className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-blue-500" />
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                        Contract Date
+                      </label>
+                      <input
+                        type="date"
+                        value={milestone.date}
+                        onChange={e => updateContractMilestone(milestone.id, 'date', e.target.value)}
+                        className="w-full px-2 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-blue-500 bg-white" />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeContractMilestone(milestone.id)}
+                      title="Remove milestone"
+                      aria-label={`Remove milestone ${index + 1}`}
+                      className="h-[34px] text-slate-400 hover:text-red-600 text-lg leading-none">
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {error && (

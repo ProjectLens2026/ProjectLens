@@ -64,6 +64,12 @@ export type ProjectStatus = 'Active' | 'Completed' | 'On Hold' | 'Archived' | 'D
 //     fields when missing (handles legacy projects with no manual dates).
 //   - Durations on the dashboard use these as the source of truth.
 // =============================================================================
+export interface ContractMilestone {
+  id: string
+  name: string
+  date: string                         // ISO date (YYYY-MM-DD)
+}
+
 export interface ContractDates {
   ntp?: string                          // ISO date (YYYY-MM-DD)
   originalContractCompletion?: string   // ISO date (YYYY-MM-DD)
@@ -74,6 +80,10 @@ export interface ContractDates {
   // name keywords like SUBSTANTIAL / BENEFICIAL OCCUPANCY).
   // Sticky at the project level — pre-fills on subsequent version uploads.
   substantialCompletion?: string        // ISO date (YYYY-MM-DD)
+  // Contractually required interim milestones or phased completion dates.
+  // Stored with the project basis so later schedule reviews can compare the
+  // submitted XER against the dates the contract actually requires.
+  contractMilestones?: ContractMilestone[]
 }
 
 export interface VersionDates {
@@ -917,9 +927,10 @@ export function addVersionToProject(projectId: string, version: ScheduleVersion)
 }
 
 // =============================================================================
-// updateProjectContractDates — replace the project's manual NTP + Original
-// Contract Completion. Called from the upload flow when the PM edits these
-// on an existing project. Bumps updatedAt and persists to IndexedDB.
+// updateProjectContractDates — merge the project's manual contract dates.
+// Called from the upload flow when the PM edits the core dates on an existing
+// project. Merging preserves project-basis fields (such as interim contract
+// milestones) that are not shown in the upload form.
 // =============================================================================
 export function updateProjectContractDates(
   projectId: string,
@@ -927,9 +938,13 @@ export function updateProjectContractDates(
 ): Project | null {
   const idx = _projects.findIndex(p => p.id === projectId)
   if (idx === -1) return null
+  const mergedDates: ContractDates = {
+    ..._projects[idx].contractDates,
+    ...dates,
+  }
   const updated: Project = {
     ..._projects[idx],
-    contractDates: dates,
+    contractDates: mergedDates,
     updatedAt: new Date().toISOString(),
   }
   _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
@@ -938,7 +953,7 @@ export function updateProjectContractDates(
     console.error('[ControlLens] updateProjectContractDates: IndexedDB persist failed:', err)
   })
   // v15 — sync to Supabase
-  updateProjectContractDatesInSupabase(projectId, dates).catch(err => {
+  updateProjectContractDatesInSupabase(projectId, mergedDates).catch(err => {
     console.error('[ControlLens] updateProjectContractDates: Supabase failed:', err)
   })
   return updated
