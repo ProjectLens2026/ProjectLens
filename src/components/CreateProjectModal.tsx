@@ -46,6 +46,7 @@ export default function CreateProjectModal({
   const [projectId, setProjectId] = useState('')
   const [owner, setOwner] = useState('')
   const [ntp, setNtp] = useState('')
+  const [substantialCompletion, setSubstantialCompletion] = useState('')
   const [originalCompletion, setOriginalCompletion] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -57,6 +58,7 @@ export default function CreateProjectModal({
       setProjectId('')
       setOwner('')
       setNtp('')
+      setSubstantialCompletion('')
       setOriginalCompletion('')
       setError('')
       setSubmitting(false)
@@ -100,16 +102,25 @@ export default function CreateProjectModal({
       setError(`Project ID "${strictId}" is already used by "${collision.name}".`)
       return
     }
+    if (ntp && substantialCompletion && ntp >= substantialCompletion) {
+      setError('Original Substantial Completion must be after NTP.')
+      return
+    }
     if (ntp && originalCompletion && ntp >= originalCompletion) {
-      setError('Original Contract Completion must be after NTP.')
+      setError('Original Final Completion must be after NTP.')
+      return
+    }
+    if (substantialCompletion && originalCompletion && substantialCompletion > originalCompletion) {
+      setError('Original Final Completion cannot be before Original Substantial Completion.')
       return
     }
 
     setSubmitting(true)
     try {
-      const contractDates: ContractDates | undefined = (ntp || originalCompletion)
+      const contractDates: ContractDates | undefined = (ntp || substantialCompletion || originalCompletion)
         ? {
             ntp: ntp || '',
+            substantialCompletion: substantialCompletion || '',
             originalContractCompletion: originalCompletion || '',
           }
         : undefined
@@ -219,12 +230,12 @@ export default function CreateProjectModal({
               className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500" />
           </div>
 
-          {/* Optional Contract Dates */}
+          {/* Initial Contract Basis */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
             <div className="text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-2">
-              📅 Contract Dates <span className="text-blue-700 normal-case font-normal">· optional, the PM can enter these later</span>
+              📅 Initial Contract Basis <span className="text-blue-700 normal-case font-normal">· optional, the PM can enter these later</span>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">
                   NTP / Contract Start
@@ -237,7 +248,17 @@ export default function CreateProjectModal({
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">
-                  Original Completion
+                  Original Substantial Completion
+                </label>
+                <input
+                  type="date"
+                  value={substantialCompletion}
+                  onChange={e => { setSubstantialCompletion(e.target.value); setError('') }}
+                  className="w-full px-2.5 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">
+                  Original Final Completion
                 </label>
                 <input
                   type="date"
