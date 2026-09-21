@@ -18,6 +18,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { discoverUSProject, type USProjectDiscoveryResult, type DiscoveryEvidence } from '@/lib/construction/projectDiscovery'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { getActiveProject, getActiveVersion, subscribeToProjects, updateVersionApprovalResult } from '@/lib/projectStore'
 import { evaluateApprovalReadiness } from '@/lib/approval-readiness/evaluator'
 import { printReport } from '@/lib/printReport'
@@ -25,6 +26,37 @@ import type { ApprovalReadinessResult, ApprovalMode, ApprovalFinding } from '@/l
 
 const COLORS = {
   ink: '#13202e', blue: '#2563eb', red: '#dc2626', amber: '#f59e0b', green: '#16a34a', slate: '#1f2937',
+}
+
+type ReviewPurpose =
+  | 'BASELINE_APPROVAL'
+  | 'PERIODIC_UPDATE'
+  | 'PM_HEALTH'
+  | 'VERSION_COMPARISON'
+  | 'RECOVERY_REVIEW'
+  | 'TIME_IMPACT_ANALYSIS'
+
+const REVIEW_PURPOSES: Array<{ value: ReviewPurpose; label: string }> = [
+  { value: 'BASELINE_APPROVAL', label: 'Baseline Approval' },
+  { value: 'PERIODIC_UPDATE', label: 'Periodic Update Review' },
+  { value: 'PM_HEALTH', label: 'PM Schedule Health Review' },
+  { value: 'VERSION_COMPARISON', label: 'Version Comparison' },
+  { value: 'RECOVERY_REVIEW', label: 'Recovery Schedule Review' },
+  { value: 'TIME_IMPACT_ANALYSIS', label: 'Time Impact Analysis' },
+]
+
+function defaultReviewPurpose(version: any): ReviewPurpose {
+  if (version?.scheduleType === 'baseline' || version?.scheduleType === 'rebaseline') return 'BASELINE_APPROVAL'
+  return 'PERIODIC_UPDATE'
+}
+
+function contextualReadinessLabel(result: ApprovalReadinessResult, mode: ApprovalMode): string {
+  if (mode === 'REVIEWER') return result.readinessLabel || result.recommendation
+  if (result.readinessStatus === 'NOT_READY') return 'NOT READY TO SUBMIT'
+  if (result.readinessStatus === 'REVIEW_REQUIRED') return 'CORRECTION REQUIRED BEFORE SUBMISSION'
+  if (result.readinessStatus === 'READY_WITH_COMMENTS') return 'READY TO SUBMIT WITH COMMENTS'
+  if (result.readinessStatus === 'READY') return 'READY TO SUBMIT'
+  return result.readinessLabel || result.recommendation
 }
 
 function gradeColor(grade: string): string {
@@ -58,6 +90,107 @@ function findingTitle(f: ApprovalFinding): string {
   return f.whatFound || 'Finding description unavailable — run the check again'
 }
 
+type ActionDisposition = 'CORRECTION' | 'CLARIFICATION'
+
+interface ActionGroup {
+  id: string
+  disposition: ActionDisposition
+  title: string
+  why: string
+  action: string
+  acceptance: string
+  findings: ApprovalFinding[]
+  affectedCount: number
+  totalDeduction: number
+}
+
+function actionFamily(f: ApprovalFinding): string {
+  const text = `${findingTitle(f)} ${f.whatFound}`.toLowerCase()
+  if (text.includes('supporting predecessors finish after')) return 'COMPLETION_SUPPORT'
+  if (text.includes('recorded progress does not follow')) return 'PROGRESS_LOGIC'
+  if (text.includes('may not represent the actual construction driver')) return 'RELATIONSHIP_DRIVER'
+  if (text.includes('may not reflect the field phasing')) return 'FIELD_PHASING'
+  if (text.includes('construction sequence needs verification')) return 'CONSTRUCTION_SEQUENCE'
+  if (text.includes('readiness path is incomplete')) return 'READINESS_PATH'
+  return `OTHER:${f.primaryDomain}`
+}
+
+const ACTION_COPY: Record<string, Pick<ActionGroup, 'title' | 'why' | 'action' | 'acceptance'>> = {
+  COMPLETION_SUPPORT: {
+    title: 'Resolve completion/readiness activities with late supporting predecessors',
+    why: 'The submitted logic allows supporting work to finish after a stated completion or readiness point, which can make the target unreliable.',
+    action: 'Confirm each target activity’s intended definition, then correct or explain its dates and governing dependencies.',
+    acceptance: 'Each target is supported by credible predecessors, or the schedule narrative documents an accepted exception.',
+  },
+  PROGRESS_LOGIC: {
+    title: 'Reconcile recorded progress with the current XER logic',
+    why: 'Actual progress and the submitted relationship network disagree, so the update may not represent how the work occurred.',
+    action: 'Validate actual dates against approved records. Correct inappropriate relationships or explain legitimate out-of-sequence execution without changing truthful actual dates.',
+    acceptance: 'Actual dates remain truthful and each flagged logic conflict is corrected or supported by a clear explanation.',
+  },
+  RELATIONSHIP_DRIVER: {
+    title: 'Validate relationships that may not represent the actual construction driver',
+    why: 'A relationship without a technical, access, inspection or contractual basis can distort the controlling path.',
+    action: 'Verify the construction basis for each flagged dependency and revise only the unsupported links.',
+    acceptance: 'Every retained relationship has a documented scheduling basis; unsupported links are corrected.',
+  },
+  FIELD_PHASING: {
+    title: 'Confirm field phasing and location logic',
+    why: 'The current links may combine workfronts or areas that were executed independently.',
+    action: 'Confirm the intended area sequence and model separate workfront logic where the field plan supports it.',
+    acceptance: 'The XER reflects the accepted location/phasing plan or the variance is explained.',
+  },
+  CONSTRUCTION_SEQUENCE: {
+    title: 'Verify construction-sequence exceptions',
+    why: 'The submitted sequence conflicts with an expected construction prerequisite and requires professional confirmation.',
+    action: 'Check plans, permits, inspections and field records; correct the logic or document the accepted sequence.',
+    acceptance: 'The schedule reflects the accepted construction sequence and preserves truthful actual dates.',
+  },
+  READINESS_PATH: {
+    title: 'Complete or clarify system-readiness paths',
+    why: 'The schedule may not show a credible chain from installation through startup, testing and turnover.',
+    action: 'Add or map the missing readiness steps and dependencies, or identify the equivalent activities already in the schedule.',
+    acceptance: 'Each applicable system has a traceable readiness path to the governing completion target.',
+  },
+}
+
+export function buildActionGroups(result: ApprovalReadinessResult): { corrections: ActionGroup[]; clarifications: ActionGroup[] } {
+  const map = new Map<string, ApprovalFinding[]>()
+  for (const f of result.findings.filter(x => approvalKind(x) === 'FINDING')) {
+    const disposition: ActionDisposition = f.criticalGate || f.ruleStrength === 'REQUIRED' ? 'CORRECTION' : 'CLARIFICATION'
+    const family = actionFamily(f)
+    const key = `${disposition}:${family}`
+    map.set(key, [...(map.get(key) || []), f])
+  }
+
+  const groups = Array.from(map.entries()).map(([key, findings], index): ActionGroup => {
+    const [disposition, family] = key.split(':', 2) as [ActionDisposition, string]
+    const fallback = {
+      title: `Resolve remaining ${findings[0].primaryDomain} schedule-control observations`,
+      why: findings[0].whyItMatters,
+      action: disposition === 'CORRECTION'
+        ? 'Correct the identified schedule condition and rerun the review.'
+        : 'Verify the evidence and provide clarification or correct the schedule where appropriate.',
+      acceptance: 'Each underlying observation is corrected or supported by a documented explanation.',
+    }
+    const copy = ACTION_COPY[family] || fallback
+    const affected = new Set(findings.flatMap(f => f.affectedActivities.map(a => a.id)))
+    return {
+      id: `ACT-${String(index + 1).padStart(2, '0')}`,
+      disposition,
+      ...copy,
+      findings,
+      affectedCount: affected.size,
+      totalDeduction: findings.reduce((sum, f) => sum + f.scoreDeduction, 0),
+    }
+  }).sort((a, b) => b.totalDeduction - a.totalDeduction || b.findings.length - a.findings.length)
+
+  return {
+    corrections: groups.filter(g => g.disposition === 'CORRECTION'),
+    clarifications: groups.filter(g => g.disposition === 'CLARIFICATION'),
+  }
+}
+
 function discoveryLabel(value?: string): string {
   if (!value || /^(general|unknown|unclassified)$/i.test(value)) return 'Not identified'
   return value.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2')
@@ -74,7 +207,13 @@ function DiscoveryEvidenceList({ evidence }: { evidence: DiscoveryEvidence[] }) 
   </ul>
 }
 
-function ProjectDiscoveryPanel({ discovery }: { discovery: USProjectDiscoveryResult | null }) {
+function DiscoveryItem({ expanded, title, children }: { expanded: boolean; title: React.ReactNode; children: React.ReactNode }) {
+  // Reports use ordinary content so printing never depends on disclosure state.
+  if (expanded) return <div className="py-2"><div className="text-xs font-semibold">{title}</div>{children}</div>
+  return <details className="py-1"><summary className="cursor-pointer text-xs font-semibold">{title}</summary>{children}</details>
+}
+
+function ProjectDiscoveryPanel({ discovery, expanded = false }: { discovery: USProjectDiscoveryResult | null; expanded?: boolean }) {
   if (!discovery) return <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 mb-4 text-sm">Project discovery unavailable. Re-upload the XER to provide activity and WBS evidence.</div>
   const signals = [discovery.archetype, discovery.ownerOverlay, discovery.projectCondition]
   const sections = [
@@ -86,45 +225,80 @@ function ProjectDiscoveryPanel({ discovery }: { discovery: USProjectDiscoveryRes
   ]
   return <section className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
     <h2 className="font-bold text-slate-800">Project Discovery — U.S. scope</h2>
-    <p className="text-xs text-slate-600 mt-1 mb-3">Detected from this version’s XER. Expand an item to inspect its evidence. Detection does not establish compliance or readiness and does not change the score.</p>
-    <div className="grid md:grid-cols-3 gap-3">
-      {signals.map((s, i) => <details key={i} className="border rounded-lg p-3">
-        <summary className="cursor-pointer text-sm font-semibold">{['Project type', 'Owner overlay', 'Construction condition'][i]}: {s.label}</summary>
+    <p className="text-xs text-slate-600 mt-1 mb-3">Detected from this version’s XER. {expanded ? 'Available supporting evidence is listed below; evidence lists may be sampled by the discovery engine.' : 'Expand an item to inspect its evidence.'} Detection does not establish compliance or readiness and does not change the score.</p>
+    <div className={expanded ? 'space-y-3' : 'grid md:grid-cols-3 gap-3'}>
+      {signals.map((s, i) => <DiscoveryItem key={i} expanded={expanded} title={<>{['Project type', 'Owner overlay', 'Construction condition'][i]}: {s.label}</>}>
         <div className="text-xs mt-1">{s.status} · {s.confidence} confidence</div>
         <DiscoveryEvidenceList evidence={s.evidence} />
-      </details>)}
+      </DiscoveryItem>)}
     </div>
     <p className="text-xs text-slate-500 my-3">{discovery.summary.taskCount} activities · {discovery.summary.wbsNodeCount} WBS nodes · {discovery.summary.classifiedActivityCount} activities classified</p>
-    <div className="grid md:grid-cols-2 gap-3">
+    <div className={expanded ? 'space-y-3' : 'grid md:grid-cols-2 gap-3 items-start'}>
       {sections.map(section => <div key={section.title} className="border rounded-lg p-3">
         <h3 className="text-sm font-bold mb-2">{section.title}</h3>
         {!section.items.length && <p className="text-xs text-amber-700">Not identified in the available evidence; this does not prove absence.</p>}
-        {section.items.map(s => <details key={s.key} className="py-1">
-          <summary className="cursor-pointer text-xs">{discoveryLabel(s.label)} — {s.confidence} confidence</summary>
+        {section.items.map(s => <DiscoveryItem key={s.key} expanded={expanded} title={<>{discoveryLabel(s.label)} — {s.confidence} confidence</>}>
           <DiscoveryEvidenceList evidence={s.evidence} />
-        </details>)}
+        </DiscoveryItem>)}
       </div>)}
       <div className="border rounded-lg p-3"><h3 className="text-sm font-bold mb-2">Project phases</h3>
-        {discovery.phases.map(p => <details key={p.phase} className="py-1"><summary className="cursor-pointer text-xs">{p.label}: {p.activityCount} activities</summary><DiscoveryEvidenceList evidence={p.evidence} /></details>)}
+        {discovery.phases.map(p => <DiscoveryItem key={p.phase} expanded={expanded} title={<>{p.label}: {p.activityCount} activities</>}><DiscoveryEvidenceList evidence={p.evidence} /></DiscoveryItem>)}
       </div>
     </div>
     <h3 className="text-sm font-bold mt-4">Selected reference scaffolds — verify applicability</h3>
-    {discovery.applicableScaffolds.map(s => <details key={s.id} className="py-2 text-xs"><summary className="cursor-pointer font-semibold">{s.label}</summary><p className="mt-1">{s.basis}</p><ul className="list-disc pl-4 mt-2">{s.sections.map(x => <li key={x.id}>{x.label}: {x.purpose}</li>)}</ul><DiscoveryEvidenceList evidence={s.evidence} /></details>)}
+    {discovery.applicableScaffolds.map(s => <DiscoveryItem key={s.id} expanded={expanded} title={s.label}><p className="mt-1 text-xs">{s.basis}</p><ul className="list-disc pl-4 mt-2 text-xs">{s.sections.map(x => <li key={x.id}>{x.label}: {x.purpose}</li>)}</ul><DiscoveryEvidenceList evidence={s.evidence} /></DiscoveryItem>)}
     <p className="text-xs text-slate-500 mt-2">{discovery.jurisdictionNote}</p>
     {discovery.unresolved.length > 0 && <div className="mt-3 text-xs text-amber-800"><b>Unresolved discovery questions</b><ul className="list-disc pl-4">{discovery.unresolved.map((x, i) => <li key={i}>{x}</li>)}</ul></div>}
   </section>
 }
 
+function ActionGroupCard({ group, mode }: { group: ActionGroup; mode: ApprovalMode }) {
+  const color = group.disposition === 'CORRECTION' ? COLORS.red : COLORS.amber
+  return <details className="rounded-xl border bg-white overflow-hidden" style={{ borderColor: `${color}55` }}>
+    <summary className="cursor-pointer list-none p-4">
+      <div className="flex flex-wrap items-start gap-3">
+        <span className="text-[9px] font-extrabold uppercase px-2 py-1 rounded" style={{ background: `${color}18`, color }}>{group.disposition === 'CORRECTION' ? 'Correction required' : 'Clarification needed'}</span>
+        <div className="flex-1 min-w-[240px]">
+          <div className="text-[14px] font-extrabold" style={{ color: COLORS.ink }}>{group.title}</div>
+          <div className="text-[11px] text-slate-500 mt-1">{group.findings.length} observation{group.findings.length === 1 ? '' : 's'} · {group.affectedCount} affected activit{group.affectedCount === 1 ? 'y' : 'ies'}</div>
+        </div>
+        <span className="text-[10px] text-slate-400">View action and evidence ▸</span>
+      </div>
+    </summary>
+    <div className="border-t border-slate-100 p-4 text-[12px] text-slate-700">
+      <MemoSection label="Why this matters">{group.why}</MemoSection>
+      <MemoSection label={mode === 'PRE_SUBMISSION' ? 'What to fix before submission' : 'Reviewer request'}>{group.action}</MemoSection>
+      <MemoSection label="Acceptance check">{group.acceptance}</MemoSection>
+      <p className="text-[10px] text-slate-500 mt-3">Grouped for corrective workflow only. Each observation retains its own evidence and does not imply a shared root cause.</p>
+      <div className="mt-3 space-y-2">
+        {group.findings.map(f => <div key={f.id} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+          <div className="flex gap-2 items-start">
+            <span className="font-mono text-[9px] font-bold">{f.id}</span>
+            <div className="flex-1"><b>{findingTitle(f)}</b><div className="text-[10px] text-slate-500 mt-1">{f.primaryDomain} · {f.ruleStrength} · score −{f.scoreDeduction}</div></div>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-600">
+            {f.affectedActivities.slice(0, 6).map(a => <Link key={a.id} href={`/dashboard/trace?task=${encodeURIComponent(a.id)}`} className="text-blue-600 font-semibold">{a.code} · Trace ›</Link>)}
+            {f.affectedActivities.length > 6 && <span>+{f.affectedActivities.length - 6} more in Scope &amp; Evidence</span>}
+          </div>
+        </div>)}
+      </div>
+    </div>
+  </details>
+}
+
 export default function ApprovalReadinessPage() {
+  const router = useRouter()
   const [project, setProject] = useState<any>(null)
   const [version, setVersion] = useState<any>(null)
   const [analysis, setAnalysis] = useState<any>(null)
   const [ready, setReady] = useState(false)
   const [mode, setMode] = useState<ApprovalMode>('PRE_SUBMISSION')
+  const [reviewPurpose, setReviewPurpose] = useState<ReviewPurpose>('PERIODIC_UPDATE')
   const [result, setResult] = useState<ApprovalReadinessResult | null>(null)
   const [running, setRunning] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [reportKind, setReportKind] = useState<null | 'executive' | 'complete'>(null)
+  const [activeTab, setActiveTab] = useState<'actions' | 'evidence'>('actions')
   // Recompute for older saved versions too; no re-upload or score mutation.
   const discovery = useMemo(() => {
     if (!analysis?.traceTasks) return null
@@ -146,6 +320,7 @@ export default function ApprovalReadinessPage() {
       setProject(p)
       setVersion(v)
       setAnalysis(v?.analysis || null)
+      setReviewPurpose(defaultReviewPurpose(v))
 
       // IMPORTANT: clear old-version UI when the newly selected version has no
       // saved Approval Readiness result. Never let one project's result bleed
@@ -161,6 +336,7 @@ export default function ApprovalReadinessPage() {
       // Close any old finding/report state that belonged to the prior version.
       setExpanded(null)
       setReportKind(null)
+      setActiveTab('actions')
       setRunning(false)
       setReady(true)
     }
@@ -171,6 +347,14 @@ export default function ApprovalReadinessPage() {
 
   function runCheck() {
     if (!analysis) return
+    if (reviewPurpose === 'VERSION_COMPARISON') {
+      router.push('/dashboard/changes')
+      return
+    }
+    if (reviewPurpose === 'TIME_IMPACT_ANALYSIS') {
+      router.push('/dashboard/tia')
+      return
+    }
     setRunning(true)
     try {
       const res = evaluateApprovalReadiness(analysis, { mode, projectType: 'ALL' })
@@ -227,31 +411,82 @@ export default function ApprovalReadinessPage() {
 
   return (
     <Shell project={project}>
-      <ProjectDiscoveryPanel discovery={discovery} />
-      {/* Mode select + run */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 mb-4">
-        <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-700 mb-2">Select mode</div>
-        <div className="flex flex-wrap items-center gap-3">
-          <ModeButton active={mode === 'PRE_SUBMISSION'} onClick={() => { setMode('PRE_SUBMISSION') }}
-            title="Pre-Submission Check" sub="Contractor — check before you submit" />
-          <ModeButton active={mode === 'REVIEWER'} onClick={() => { setMode('REVIEWER') }}
-            title="Reviewer Check" sub="Owner / PM — verify before you approve" />
-          <button onClick={runCheck} disabled={running}
-            className="ml-auto text-white text-[13px] font-bold px-5 py-2.5 rounded-lg disabled:opacity-60" style={{ background: COLORS.blue }}>
-            {running ? 'Running…' : result ? 'Re-run Check' : 'Run Approval Readiness Check'}
-          </button>
+      <div className="rounded-xl border border-slate-200 bg-white p-4 mb-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-slate-500">Selected schedule version</div>
+            <div className="text-[14px] font-extrabold text-slate-900 mt-1">{version?.versionLabel || version?.fileName || 'Current version'}</div>
+            <div className="text-[11px] text-slate-500 mt-1">Data date: {shortDate(version?.dataDate || analysis?.dataDate)} · File: {version?.fileName || '—'}</div>
+          </div>
+          <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2 text-right">
+            <div className="text-[9px] font-extrabold uppercase tracking-wide text-blue-600">Review level</div>
+            <div className="text-[11px] font-bold text-blue-900 mt-0.5">Version-specific review</div>
+          </div>
         </div>
       </div>
 
-      {!result && !running && (
+      <div className="flex gap-2 mb-4" role="tablist" aria-label="Schedule review views">
+        <button role="tab" aria-selected={activeTab === 'actions'} onClick={() => setActiveTab('actions')} className={`rounded-lg border px-5 py-3 text-[13px] font-bold ${activeTab === 'actions' ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>Required Actions</button>
+        <button role="tab" aria-selected={activeTab === 'evidence'} onClick={() => setActiveTab('evidence')} className={`rounded-lg border px-5 py-3 text-[13px] font-bold ${activeTab === 'evidence' ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>Scope &amp; Evidence</button>
+        <Link href="/dashboard/lens" className="rounded-lg border border-slate-200 bg-white px-5 py-3 text-[13px] font-bold text-slate-600 hover:bg-slate-50">Schedule Detail</Link>
+        <Link href="/dashboard/trace" className="rounded-lg border border-slate-200 bg-white px-5 py-3 text-[13px] font-bold text-slate-600 hover:bg-slate-50">Logic Trace</Link>
+      </div>
+
+      {activeTab === 'actions' && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 mb-4">
+        <div className="text-xs text-slate-600">The action report summarizes what must be corrected or clarified. The full evidence appendix preserves technical detail.</div>
+        <div className="flex gap-2">
+          <button disabled={!result} onClick={() => setReportKind('executive')} className="text-[11px] font-bold px-3 py-2 rounded-lg text-white disabled:opacity-40" style={{ background: COLORS.ink }}>Action Report</button>
+          <button disabled={!result} onClick={() => setReportKind('complete')} className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200 disabled:opacity-40">Full Evidence Appendix</button>
+        </div>
+        {!result && <p className="text-xs text-slate-500">Run the check below to enable reports.</p>}
+      </div>}
+      {activeTab === 'evidence' && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 mb-4">
+        <div className="text-xs text-slate-600">The evidence appendix includes discovery, domain results, every finding, affected activities, and available supporting evidence.</div>
+        <button disabled={!result} onClick={() => setReportKind('complete')} className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200 disabled:opacity-40">Full Evidence Appendix</button>
+      </div>}
+      {activeTab === 'evidence' && <ProjectDiscoveryPanel discovery={discovery} />}
+      {/* Review purpose + perspective + run */}
+      {activeTab === 'actions' && <div className="rounded-2xl border border-slate-200 bg-white p-4 mb-4">
+        <div className="grid grid-cols-1 xl:grid-cols-[240px_1fr_auto] gap-4 items-end">
+          <label>
+            <span className="block text-[10px] font-extrabold uppercase tracking-wide text-slate-500 mb-1.5">Review purpose</span>
+            <select value={reviewPurpose} onChange={e => setReviewPurpose(e.target.value as ReviewPurpose)} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-[12px] font-bold text-slate-800 outline-none focus:border-blue-500">
+              {REVIEW_PURPOSES.map(purpose => <option key={purpose.value} value={purpose.value}>{purpose.label}</option>)}
+            </select>
+          </label>
+          <div>
+            <div className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500 mb-1.5">Review perspective</div>
+            <div className="flex flex-wrap gap-2">
+              <ModeButton active={mode === 'PRE_SUBMISSION'} onClick={() => { setMode('PRE_SUBMISSION') }}
+                title="Contractor" sub="Is it ready to submit?" />
+              <ModeButton active={mode === 'REVIEWER'} onClick={() => { setMode('REVIEWER') }}
+                title="Owner / Reviewer" sub="Is it ready to approve?" />
+            </div>
+          </div>
+          <button onClick={runCheck} disabled={running}
+            className="text-white text-[13px] font-bold px-5 py-2.5 rounded-lg disabled:opacity-60" style={{ background: COLORS.blue }}>
+            {running
+              ? 'Running…'
+              : reviewPurpose === 'VERSION_COMPARISON'
+                ? 'Open Comparison'
+                : reviewPurpose === 'TIME_IMPACT_ANALYSIS'
+                  ? 'Open TIA Workspace'
+                  : result
+                    ? 'Re-run Review'
+                    : 'Run Schedule Review'}
+          </button>
+        </div>
+      </div>}
+
+      {activeTab === 'actions' && !result && !running && (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
           <div className="text-2xl mb-2">☝️</div>
-          <div className="text-[13px] font-bold" style={{ color: COLORS.ink }}>Choose a mode and run the check</div>
-          <div className="text-[11px] text-slate-500 mt-1">Control Lens will score the schedule and surface what requires attention. The result stays here when you leave and return.</div>
+          <div className="text-[13px] font-bold" style={{ color: COLORS.ink }}>Choose the review purpose and perspective</div>
+          <div className="text-[11px] text-slate-500 mt-1">Control Lens will review this selected version and surface what requires attention. The result stays with this version when you leave and return.</div>
         </div>
       )}
 
-      {running && !result && (
+      {activeTab === 'actions' && running && !result && (
         <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-[13px] text-slate-500">
           Running check…
         </div>
@@ -260,12 +495,12 @@ export default function ApprovalReadinessPage() {
       {result && (
         <>
           {/* Reviewer-first decision summary. The status leads; the score supports. */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4 print:break-inside-avoid">
+          {activeTab === 'actions' && <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4 print:break-inside-avoid">
             <div className="flex flex-wrap items-start gap-5">
               <div className="flex-1 min-w-[320px]">
                 <div className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-slate-500 mb-1">Control Lens Readiness Status</div>
                 <div className="text-[24px] md:text-[28px] font-black leading-tight" style={{ color: readinessColor(result.readinessStatus) }}>
-                  {result.readinessLabel || result.recommendation}
+                  {contextualReadinessLabel(result, mode)}
                 </div>
                 <div className="text-[12px] text-slate-600 leading-relaxed mt-2 max-w-[720px]">
                   {result.readinessReason || 'Control Lens combines schedule logic, sequencing, path credibility and readiness evidence. The authorized reviewer makes the final approval decision.'}
@@ -292,22 +527,16 @@ export default function ApprovalReadinessPage() {
                   <div className="text-[13px] font-extrabold mt-1" style={{ color: gradeColor(result.grade) }}>{result.grade}</div>
                   <div className="text-[8.5px] text-slate-400 mt-1">supporting indicator</div>
                 </div>
-                <div className="flex flex-col gap-2">
-                  <button onClick={() => setReportKind('executive')}
-                    className="text-[11px] font-bold px-3 py-2 rounded-lg text-white" style={{ background: COLORS.ink }}>
-                    📄 Executive Report
-                  </button>
-                  <button onClick={() => setReportKind('complete')}
-                    className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">
-                    📑 Complete Review
-                  </button>
-                </div>
               </div>
             </div>
-          </div>
+          </div>}
+
+          {activeTab === 'evidence' && <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 mb-4 text-[11px] text-slate-600 leading-relaxed">
+            <b className="text-slate-800">Technical evidence view.</b> Discovery describes the submitted XER and helps organize review; it does not establish compliance or approval. The selected reference scaffolds are evidence-led review aids and do not yet alter the approval checks or score.
+          </div>}
 
           {/* What Control Lens understands about the submitted work */}
-          {result.projectUnderstanding && (
+          {activeTab === 'evidence' && result.projectUnderstanding && (
             <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
               <div className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-blue-600 mb-1">Project Understanding / Nature of Work</div>
               <div className="text-[18px] font-black leading-snug" style={{ color: COLORS.ink }}>{result.projectUnderstanding.projectNature}</div>
@@ -331,7 +560,7 @@ export default function ApprovalReadinessPage() {
           )}
 
           {/* Path credibility is now a first-class approval question. */}
-          {result.pathReview && (
+          {activeTab === 'evidence' && result.pathReview && (
             <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
               <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-700 mb-1">Control Path Credibility</div>
               <div className="text-[11px] text-slate-500 mb-3">Control Lens evaluates whether the submitted XER represents the work that should actually control completion. This is engineering schedule review — not a silent P6 CPM recalculation.</div>
@@ -353,39 +582,51 @@ export default function ApprovalReadinessPage() {
             </div>
           )}
 
-          {/* Priority findings — what the reviewer should read first. */}
-          {(() => {
-            const priority = result.findings.filter(f => approvalKind(f) === 'FINDING' && (f.criticalGate || f.severity >= 4)).slice(0, 5)
-            if (!priority.length) return null
-            return (
-              <div className="rounded-2xl border border-red-200 bg-red-50/30 p-5 mb-4">
-                <div className="flex items-end justify-between gap-3 mb-3">
+          {/* Contractor-facing disposition groups. Evidence stays attached to each observation. */}
+          {activeTab === 'actions' && (() => {
+            const { corrections, clarifications } = buildActionGroups(result)
+            const recommendations = result.findings.filter(f => approvalKind(f) === 'RECOMMENDATION')
+            return <div className="space-y-4">
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <div className="text-[11px] font-extrabold uppercase tracking-wide text-red-700">Priority Review</div>
-                    <div className="text-[11px] text-slate-500 mt-0.5">Read these first. Detailed evidence remains below.</div>
+                    <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-700">Review Disposition</div>
+                    <div className="text-[11px] text-slate-500 mt-1">Work through these grouped actions instead of reviewing every activity one by one. Expand a group only when you need the supporting observations and trace links.</div>
                   </div>
-                  <div className="text-[11px] font-bold text-red-700">{priority.length} material item{priority.length === 1 ? '' : 's'}</div>
+                  <div className="flex gap-2">
+                    <Chip label={`${corrections.length} correction group${corrections.length === 1 ? '' : 's'}`} color={corrections.length ? COLORS.red : COLORS.green} />
+                    <Chip label={`${clarifications.length} clarification group${clarifications.length === 1 ? '' : 's'}`} color={clarifications.length ? COLORS.amber : COLORS.green} />
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  {priority.map(f => (
-                    <button key={f.id} onClick={() => setExpanded(expanded === f.id ? null : f.id)} className="w-full text-left rounded-lg border border-red-100 bg-white px-3 py-3 hover:border-red-200">
-                      <div className="flex items-start gap-2">
-                        <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded bg-red-100 text-red-700 flex-shrink-0">{f.primaryDomain}</span>
-                        <div className="flex-1">
-                          <div className="text-[13px] font-extrabold leading-snug" style={{ color: COLORS.ink }}>{findingTitle(f)}</div>
-                          <div className="text-[11px] text-slate-600 leading-relaxed mt-1">{f.whatFound}</div>
-                        </div>
-                        <span className="text-[10px] text-slate-400 flex-shrink-0">View detail ›</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
+                {result.counts.major > 0 && <p className="mt-3 rounded-lg bg-amber-50 border border-amber-200 p-3 text-[10px] text-amber-900">The current score and readiness wording are provisional pending calibration. Use the dispositions and underlying evidence—not the numeric score alone—for the authorized review decision.</p>}
               </div>
-            )
+
+              <section className="rounded-2xl border border-red-200 bg-red-50/20 p-5">
+                <div className="flex items-end justify-between gap-3 mb-3">
+                  <div><h2 className="text-[13px] font-extrabold text-red-800">Corrections required</h2><p className="text-[11px] text-slate-500">Required or gate-related conditions to resolve before disposition.</p></div>
+                  <span className="text-[11px] font-bold text-red-700">{corrections.reduce((n, g) => n + g.findings.length, 0)} observations</span>
+                </div>
+                {corrections.length ? <div className="space-y-2">{corrections.map(g => <ActionGroupCard key={g.id} group={g} mode={mode} />)}</div> : <p className="text-[12px] text-slate-500 italic">No correction groups detected by the current checks.</p>}
+              </section>
+
+              <section className="rounded-2xl border border-amber-200 bg-amber-50/20 p-5">
+                <div className="flex items-end justify-between gap-3 mb-3">
+                  <div><h2 className="text-[13px] font-extrabold text-amber-800">Clarifications needed</h2><p className="text-[11px] text-slate-500">Verify the evidence, explain legitimate conditions, or correct the schedule where appropriate.</p></div>
+                  <span className="text-[11px] font-bold text-amber-700">{clarifications.reduce((n, g) => n + g.findings.length, 0)} observations</span>
+                </div>
+                {clarifications.length ? <div className="space-y-2">{clarifications.map(g => <ActionGroupCard key={g.id} group={g} mode={mode} />)}</div> : <p className="text-[12px] text-slate-500 italic">No clarification groups detected by the current checks.</p>}
+              </section>
+
+              {recommendations.length > 0 && <section className="rounded-2xl border border-blue-200 bg-blue-50/20 p-5">
+                <h2 className="text-[13px] font-extrabold text-blue-800">Optional Control Lens recommendations</h2>
+                <p className="text-[11px] text-slate-500 mt-1 mb-3">{recommendations.length} non-scoring suggestion{recommendations.length === 1 ? '' : 's'}; not contractual unless governing requirements say otherwise.</p>
+                <div className="space-y-2">{recommendations.map(f => <FindingRow key={f.id} f={f} mode={mode} open={expanded === f.id} onToggle={() => setExpanded(expanded === f.id ? null : f.id)} />)}</div>
+              </section>}
+            </div>
           })()}
 
           {/* Domain scores */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
+          {activeTab === 'evidence' && <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
             <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-700 mb-3">Approval Domains</div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-2">
               {result.domains.map(d => {
@@ -408,10 +649,10 @@ export default function ApprovalReadinessPage() {
                 )
               })}
             </div>
-          </div>
+          </div>}
 
           {/* Findings and non-scoring Control Lens recommendations */}
-          {(() => {
+          {activeTab === 'evidence' && (() => {
             const scoringFindings = result.findings.filter(f => approvalKind(f) === 'FINDING')
             const recommendations = result.findings.filter(f => approvalKind(f) === 'RECOMMENDATION')
             return (
@@ -545,7 +786,7 @@ function Chip({ label, color }: { label: string; color: string }) {
 // Save-as-PDF uses the browser print dialog; the dashboard layout hides the
 // sidebar on print, and the toolbar below is print-hidden.
 // =============================================================================
-function ApprovalReport({ result, mode, kind, project, discovery, onBack }: {
+export function ApprovalReport({ result, mode, kind, project, discovery, onBack }: {
   result: ApprovalReadinessResult
   mode: ApprovalMode
   kind: 'executive' | 'complete'
@@ -560,20 +801,14 @@ function ApprovalReport({ result, mode, kind, project, discovery, onBack }: {
   const voice = mode === 'PRE_SUBMISSION' ? 'Pre-Submission Check (Contractor)' : 'Reviewer Check (Owner / PM)'
   const gc = gradeColor(result.grade)
 
-  // Report title is hardcoded by WHO is running it:
-  //   Reviewer (owner)      → "Owner's Review Report"
-  //   Pre-Submission (GC)   → "Readiness Report — Before Submission"
-  const reportTitle = mode === 'REVIEWER'
-    ? "Owner's Review Report"
-    : 'Readiness Report — Before Submission'
-  const docKind = kind === 'executive' ? 'Executive Summary' : 'Complete Schedule Control Review'
+  const reportTitle = kind === 'executive'
+    ? (mode === 'REVIEWER' ? 'Owner Action Report' : 'Contractor Action Report')
+    : 'Schedule Review Evidence Appendix'
+  const docKind = kind === 'executive' ? 'Required Corrections and Clarifications' : 'Complete Scope, Findings and Technical Evidence'
 
-  // executive = critical + major only; complete = everything
   const reportFindings = result.findings.filter(f => approvalKind(f) === 'FINDING')
   const reportRecommendations = result.findings.filter(f => approvalKind(f) === 'RECOMMENDATION')
-  const shown = kind === 'executive'
-    ? reportFindings.filter(f => f.criticalGate || f.severity >= 3)
-    : reportFindings
+  const actionGroups = buildActionGroups(result)
 
   return (
     <div className="ar-print-root flex flex-col h-full">
@@ -636,14 +871,7 @@ function ApprovalReport({ result, mode, kind, project, discovery, onBack }: {
           </div>
 
           {/* project strip */}
-          {discovery && <section className="border rounded-lg p-3 mb-4 text-xs">
-            <h2 className="font-bold mb-2">Project Discovery — U.S. scope (non-scoring)</h2>
-            <p>{discovery.archetype.label} ({discovery.archetype.confidence}) · {discovery.ownerOverlay.label} ({discovery.ownerOverlay.confidence}) · {discovery.projectCondition.label} ({discovery.projectCondition.confidence})</p>
-            <p className="mt-1">Buildings / areas: {discovery.locations.map(x => x.label).join('; ') || 'Not identified'}</p>
-            <p className="mt-1">Systems: {discovery.systems.map(x => discoveryLabel(x.label)).join('; ') || 'Not identified'}</p>
-            <p className="mt-1">Reference scaffolds: {discovery.applicableScaffolds.map(x => x.label).join('; ')}. Applicability requires review.</p>
-            {discovery.unresolved.map((x, i) => <p key={i} className="mt-1">Unresolved: {x}</p>)}
-          </section>}
+          {kind === 'complete' && <ProjectDiscoveryPanel discovery={discovery} expanded />}
           <div className="grid grid-cols-3 gap-6 mb-5">
             <Info label="Project" value={project?.name || '—'} />
             <Info label="Project Code" value={project?.projectId || '—'} mono />
@@ -680,7 +908,7 @@ function ApprovalReport({ result, mode, kind, project, discovery, onBack }: {
             </div>
           </div>
 
-          {(result.projectUnderstanding || result.pathReview) && (
+          {kind === 'complete' && (result.projectUnderstanding || result.pathReview) && (
             <>
               <SectionBar>Engineering Readiness Snapshot</SectionBar>
               <div className="border border-slate-200 rounded-lg p-3 mb-5 print:break-inside-avoid">
@@ -716,6 +944,7 @@ function ApprovalReport({ result, mode, kind, project, discovery, onBack }: {
           )}
 
           {/* domain table */}
+          {kind === 'complete' && <>
           <SectionBar>Approval Domains</SectionBar>
           <table className="w-full text-[11px] mb-5 print:break-inside-avoid">
             <thead>
@@ -740,12 +969,35 @@ function ApprovalReport({ result, mode, kind, project, discovery, onBack }: {
               })}
             </tbody>
           </table>
+          </>}
 
-          {/* ── Findings ─────────────────────────────────────────────── */}
-          <SectionBar>{kind === 'executive' ? 'Material Findings' : 'All Findings — Detail & Evidence'}</SectionBar>
-          {shown.length === 0 ? (
+          {kind === 'executive' && <>
+            <SectionBar>Required Actions</SectionBar>
+            <div className="text-[10px] text-slate-500 mb-3">Observations are grouped only by corrective workflow. Grouping does not imply a shared root cause; the complete appendix preserves each observation’s evidence.</div>
+            {([
+              { label: 'Corrections required', groups: actionGroups.corrections, color: COLORS.red },
+              { label: 'Clarifications needed', groups: actionGroups.clarifications, color: COLORS.amber },
+            ] as const).map(section => <div key={section.label} className="mb-5">
+              <div className="text-[12px] font-extrabold mb-2" style={{ color: section.color }}>{section.label}</div>
+              {section.groups.length === 0 ? <div className="text-[11px] text-slate-500 italic">None detected by the current checks.</div> : section.groups.map(group => <div key={group.id} className="mb-3 rounded-lg border border-slate-200 p-3 print:break-inside-avoid">
+                <div className="flex items-start gap-2">
+                  <span className="font-mono text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${section.color}18`, color: section.color }}>{group.id}</span>
+                  <div className="flex-1"><div className="text-[12px] font-extrabold" style={{ color: COLORS.ink }}>{group.title}</div><div className="text-[9.5px] text-slate-500 mt-0.5">{group.findings.length} observations · {group.affectedCount} affected activities</div></div>
+                </div>
+                <div className="grid grid-cols-3 gap-3 mt-2 text-[10px]">
+                  <div><b>Why:</b> {group.why}</div><div><b>Action:</b> {group.action}</div><div><b>Acceptance:</b> {group.acceptance}</div>
+                </div>
+                <div className="mt-2 text-[9.5px] text-slate-600">{group.findings.map(f => `${f.id} — ${findingTitle(f)}`).join(' · ')}</div>
+              </div>)}
+            </div>)}
+          </>}
+
+          {/* ── Complete findings and technical evidence ─────────────── */}
+          {kind === 'complete' && <>
+          <SectionBar>All Findings — Detail &amp; Evidence</SectionBar>
+          {reportFindings.length === 0 ? (
             <div className="text-[12px] text-slate-500 italic py-3">No material findings.</div>
-          ) : shown.map(f => (
+          ) : reportFindings.map(f => (
             <div key={f.id} className="mb-4 border border-slate-200 rounded-lg overflow-hidden print:break-inside-avoid">
               <div className="px-3 py-2 border-b border-slate-200 flex items-center gap-2" style={{ background: '#f8fafc' }}>
                 <span className="font-mono text-[10px] font-bold text-white px-1.5 py-0.5 rounded" style={{ background: COLORS.ink }}>{f.id}</span>
@@ -759,8 +1011,8 @@ function ApprovalReport({ result, mode, kind, project, discovery, onBack }: {
                 <Memo label={mode === 'PRE_SUBMISSION' ? 'Pre-Submission Note' : 'Reviewer Check'}>
                   {mode === 'PRE_SUBMISSION' ? f.preSubmissionNote : f.reviewerCheck}
                 </Memo>
-                {kind === 'complete' && <Memo label="Reference">{f.referenceRequirement}</Memo>}
-                {kind === 'complete' && f.affectedActivities.length > 0 && (
+                <Memo label="Reference">{f.referenceRequirement}</Memo>
+                {f.affectedActivities.length > 0 && (
                   <>
                     <div className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500 mb-1 mt-2">Affected activities</div>
                     <table className="w-full text-[10.5px]">
@@ -776,14 +1028,10 @@ function ApprovalReport({ result, mode, kind, project, discovery, onBack }: {
                     </table>
                   </>
                 )}
-                {kind === 'executive' && f.affectedActivities.length > 0 && (
-                  <div className="text-[10px] text-slate-500 mt-1">
-                    {f.affectedActivities.length} affected activit{f.affectedActivities.length === 1 ? 'y' : 'ies'} — see Complete Review for full evidence.
-                  </div>
-                )}
               </div>
             </div>
           ))}
+          </>}
 
           {reportRecommendations.length > 0 && (
             <>
@@ -860,9 +1108,13 @@ function Memo({ label, children }: { label: string; children: React.ReactNode })
 function Shell({ children, project }: { children: React.ReactNode; project?: any }) {
   return (
     <div className="flex flex-col h-full">
-      <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center flex-shrink-0 no-print">
+      <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0 no-print">
+        <Link href="/dashboard" className="text-xs font-bold text-blue-600 hover:text-blue-800 whitespace-nowrap">
+          ← Back to Overview
+        </Link>
+        <div className="h-6 border-l border-slate-200" />
         <div>
-          <span className="font-bold text-slate-900 text-base">Approval Readiness</span>
+          <span className="font-bold text-slate-900 text-base">Review Schedule</span>
           <span className="text-slate-400 text-sm ml-2">{project ? `· ${project.name}` : ''}</span>
         </div>
         <span className="ml-auto text-[11px] text-slate-400 italic">Check before you submit · Verify before you approve</span>
