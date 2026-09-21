@@ -427,6 +427,7 @@ export default function Sidebar({ user }: SidebarProps) {
   const allViews = activeProject ? [
     // PROJECT — orient first, then package/export results.
     { href: '/dashboard', icon: '⊞', label: 'Project Overview', group: 'PROJECT', requires: 'view' as const },
+    { href: '/dashboard/project-setup', icon: '⚙', label: 'Project Control Basis', group: 'PROJECT', requires: 'view' as const },
     { href: '/dashboard/reports', icon: '📄', label: 'Reports', group: 'PROJECT', requires: 'view' as const },
 
     // SCHEDULE REVIEW — working analysis views.
