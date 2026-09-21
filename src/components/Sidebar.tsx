@@ -1,4 +1,6 @@
 'use client'
+// CONTROL_LENS_PROJECT_NAV_V2
+// Simplified project navigation: five direct destinations only.
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
@@ -418,35 +420,17 @@ export default function Sidebar({ user }: SidebarProps) {
   function fmtSnap(d?: string): string {
     return formatDisplayDate(d)
   }
-  // Per-project views — order is what the user sees in the sidebar.
-  // v13: Earned Value link added between Schedule Analysis and Risks & Issues.
-  // Page lives at /dashboard/evm (standalone, not a tab inside Lens).
-  //
-  // Phase 3D — Viewer lockdown: EVM, Trend, TIA, and Upload are hidden for
-  // Viewers (read-only role). Lens (Schedule Analysis) stays — it's view-only.
+  // Per-project navigation intentionally exposes only the five workspaces that
+  // answer the user's real questions. Detailed tools remain available inside
+  // Review Schedule, Project Controls, Reports, and Schedules & Versions.
+  // Workspace-level navigation (Enterprise, Archive, Deleted, Settings,
+  // Portfolio) remains separate and unchanged below.
   const allViews = activeProject ? [
-    // PROJECT — orient first, then package/export results.
-    { href: '/dashboard', icon: '⊞', label: 'Project Overview', group: 'PROJECT', requires: 'view' as const },
-    { href: '/dashboard/project-setup', icon: '⚙', label: 'Project Control Basis', group: 'PROJECT', requires: 'view' as const },
-    { href: '/dashboard/reports', icon: '📄', label: 'Reports', group: 'PROJECT', requires: 'view' as const },
-
-    // SCHEDULE REVIEW — working analysis views.
-    { href: '/dashboard/lens', icon: '🔍', label: 'Schedule Analysis', group: 'SCHEDULE REVIEW', requires: 'view' as const },
-    { href: '/dashboard/trace', icon: '🧭', label: 'Logic Trace', group: 'SCHEDULE REVIEW', requires: 'view' as const },
-    { href: '/dashboard/approval', icon: '✅', label: 'Approval Readiness', group: 'SCHEDULE REVIEW', requires: 'view' as const },
-
-    // PROJECT CONTROLS — schedule-focused controls only. RFIs and Change Orders
-    // intentionally remain out of the primary rail; their legacy routes/data are
-    // preserved so this navigation change is non-destructive.
-    { href: '/dashboard/risks', icon: '⚠', label: 'Risks & Issues', group: 'PROJECT CONTROLS', requires: 'view' as const },
-    { href: '/dashboard/procurement', icon: '🚚', label: 'Procurement', group: 'PROJECT CONTROLS', requires: 'view' as const },
-    { href: '/dashboard/submittals', icon: '📋', label: 'Submittals', group: 'PROJECT CONTROLS', requires: 'view' as const },
-    { href: '/dashboard/evm', icon: '💰', label: 'Performance & EVM', group: 'PROJECT CONTROLS', requires: 'advanced' as const },
-    { href: '/dashboard/trend', icon: '📈', label: 'Schedule Trends', group: 'PROJECT CONTROLS', requires: 'advanced' as const },
-    { href: '/dashboard/tia', icon: '📑', label: 'Time Impact Analysis', group: 'PROJECT CONTROLS', requires: 'advanced' as const },
-
-    // SCHEDULE — data/version administration stays last.
-    { href: '/dashboard/upload', icon: '⬆', label: 'Upload Schedule', group: 'SCHEDULE', requires: 'upload' as const },
+    { href: '/dashboard', icon: '⊞', label: 'Overview', group: 'PROJECT WORKSPACE', requires: 'view' as const },
+    { href: '/dashboard/approval', icon: '✅', label: 'Review Schedule', group: 'PROJECT WORKSPACE', requires: 'view' as const },
+    { href: '/dashboard/controls', icon: '⚙', label: 'Project Controls', group: 'PROJECT WORKSPACE', requires: 'view' as const },
+    { href: '/dashboard/reports', icon: '📄', label: 'Reports', group: 'PROJECT WORKSPACE', requires: 'view' as const },
+    { href: '/dashboard/projects', icon: '▤', label: 'Schedules & Versions', group: 'PROJECT WORKSPACE', requires: 'view' as const },
   ] : []
   const views = allViews.filter(v => {
     if (v.requires === 'advanced') return perms.can.runAdvancedAnalytics
@@ -973,41 +957,41 @@ export default function Sidebar({ user }: SidebarProps) {
                     })
                   }
                 </div>
-                {/* Day 10 — inline Views section. Only renders for the active
-                    project (views are version-context-dependent). Shows the
-                    active version label in the header so PMs never lose
-                    context. Replaces the bottom standalone Views panel. */}
+                {/* CONTROL_LENS_PROJECT_NAV_V2 — one compact project menu.
+                    Project/version selection remains above. Detailed tools
+                    are reached from the five destinations below. */}
                 {isActive && (
-                  <div className="ml-5 pl-2 border-l border-white/5 mt-1.5 mb-1">
-                    <div className="text-white/30 text-[9px] uppercase tracking-widest px-2 py-1 truncate"
-                      title={activeVersion?.versionLabel || 'No version selected'}>
-                      Project {activeVersion?.versionLabel ? `· ${activeVersion.versionLabel}` : ''}
+                  <div className="ml-5 pl-2 border-l border-white/10 mt-2 mb-2">
+                    <div className="px-2 pt-1.5 pb-1">
+                      <div className="text-white/45 text-[9px] font-bold uppercase tracking-[0.14em]">
+                        Project Workspace
+                      </div>
+                      <div
+                        className="text-white/30 text-[9px] truncate mt-0.5"
+                        title={activeVersion?.versionLabel || 'No version selected'}
+                      >
+                        {activeVersion?.versionLabel
+                          ? `Selected: ${activeVersion.versionLabel}`
+                          : 'No schedule version selected'}
+                      </div>
                     </div>
-                    {views.map((item, idx) => {
+                    {views.map((item) => {
                       // Keep Reports highlighted while the user is inside any
                       // /dashboard/reports/* child page. Dashboard root remains exact.
                       const active = item.href === '/dashboard'
                         ? pathname === item.href
                         : pathname === item.href || pathname.startsWith(item.href + '/')
-                      const showGroup = idx === 0 || views[idx - 1]?.group !== item.group
                       return (
-                        <div key={item.href}>
-                          {showGroup && (
-                            <div className="text-white/25 text-[8px] font-bold uppercase tracking-[0.14em] px-2 pt-2 pb-0.5">
-                              {item.group}
-                            </div>
-                          )}
-                          <Link href={item.href}
-                            className={clsx(
-                              'flex items-center gap-2.5 px-2 py-1 rounded text-[11px] font-medium border-l-2 my-0.5',
-                              active
-                                ? 'bg-blue-600/20 text-white border-blue-500'
-                                : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
-                            )}>
-                            <span className="text-sm w-4 text-center">{item.icon}</span>
-                            <span className="flex-1">{item.label}</span>
-                          </Link>
-                        </div>
+                        <Link key={item.href} href={item.href}
+                          className={clsx(
+                            'flex items-center gap-2.5 px-2 py-1.5 rounded text-[11px] font-medium border-l-2 my-0.5',
+                            active
+                              ? 'bg-blue-600/25 text-white border-blue-400'
+                              : 'text-slate-300 border-transparent hover:text-white hover:bg-white/5'
+                          )}>
+                          <span className="text-sm w-4 text-center">{item.icon}</span>
+                          <span className="flex-1">{item.label}</span>
+                        </Link>
                       )
                     })}
                   </div>
