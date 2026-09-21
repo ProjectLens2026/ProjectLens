@@ -432,11 +432,9 @@ export default function Sidebar({ user }: SidebarProps) {
     { href: '/dashboard/reports', icon: '📄', label: 'Reports', group: 'PROJECT WORKSPACE', requires: 'view' as const },
     { href: '/dashboard/projects', icon: '▤', label: 'Schedules & Versions', group: 'PROJECT WORKSPACE', requires: 'view' as const },
   ] : []
-  const views = allViews.filter(v => {
-    if (v.requires === 'advanced') return perms.can.runAdvancedAnalytics
-    if (v.requires === 'upload') return perms.can.uploadSchedule
-    return true  // 'view' is open to everyone with project access
-  })
+  // All five destinations are available to anyone who can view the active
+  // project. Permission checks remain inside the destination pages/actions.
+  const views = allViews
   const isEnterpriseActive = pathname.startsWith('/dashboard/enterprise')
   const isArchiveActive = pathname.startsWith('/dashboard/archive')
   const isDeletedActive = pathname.startsWith('/dashboard/deleted')
