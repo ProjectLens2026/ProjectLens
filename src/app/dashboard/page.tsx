@@ -177,7 +177,10 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   const contractEnd = manualOriginalCompletion
     || a.contractEnd || a.contract_end || a.contractFinish || a.contract_finish || a.contractCompletion
 
-  const projectedEnd = a.projectedEnd || a.projected_end || a.forecastFinish || a.forecast_finish || a.projectedFinish || contractEnd
+  // Forecast must come from the selected XER analysis. Never substitute the
+  // contract completion date, because that would manufacture an on-time
+  // forecast when the schedule provides no usable projected finish.
+  const projectedEnd = a.projectedEnd || a.projected_end || a.forecastFinish || a.forecast_finish || a.projectedFinish
   const finalCompletion = a.finalCompletion || a.final_completion || a.projectFinish || a.project_finish || a.finalComp || findMilestoneDate(finalMilestoneObj) || projectedEnd
   const substantialCompletion = a.substantialCompletion || a.substantial_completion || a.substComp || a.subComp || a.substantialComp || a.substCompletion || findMilestoneDate(substMilestoneObj)
 
@@ -402,26 +405,71 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   const velocityPerMonth = chartData.velocityPerMonth
   const requiredVelocity = chartData.requiredVelocityToHitContract
 
+  // Overview V2 — project position must be explicit and evidence-led.
+  const authorizedCompletion = revisedContractCompletion || contractEnd
+  const contractBasisComplete = Boolean(manualNtp && manualOriginalCompletion)
+  const storedReview = version.approvalResult as any | undefined
+  const reviewStatus = storedReview
+    ? (storedReview.readinessLabel || storedReview.recommendation || storedReview.readinessStatus || 'Review completed')
+    : 'Not reviewed'
+  const reviewNeedsCorrection = storedReview
+    ? storedReview.readinessStatus === 'NOT_READY' || storedReview.readinessStatus === 'REVIEW_REQUIRED' || storedReview.criticalGates?.passed === false
+    : false
+  const positionLabel = !contractBasisComplete
+    ? 'Contract basis incomplete'
+    : !projectedEnd
+      ? 'Forecast unavailable'
+      : daysBehindNum > 0
+        ? `${daysBehindNum} calendar days behind`
+        : daysBehindNum < 0
+          ? `${Math.abs(daysBehindNum)} calendar days ahead`
+          : 'Forecast matches authorized completion'
+  const positionTone = !contractBasisComplete || !projectedEnd
+    ? 'amber'
+    : daysBehindNum > 0
+      ? 'red'
+      : 'green'
+  const scheduleTypeLabel = String(version.scheduleType || 'schedule').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+
+  const overviewConcerns: Array<{ title: string; detail: string; tone: 'red' | 'amber' | 'slate' }> = []
+  if (!contractBasisComplete) overviewConcerns.push({
+    title: 'Complete the project control basis',
+    detail: 'Confirm the contractual start and original completion before relying on delay or approval conclusions.',
+    tone: 'amber',
+  })
+  if (contractBasisComplete && daysBehindNum > 0) overviewConcerns.push({
+    title: `Forecast is ${daysBehindNum} days beyond the authorized completion`,
+    detail: 'Review the controlling path and determine whether recovery action or a formal time-impact review is required.',
+    tone: 'red',
+  })
+  if (risksCritical > 0) overviewConcerns.push({
+    title: `${risksCritical} critical risk categor${risksCritical === 1 ? 'y' : 'ies'} detected`,
+    detail: 'Open the schedule review to see the required corrections and supporting evidence.',
+    tone: 'red',
+  })
+  if (longLeadAtRisk > 0) overviewConcerns.push({
+    title: `${longLeadAtRisk} long-lead item${longLeadAtRisk === 1 ? '' : 's'} at risk`,
+    detail: 'Procurement items with 14 days of float or less may threaten the forecast path.',
+    tone: 'amber',
+  })
+  if (!storedReview) overviewConcerns.push({
+    title: 'This version has not been reviewed',
+    detail: 'Choose the review purpose and perspective before making a submission or approval decision.',
+    tone: 'slate',
+  })
+
   return (
     <div className="flex flex-col h-full bg-slate-50 overflow-y-auto">
-      {/* Header bar */}
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center justify-between flex-shrink-0">
         <div>
-          <span className="font-bold text-slate-900 text-base">Executive Dashboard</span>
-          <span className="text-slate-400 text-sm ml-2">· {project.name}{project.projectId ? ` · ${project.projectId}` : ''} · {xerFile}</span>
+          <span className="font-bold text-slate-900 text-base">Overview</span>
+          <span className="text-slate-400 text-sm ml-2">· {project.name}{project.projectId ? ` · ${project.projectId}` : ''}</span>
         </div>
         <div className="flex items-center gap-2 print:hidden">
-          <span className="text-xs text-slate-400">Last updated: {lastUpdated}</span>
-          <Link href="/dashboard/lens" className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded-md flex items-center gap-1.5">
-            🔍 Full Analysis
+          <span className="text-xs text-slate-400">{version.versionLabel || xerFile}</span>
+          <Link href="/dashboard/approval" className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded-md">
+            Review Schedule
           </Link>
-          <button
-            type="button"
-            onClick={() => window.print()}
-            title="Print or save as PDF"
-            className="bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 text-xs font-semibold px-3 py-1.5 rounded-md flex items-center gap-1.5">
-            🖨 Print / Save PDF
-          </button>
           <Link href="/dashboard/upload" className="bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 text-xs font-semibold px-3 py-1.5 rounded-md flex items-center gap-1.5">
             + Upload Schedule
           </Link>
@@ -429,294 +477,133 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
       </div>
 
       <div className="p-6 max-w-7xl mx-auto w-full space-y-4">
-
-        {/* SECTION 1: Health Status banner */}
-        <HealthBanner score={healthScore} label={healthLabel} narrative={healthNarrative} />
-
-        {/* SECTION 2: Key Dates & Durations */}
-        <Card>
-          <SectionTitle>Key Dates & Durations</SectionTitle>
-
-          {/* Manual contract dates row — 4 cells */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-            <DateCell
-              label="NTP / Contract Start"
-              value={fmtDate(projectStart)}
-              sub={manualNtp ? 'Entered manually' : 'From XER'} />
-            <DateCell
-              label="Original Contract Completion"
-              value={fmtDate(contractEnd)}
-              sub={manualOriginalCompletion ? 'Entered manually' : 'From XER'}
-              highlightColor="red" />
-            <DateCell
-              label="Revised Contract Completion"
-              value={fmtDate(revisedContractCompletion)}
-              sub={
-                manualRevisedCompletion ? 'Override (manual)' :
-                timeExtensionDays > 0 ? `Original + ${timeExtensionDays}d` :
-                'No time extension'
-              }
-              highlightColor="amber" />
-            <DateCell
-              label="Substantial — Manual"
-              value={fmtDate(manualSubstantialCompletion)}
-              sub={manualSubstantialCompletion ? 'Per contract' : 'Add via Upload → Contract Dates'} />
-          </div>
-
-          {/* XER-detected dates row — 4 cells */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-slate-100">
-            <DateCell
-              label="Data Date"
-              value={fmtDate(dataDate)}
-              sub={manualDataDate ? 'Manual entry' : 'From XER'} />
-            <DateCell
-              label="Substantial — XER"
-              value={fmtDate(substantialCompletion)}
-              sub={substMilestone ? `${substMilestone} · From XER` : 'Detected from XER'} />
-            <DateCell
-              label="Final Completion"
-              value={fmtDate(finalCompletion)}
-              sub={finalMilestone ? `${finalMilestone} · From XER` : 'Detected from XER'} />
-            <DateCell
-              label="Projected End"
-              value={fmtDate(projectedEnd)}
-              sub={daysBehindNum > 0 ? `+${daysBehindNum}d vs revised` : 'XER forecast'}
-              highlightColor={daysBehindNum > 0 ? 'amber' : undefined} />
-          </div>
-
-          {/* Durations row — 4 cells */}
-          <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-2 md:grid-cols-4 gap-4">
-            <DurationCell label="Original Duration" value={originalDuration} />
-            <DurationCell label="Revised Duration" value={revisedDuration} />
-            <DurationCell label="Remaining Duration" value={remainingDuration} />
-            <DurationCell label="Duration at Completion" value={durationAtCompletion} delta={daysBehindNum > 0 ? daysBehindNum : undefined} />
-          </div>
-        </Card>
-
-        {/* SECTION 3: KPI tiles */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <KPITile
-            href="/dashboard/tia"
-            label="Days Behind Contract"
-            value={!hasDaysBehind ? '—' : (daysBehindNum > 0 ? `+${daysBehindNum}` : String(daysBehindNum))}
-            sub={!hasDaysBehind ? 'Not yet computed' : (daysBehindNum > 0 ? '↓ TIA territory' : 'On contract')}
-            valueColor={!hasDaysBehind ? 'slate' : (daysBehindNum > 0 ? 'red' : 'green')}
-          />
-          <KPITile
-            href="/dashboard/lens"
-            label="Work Complete"
-            value={hasWorkComplete ? `${Math.round(workCompleteNum)}%` : '—'}
-            sub={
-              !hasWorkComplete ? 'No activity data' :
-              workCompleteIsTimeBased ? 'Time-based estimate' :
-              hasWorkCompleteBreakdown
-                ? (wcConstructionCount !== undefined
-                    ? `${wcCompletedAtThreshold!.toLocaleString()} of ${wcConstructionCount.toLocaleString()} construction (≥80%)`
-                    : `${wcCompletedAtThreshold!.toLocaleString()} of ${totalActivities.toLocaleString()} complete (≥80%)`)
-                : completedActivities !== undefined
-                  ? `${completedActivities.toLocaleString()} of ${totalActivities.toLocaleString()} activities`
-                  : totalActivities > 0 ? `${totalActivities.toLocaleString()} activities total` : 'Computed'
-            }
-            valueColor="slate"
-          />
-          <KPITile
-            href="/dashboard/procurement"
-            label="Long Lead at Risk"
-            value={String(longLeadAtRisk)}
-            sub={longLeadAtRisk === 0 ? `✓ none ≤14d float · ${longLeadTotal} total` : `≤14d float · ${longLeadTotal} total`}
-            valueColor={longLeadAtRisk === 0 ? 'green' : 'red'}
-          />
-          <RisksTile
-            all={risksAll}
-            critical={risksCritical}
-            high={risksHigh}
-            medium={risksMedium}
-          />
-        </div>
-
-        {/* WORK % CALCULATION EXPLAINER — Day 5, v3
-            Shows the math behind the Work Complete tile so PMs see what
-            drove the percentage. v3 makes the construction-only scope
-            explicit, and shows which activity categories were excluded
-            from the average. Hidden if breakdown data is unavailable
-            (legacy versions). */}
-        {hasWorkComplete && hasWorkCompleteBreakdown && (
-          <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 -mt-2 mb-2">
-            <div className="flex items-start gap-3">
-              <div className="text-[11px] font-bold text-slate-600 uppercase tracking-wider mt-0.5 whitespace-nowrap">
-                Work % calculation
-              </div>
-              <div className="flex-1 text-[12px] text-slate-700 leading-relaxed">
-                <span className="font-semibold text-slate-900">{wcCompletedAtThreshold!.toLocaleString()}</span> complete (≥80%, counted as 100%)
-                {' + '}
-                <span className="font-semibold text-slate-900">{wcInProgressCount!.toLocaleString()}</span> in-progress (avg <span className="font-semibold">{Math.round(wcInProgressAvgPct ?? 0)}%</span>)
-                {' + '}
-                <span className="font-semibold text-slate-900">{wcNotStartedCount!.toLocaleString()}</span> not started (0%)
-                {' = '}
-                <span className="font-semibold text-slate-900">{Math.round(workCompleteNum)}%</span> across{' '}
-                {wcConstructionCount !== undefined
-                  ? <><span className="font-semibold">{wcConstructionCount.toLocaleString()}</span> construction activities</>
-                  : <>{totalActivities.toLocaleString()} activities</>}
-                {wcExcludedCount !== undefined && wcExcludedCount > 0 && (
-                  <span className="block text-slate-500 mt-1">
-                    Excluded <span className="font-semibold text-slate-700">{wcExcludedCount.toLocaleString()}</span> non-construction activities:{' '}
-                    {wcExcludedMilestone !== undefined && wcExcludedMilestone > 0 && <>{wcExcludedMilestone} milestones · </>}
-                    {wcExcludedSubmittal !== undefined && wcExcludedSubmittal > 0 && <>{wcExcludedSubmittal} submittals · </>}
-                    {wcExcludedProcurement !== undefined && wcExcludedProcurement > 0 && <>{wcExcludedProcurement} procurement · </>}
-                    {wcExcludedDesign !== undefined && wcExcludedDesign > 0 && <>{wcExcludedDesign} design · </>}
-                    {wcExcludedCloseout !== undefined && wcExcludedCloseout > 0 && <>{wcExcludedCloseout} closeout</>}
-                  </span>
-                )}
-              </div>
+        <div className={clsx(
+          'rounded-xl border p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4',
+          positionTone === 'red' ? 'bg-red-50 border-red-200' :
+          positionTone === 'green' ? 'bg-emerald-50 border-emerald-200' :
+          'bg-amber-50 border-amber-200'
+        )}>
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Current contractual position</div>
+            <div className={clsx(
+              'text-2xl font-black mt-1',
+              positionTone === 'red' ? 'text-red-700' : positionTone === 'green' ? 'text-emerald-700' : 'text-amber-700'
+            )}>{positionLabel}</div>
+            <div className="text-xs text-slate-600 mt-1">
+              Authorized completion: <b>{fmtDate(authorizedCompletion)}</b> · Current XER forecast: <b>{fmtDate(projectedEnd)}</b>
             </div>
           </div>
-        )}
+          <div className="flex gap-2 flex-shrink-0">
+            {!contractBasisComplete && (
+              <Link href="/dashboard/project-setup" className="bg-white border border-amber-300 text-amber-800 text-xs font-bold px-3 py-2 rounded-lg hover:bg-amber-100">
+                Complete Project Basis
+              </Link>
+            )}
+            <Link href="/dashboard/approval" className="bg-slate-900 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-slate-800">
+              Review This Version →
+            </Link>
+          </div>
+        </div>
 
-        {/* SECTION 4: Schedule Progress chart */}
         <Card>
-          <div className="flex items-start justify-between mb-3">
+          <div className="flex items-center justify-between mb-4">
             <div>
-              <SectionTitle>Schedule Progress</SectionTitle>
-              <div className="text-[11px] text-slate-500 mt-0.5">
-                Last 2 months + forecast · Revised end <span className="text-red-600 font-semibold">{fmtDate(revisedContractCompletion || contractEnd)}</span>
-                {' · Projected '}<span className="text-amber-600 font-semibold">{fmtDate(projectedEnd)}{daysBehindNum > 0 ? ` (+${daysBehindNum}d)` : ''}</span>
-              </div>
+              <SectionTitle>Contract and Schedule Position</SectionTitle>
+              <div className="text-[11px] text-slate-500">Contract dates govern. XER dates show the contractor's current schedule position.</div>
             </div>
-            <ChartLegend />
+            <Link href="/dashboard/project-setup" className="text-xs font-semibold text-blue-600 hover:text-blue-800">Project Setup</Link>
           </div>
-          <ScheduleProgressChart data={chartData} />
-          {/* Bar/line description — v8. The KPI legend at the top names
-              the categories; this block explains WHAT each color represents
-              so the chart reads without having to interpret. Placed below
-              the chart so it doesn't compete with the title or pills above. */}
-          <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-x-5 gap-y-1.5 text-[11px] text-slate-600">
-            <div className="flex items-center gap-1.5">
-              <span className="inline-block w-3 h-3 bg-blue-600 rounded-sm flex-shrink-0"/>
-              <span><span className="font-semibold text-blue-900">Planned</span> — baseline cumulative % at this date</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="inline-block w-3 h-3 bg-emerald-600 rounded-sm flex-shrink-0"/>
-              <span><span className="font-semibold text-emerald-900">Actual</span> — verified progress to date</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="inline-block w-3 h-3 bg-amber-400 rounded-sm flex-shrink-0" style={{opacity: 0.85}}/>
-              <span><span className="font-semibold text-amber-900">Forecast</span> — projected progress after data date</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <svg width="20" height="6" viewBox="0 0 20 6"><line x1="0" y1="3" x2="20" y2="3" stroke="#b45309" strokeWidth="2" strokeDasharray="4,3"/></svg>
-              <span>Dashed line = forecast cumulative</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="inline-block px-1 text-[9px] font-bold text-red-700 bg-red-50 border border-red-300 rounded-sm" style={{lineHeight: '12px'}}>CONTRACT END</span>
-              <span>Revised contract completion</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="inline-block px-1 text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-300 rounded-sm" style={{lineHeight: '12px'}}>FORECAST END</span>
-              <span>Projected completion from XER</span>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3 pt-3 border-t border-slate-100">
-            <InsightCell
-              label={!hasWorkComplete ? 'Plan variance' : (behindByPts >= 0 ? 'Ahead of plan by' : 'Behind plan by')}
-              value={!hasWorkComplete ? '—' : `${behindByPts >= 0 ? '+' : ''}${behindByPts.toFixed(1)} percentage pts`}
-              color={!hasWorkComplete ? 'slate' : (behindByPts >= 0 ? 'green' : 'red')}
-            />
-            <InsightCell
-              label="Velocity (last 3 mo)"
-              value={!hasWorkComplete ? '—' : `~${velocityPerMonth.toFixed(1)}% / month`}
-              color="slate"
-            />
-            <InsightCell
-              label="Required velocity to hit contract"
-              value={!hasWorkComplete
-                ? '—'
-                : (requiredVelocity === Infinity ? '— (already past)' : `~${requiredVelocity.toFixed(1)}% / month`)}
-              color={!hasWorkComplete ? 'slate' : (requiredVelocity === Infinity || requiredVelocity > velocityPerMonth * 1.5 ? 'red' : 'slate')}
-            />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <DateCell label="Contract Start / NTP" value={fmtDate(projectStart)} sub={manualNtp ? 'Project basis' : 'XER fallback — confirm basis'} />
+            <DateCell label="Authorized Completion" value={fmtDate(authorizedCompletion)} sub={manualRevisedCompletion ? 'Approved/current basis' : timeExtensionDays > 0 ? `Original + ${timeExtensionDays} days` : 'Original contract basis'} highlightColor={daysBehindNum > 0 ? 'red' : undefined} />
+            <DateCell label="Current Forecast" value={fmtDate(projectedEnd)} sub="Selected XER version" highlightColor={daysBehindNum > 0 ? 'amber' : undefined} />
+            <DateCell label="Data Date" value={fmtDate(dataDate)} sub={manualDataDate ? 'Manual confirmation' : 'Selected XER version'} />
           </div>
         </Card>
 
-        {/* SECTION 5: Immediate Attention Areas */}
-        <div>
-          <div className="text-sm font-semibold text-slate-800 mb-2">Immediate Attention Areas</div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {attentionAreas.slice(0, 3).map((area, i) => (
-              <AttentionAreaCard key={i} area={area} />
-            ))}
-          </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Card>
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <SectionTitle>Selected Schedule</SectionTitle>
+                <div className="text-[11px] text-slate-500">The Overview reflects this version only.</div>
+              </div>
+              <span className="text-[10px] font-bold uppercase tracking-wide bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2 py-1">{scheduleTypeLabel}</span>
+            </div>
+            <div className="space-y-3 text-xs">
+              <div className="flex justify-between gap-4 border-b border-slate-100 pb-2"><span className="text-slate-500">Version</span><span className="font-bold text-slate-900 text-right">{version.versionLabel || xerFile}</span></div>
+              <div className="flex justify-between gap-4 border-b border-slate-100 pb-2"><span className="text-slate-500">Data date</span><span className="font-bold text-slate-900">{fmtDate(dataDate)}</span></div>
+              <div className="flex justify-between gap-4 border-b border-slate-100 pb-2"><span className="text-slate-500">Activities</span><span className="font-bold text-slate-900">{totalActivities > 0 ? totalActivities.toLocaleString() : '—'}</span></div>
+              <div className="flex justify-between gap-4"><span className="text-slate-500">Uploaded</span><span className="font-bold text-slate-900">{lastUpdated}</span></div>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <SectionTitle>Review Decision</SectionTitle>
+                <div className="text-[11px] text-slate-500">A review result belongs to the selected schedule version.</div>
+              </div>
+              <span className={clsx(
+                'text-[10px] font-bold uppercase tracking-wide rounded-full px-2 py-1 border',
+                !storedReview ? 'bg-slate-50 text-slate-600 border-slate-200' :
+                reviewNeedsCorrection ? 'bg-red-50 text-red-700 border-red-200' :
+                'bg-emerald-50 text-emerald-700 border-emerald-200'
+              )}>{storedReview ? 'Review saved' : 'Pending'}</span>
+            </div>
+            <div className={clsx('text-lg font-black', reviewNeedsCorrection ? 'text-red-700' : storedReview ? 'text-emerald-700' : 'text-slate-700')}>{reviewStatus}</div>
+            <div className="text-xs text-slate-500 mt-2">
+              {storedReview
+                ? `Critical: ${storedReview.counts?.critical ?? 0} · Major: ${storedReview.counts?.major ?? 0} · Minor: ${storedReview.counts?.minor ?? 0}`
+                : 'No submission or approval conclusion has been generated for this version.'}
+            </div>
+            <Link href="/dashboard/approval" className="inline-flex mt-4 text-xs font-bold text-blue-600 hover:text-blue-800">
+              {storedReview ? 'Open saved review →' : 'Choose purpose and run review →'}
+            </Link>
+          </Card>
         </div>
 
-        {/* SECTION 6: 2 Weeks Lookahead */}
         <Card>
-          <SectionTitle>2 Weeks Lookahead</SectionTitle>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
-                <tr>
-                  <th className="text-left font-semibold py-2 pr-3">Milestone</th>
-                  <th className="text-left font-semibold py-2 pr-3 w-28">Date</th>
-                  <th className="text-left font-semibold py-2 pr-3 w-24">Status</th>
-                  <th className="text-left font-semibold py-2 w-16">Risk</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lookahead.map((item, i) => (
-                  <tr key={i} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-                    <td className="py-2 pr-3 text-slate-900 text-xs">{item.name}</td>
-                    <td className="py-2 pr-3 text-slate-500 text-xs">{item.date}</td>
-                    <td className="py-2 pr-3"><StatusPill status={item.status} /></td>
-                    <td className="py-2 text-xs font-semibold"><RiskLabel risk={item.risk} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <SectionTitle>Management Attention</SectionTitle>
+              <div className="text-[11px] text-slate-500">Only conditions that may change the project decision are shown here.</div>
+            </div>
+          </div>
+          {overviewConcerns.length === 0 ? (
+            <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-4 text-sm font-semibold text-emerald-800">No immediate project-level concern is currently detected.</div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {overviewConcerns.slice(0, 4).map((concern, index) => (
+                <div key={index} className="py-3 first:pt-0 last:pb-0 flex gap-3">
+                  <span className={clsx('w-2 h-2 rounded-full mt-1.5 flex-shrink-0', concern.tone === 'red' ? 'bg-red-500' : concern.tone === 'amber' ? 'bg-amber-500' : 'bg-slate-400')} />
+                  <div><div className="text-sm font-bold text-slate-900">{concern.title}</div><div className="text-xs text-slate-500 mt-0.5">{concern.detail}</div></div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <Card>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <SectionTitle>Supporting Schedule Indicators</SectionTitle>
+              <div className="text-[11px] text-slate-500">Indicators support management review; they do not determine approval by themselves.</div>
+            </div>
+            <Link href="/dashboard/controls" className="text-xs font-semibold text-blue-600 hover:text-blue-800">Open Project Controls</Link>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Work complete</div><div className="text-xl font-black text-slate-900 mt-1">{hasWorkComplete ? `${Math.round(workCompleteNum)}%` : '—'}</div><div className="text-[10px] text-slate-400 mt-1">Selected XER calculation</div></div>
+            <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Risk categories</div><div className={clsx('text-xl font-black mt-1', risksCritical > 0 ? 'text-red-600' : 'text-slate-900')}>{risksAll}</div><div className="text-[10px] text-slate-400 mt-1">{risksCritical} critical · {risksHigh} high</div></div>
+            <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Long-lead at risk</div><div className={clsx('text-xl font-black mt-1', longLeadAtRisk > 0 ? 'text-amber-600' : 'text-slate-900')}>{longLeadAtRisk}</div><div className="text-[10px] text-slate-400 mt-1">of {longLeadTotal} detected items</div></div>
+            <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Remaining duration</div><div className="text-xl font-black text-slate-900 mt-1">{remainingDuration || '—'}</div><div className="text-[10px] text-slate-400 mt-1">calendar days to authorized completion</div></div>
           </div>
         </Card>
 
-        {/* SECTION 7: Bottom row */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <Card compact>
-            <SectionTitle>Operational Pressure</SectionTitle>
-            <div className="text-xs">
-              {operationalPressure.map((p, i) => (
-                <div key={i} className={clsx(
-                  'flex justify-between py-1.5',
-                  i < operationalPressure.length - 1 ? 'border-b border-slate-100' : ''
-                )}>
-                  <span className="text-slate-600">{p.label}</span>
-                  <PressureLabel level={p.level} />
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          <Card compact>
-            <SectionTitle>Recommended Follow-Up</SectionTitle>
-            <div className="space-y-1.5 text-xs text-slate-700 leading-relaxed">
-              {followUp.map((f, i) => (
-                <div key={i} className={clsx(
-                  'pl-2 py-1 border-l-2',
-                  f.priority === 'high' ? 'border-red-500' : f.priority === 'medium' ? 'border-amber-500' : 'border-slate-300'
-                )}>
-                  {f.text}
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          <div className="bg-sky-50 border border-sky-200 rounded-xl p-3">
-            <div className="text-xs font-semibold text-sky-900 mb-1.5">Communication Summary</div>
-            <div className="text-xs text-sky-800 leading-relaxed">{communicationSummary}</div>
-            <div className="flex gap-2 mt-3">
-              <button
-                onClick={() => { navigator.clipboard?.writeText(communicationSummary) }}
-                className="text-[10px] bg-white text-sky-900 border border-sky-200 px-2 py-1 rounded hover:bg-sky-100 font-semibold"
-              >📋 Copy</button>
-              <Link href="/dashboard/tia"
-                className="text-[10px] bg-white text-sky-900 border border-sky-200 px-2 py-1 rounded hover:bg-sky-100 font-semibold"
-              >📑 TIA</Link>
-            </div>
-          </div>
+        <div className="flex flex-wrap gap-2 pb-4">
+          <Link href="/dashboard/approval" className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg">Review Schedule</Link>
+          <Link href="/dashboard/project-setup" className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold px-4 py-2 rounded-lg">Project Setup</Link>
+          <Link href="/dashboard/projects" className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold px-4 py-2 rounded-lg">Schedules & Versions</Link>
         </div>
       </div>
     </div>
