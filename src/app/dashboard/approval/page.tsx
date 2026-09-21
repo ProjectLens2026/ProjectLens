@@ -154,7 +154,7 @@ const ACTION_COPY: Record<string, Pick<ActionGroup, 'title' | 'why' | 'action' |
   },
 }
 
-export function buildActionGroups(result: ApprovalReadinessResult): { corrections: ActionGroup[]; clarifications: ActionGroup[] } {
+function buildActionGroups(result: ApprovalReadinessResult): { corrections: ActionGroup[]; clarifications: ActionGroup[] } {
   const map = new Map<string, ApprovalFinding[]>()
   for (const f of result.findings.filter(x => approvalKind(x) === 'FINDING')) {
     const disposition: ActionDisposition = f.criticalGate || f.ruleStrength === 'REQUIRED' ? 'CORRECTION' : 'CLARIFICATION'
@@ -786,7 +786,7 @@ function Chip({ label, color }: { label: string; color: string }) {
 // Save-as-PDF uses the browser print dialog; the dashboard layout hides the
 // sidebar on print, and the toolbar below is print-hidden.
 // =============================================================================
-export function ApprovalReport({ result, mode, kind, project, discovery, onBack }: {
+function ApprovalReport({ result, mode, kind, project, discovery, onBack }: {
   result: ApprovalReadinessResult
   mode: ApprovalMode
   kind: 'executive' | 'complete'
