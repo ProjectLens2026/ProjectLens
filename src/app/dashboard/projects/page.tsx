@@ -5,8 +5,9 @@ import Link from 'next/link'
 import {
   loadProjects, deleteProject, renameProject, deleteVersion,
   moveVersionToProject,
+  updateProjectContractDates,
   setActiveProjectId, setActiveVersionId, getLatestVersion, getVisibleVersions,
-  migrateLegacyData, Project, ScheduleVersion
+  migrateLegacyData, Project, ScheduleVersion, ContractDates, ContractMilestone
 } from '@/lib/projectStore'
 
 export default function ProjectsPage() {
@@ -20,6 +21,9 @@ export default function ProjectsPage() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [confirmDeleteVersion, setConfirmDeleteVersion] = useState<string | null>(null)
   const [confirmMoveTarget, setConfirmMoveTarget] = useState<{versionId: string, targetId: string} | null>(null)
+  const [editingBasisId, setEditingBasisId] = useState<string | null>(null)
+  const [basisForm, setBasisForm] = useState<ContractDates>({})
+  const [basisError, setBasisError] = useState('')
 
   useEffect(() => {
     migrateLegacyData()
@@ -65,6 +69,97 @@ export default function ProjectsPage() {
     setEditingId(null)
   }
 
+  function startEditBasis(project: Project) {
+    setEditingBasisId(project.id)
+    setBasisForm({
+      ntp: project.contractDates?.ntp || '',
+      substantialCompletion: project.contractDates?.substantialCompletion || '',
+      originalContractCompletion: project.contractDates?.originalContractCompletion || '',
+      contractMilestones: (project.contractDates?.contractMilestones || []).map(row => ({ ...row })),
+    })
+    setBasisError('')
+  }
+
+  function cancelEditBasis() {
+    setEditingBasisId(null)
+    setBasisForm({})
+    setBasisError('')
+  }
+
+  function updateBasisDate(field: 'ntp' | 'substantialCompletion' | 'originalContractCompletion', value: string) {
+    setBasisForm(current => ({ ...current, [field]: value }))
+    setBasisError('')
+  }
+
+  function addBasisMilestone() {
+    const milestone: ContractMilestone = {
+      id: 'cms_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      name: '',
+      date: '',
+    }
+    setBasisForm(current => ({
+      ...current,
+      contractMilestones: [...(current.contractMilestones || []), milestone],
+    }))
+    setBasisError('')
+  }
+
+  function updateBasisMilestone(id: string, field: 'name' | 'date', value: string) {
+    setBasisForm(current => ({
+      ...current,
+      contractMilestones: (current.contractMilestones || []).map(row => (
+        row.id === id ? { ...row, [field]: value } : row
+      )),
+    }))
+    setBasisError('')
+  }
+
+  function removeBasisMilestone(id: string) {
+    setBasisForm(current => ({
+      ...current,
+      contractMilestones: (current.contractMilestones || []).filter(row => row.id !== id),
+    }))
+    setBasisError('')
+  }
+
+  function saveControlBasis(projectId: string) {
+    const ntp = basisForm.ntp || ''
+    const substantial = basisForm.substantialCompletion || ''
+    const finalCompletion = basisForm.originalContractCompletion || ''
+    const milestones = basisForm.contractMilestones || []
+
+    if (ntp && substantial && ntp >= substantial) {
+      setBasisError('Original Substantial Completion must be after NTP.')
+      return
+    }
+    if (ntp && finalCompletion && ntp >= finalCompletion) {
+      setBasisError('Original Final Completion must be after NTP.')
+      return
+    }
+    if (substantial && finalCompletion && substantial > finalCompletion) {
+      setBasisError('Original Final Completion cannot be before Original Substantial Completion.')
+      return
+    }
+    if (milestones.some(row => !row.name.trim() || !row.date)) {
+      setBasisError('Each contract milestone requires both a name and date.')
+      return
+    }
+    const normalizedNames = milestones.map(row => row.name.trim().toLowerCase())
+    if (new Set(normalizedNames).size !== normalizedNames.length) {
+      setBasisError('Contract milestone names must be unique.')
+      return
+    }
+
+    updateProjectContractDates(projectId, {
+      ntp,
+      substantialCompletion: substantial,
+      originalContractCompletion: finalCompletion,
+      contractMilestones: milestones.map(row => ({ ...row, name: row.name.trim() })),
+    })
+    refresh()
+    cancelEditBasis()
+  }
+
   function relativeTime(iso: string) {
     const diff = Date.now() - new Date(iso).getTime()
     const days = Math.floor(diff / (1000 * 60 * 60 * 24))
@@ -78,7 +173,8 @@ export default function ProjectsPage() {
   function shortDate(d?: string) {
     if (!d) return '—'
     try {
-      return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      const value = /^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d}T00:00:00` : d
+      return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     } catch { return d.slice(0, 10) }
   }
 
@@ -151,6 +247,14 @@ export default function ProjectsPage() {
             const isExpanded = expandedId === p.id
             const isEditing = editingId === p.id
             const isDeleting = confirmDelete === p.id
+            const isEditingBasis = editingBasisId === p.id
+            const contractMilestones = p.contractDates?.contractMilestones || []
+            const hasControlBasis = !!(
+              p.contractDates?.ntp ||
+              p.contractDates?.substantialCompletion ||
+              p.contractDates?.originalContractCompletion ||
+              contractMilestones.length > 0
+            )
 
             return (
               <div key={p.id} className={`bg-white border rounded-2xl p-5 hover:shadow-lg transition-all ${cond.border}`}>
@@ -212,6 +316,123 @@ export default function ProjectsPage() {
                     </div>
                   </div>
                 )}
+
+                {/* Project Control Basis — contract source of truth, separate from XER findings. */}
+                <div className="border border-blue-200 bg-blue-50/60 rounded-xl p-3 mb-3">
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <div>
+                      <div className="text-[10px] font-bold text-blue-900 uppercase tracking-wider">Project Control Basis</div>
+                      <div className="text-[9px] text-blue-700 mt-0.5">Contract dates and required phased milestones</div>
+                    </div>
+                    {!isEditingBasis && (
+                      <button
+                        onClick={() => startEditBasis(p)}
+                        className="shrink-0 text-[10px] font-bold text-blue-700 bg-white border border-blue-200 px-2.5 py-1.5 rounded-md hover:bg-blue-100">
+                        {hasControlBasis ? 'Edit basis' : 'Set basis'}
+                      </button>
+                    )}
+                  </div>
+
+                  {isEditingBasis ? (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <BasisDateInput
+                          label="NTP / Contract Start"
+                          value={basisForm.ntp || ''}
+                          onChange={value => updateBasisDate('ntp', value)} />
+                        <BasisDateInput
+                          label="Original Substantial"
+                          value={basisForm.substantialCompletion || ''}
+                          onChange={value => updateBasisDate('substantialCompletion', value)} />
+                        <BasisDateInput
+                          label="Original Final"
+                          value={basisForm.originalContractCompletion || ''}
+                          onChange={value => updateBasisDate('originalContractCompletion', value)} />
+                      </div>
+
+                      <div className="border-t border-blue-200 pt-2">
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <div className="text-[9px] font-bold text-blue-900 uppercase tracking-wider">Contract Milestones &amp; Phases</div>
+                          <button
+                            type="button"
+                            onClick={addBasisMilestone}
+                            className="text-[9px] font-bold text-blue-700 bg-white border border-blue-200 px-2 py-1 rounded hover:bg-blue-100">
+                            + Add milestone
+                          </button>
+                        </div>
+
+                        {(basisForm.contractMilestones || []).length === 0 ? (
+                          <div className="text-[10px] text-blue-700/70 italic">No additional contractual milestones.</div>
+                        ) : (
+                          <div className="space-y-2">
+                            {(basisForm.contractMilestones || []).map((milestone, index) => (
+                              <div key={milestone.id} className="grid grid-cols-[1fr_128px_24px] gap-2 items-end">
+                                <div>
+                                  <label className="block text-[8px] font-bold text-blue-800 uppercase tracking-wider mb-1">Milestone {index + 1}</label>
+                                  <input
+                                    type="text"
+                                    value={milestone.name}
+                                    onChange={e => updateBasisMilestone(milestone.id, 'name', e.target.value)}
+                                    placeholder="e.g. Phase 1 Turnover"
+                                    maxLength={100}
+                                    className="w-full px-2 py-1.5 border border-blue-200 rounded-md text-[11px] bg-white focus:outline-none focus:border-blue-500" />
+                                </div>
+                                <div>
+                                  <label className="block text-[8px] font-bold text-blue-800 uppercase tracking-wider mb-1">Contract Date</label>
+                                  <input
+                                    type="date"
+                                    value={milestone.date}
+                                    onChange={e => updateBasisMilestone(milestone.id, 'date', e.target.value)}
+                                    className="w-full px-2 py-1.5 border border-blue-200 rounded-md text-[11px] bg-white focus:outline-none focus:border-blue-500" />
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => removeBasisMilestone(milestone.id)}
+                                  title="Remove milestone"
+                                  aria-label={`Remove milestone ${index + 1}`}
+                                  className="h-8 text-slate-400 hover:text-red-600 text-lg leading-none">×</button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {basisError && (
+                        <div className="text-[10px] font-semibold text-red-700 bg-red-50 border border-red-200 rounded-md px-2.5 py-2">
+                          ⚠ {basisError}
+                        </div>
+                      )}
+
+                      <div className="flex justify-end gap-2">
+                        <button onClick={cancelEditBasis} className="text-[10px] font-bold text-slate-600 px-3 py-1.5">Cancel</button>
+                        <button onClick={() => saveControlBasis(p.id)} className="text-[10px] font-bold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-md">Save basis</button>
+                      </div>
+                    </div>
+                  ) : hasControlBasis ? (
+                    <div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <BasisDate label="NTP" value={shortDate(p.contractDates?.ntp)} />
+                        <BasisDate label="Substantial" value={shortDate(p.contractDates?.substantialCompletion)} />
+                        <BasisDate label="Final" value={shortDate(p.contractDates?.originalContractCompletion)} />
+                      </div>
+                      {contractMilestones.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-blue-200 space-y-1">
+                          {contractMilestones.slice(0, 3).map(milestone => (
+                            <div key={milestone.id} className="flex items-center justify-between gap-3 text-[10px]">
+                              <span className="text-slate-700 font-semibold truncate">{milestone.name}</span>
+                              <span className="text-blue-800 shrink-0">{shortDate(milestone.date)}</span>
+                            </div>
+                          ))}
+                          {contractMilestones.length > 3 && (
+                            <div className="text-[9px] text-blue-700">+ {contractMilestones.length - 3} more contractual milestone{contractMilestones.length - 3 === 1 ? '' : 's'}</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-[10px] text-blue-700/70 italic">No contract dates or contractual milestones have been entered.</div>
+                  )}
+                </div>
 
                 {analysis ? (
                   <>
@@ -396,6 +617,36 @@ export default function ProjectsPage() {
           </Link>
         </div>
       </div>
+    </div>
+  )
+}
+
+function BasisDateInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <div>
+      <label className="block text-[8px] font-bold text-blue-800 uppercase tracking-wider mb-1">{label}</label>
+      <input
+        type="date"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="w-full px-2 py-1.5 border border-blue-200 rounded-md text-[11px] bg-white focus:outline-none focus:border-blue-500" />
+    </div>
+  )
+}
+
+function BasisDate({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-white/80 border border-blue-100 rounded-md px-2 py-1.5 min-w-0">
+      <div className="text-[8px] font-bold text-blue-700 uppercase tracking-wider">{label}</div>
+      <div className="text-[10px] font-semibold text-slate-800 truncate" title={value}>{value}</div>
     </div>
   )
 }
