@@ -467,6 +467,9 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
         </div>
         <div className="flex items-center gap-2 print:hidden">
           <span className="text-xs text-slate-400">{version.versionLabel || xerFile}</span>
+          <Link href="/dashboard/lens" className="bg-white text-slate-800 border border-slate-300 hover:bg-slate-50 text-xs font-semibold px-3 py-1.5 rounded-md">
+            Full CPM Analysis
+          </Link>
           <Link href="/dashboard/approval" className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded-md">
             Review Schedule
           </Link>
@@ -600,7 +603,36 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
           </div>
         </Card>
 
+        <Card>
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <div>
+              <SectionTitle>Detailed P6 Schedule Analysis</SectionTitle>
+              <div className="text-[11px] text-slate-500">The complete Control Lens CPM analysis remains available. Overview summarizes the project; these tools preserve the underlying schedule evidence.</div>
+            </div>
+            <Link href="/dashboard/lens" className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded-lg whitespace-nowrap">Open Full Analysis →</Link>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <Link href="/dashboard/lens" className="rounded-lg border border-slate-200 p-3 hover:border-blue-300 hover:bg-blue-50 transition-colors">
+              <div className="text-xs font-bold text-slate-900">CPM & Schedule Detail</div>
+              <div className="text-[10px] text-slate-500 mt-1">Activities, dates, float, constraints, relationships, and schedule metrics.</div>
+            </Link>
+            <Link href="/dashboard/trace" className="rounded-lg border border-slate-200 p-3 hover:border-blue-300 hover:bg-blue-50 transition-colors">
+              <div className="text-xs font-bold text-slate-900">Logic Trace</div>
+              <div className="text-[10px] text-slate-500 mt-1">Trace predecessor and successor logic through the selected XER.</div>
+            </Link>
+            <Link href="/dashboard/reports/critical-path" className="rounded-lg border border-slate-200 p-3 hover:border-blue-300 hover:bg-blue-50 transition-colors">
+              <div className="text-xs font-bold text-slate-900">Critical & Longest Path</div>
+              <div className="text-[10px] text-slate-500 mt-1">Review the submitted controlling paths and completion-driving activities.</div>
+            </Link>
+            <Link href="/dashboard/reports/schedule-quality" className="rounded-lg border border-slate-200 p-3 hover:border-blue-300 hover:bg-blue-50 transition-colors">
+              <div className="text-xs font-bold text-slate-900">Schedule Quality</div>
+              <div className="text-[10px] text-slate-500 mt-1">Open ends, constraints, lags, calendars, durations, and coding checks.</div>
+            </Link>
+          </div>
+        </Card>
+
         <div className="flex flex-wrap gap-2 pb-4">
+          <Link href="/dashboard/lens" className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-lg">Full CPM Analysis</Link>
           <Link href="/dashboard/approval" className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg">Review Schedule</Link>
           <Link href="/dashboard/project-setup" className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold px-4 py-2 rounded-lg">Project Setup</Link>
           <Link href="/dashboard/projects" className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold px-4 py-2 rounded-lg">Schedules & Versions</Link>
