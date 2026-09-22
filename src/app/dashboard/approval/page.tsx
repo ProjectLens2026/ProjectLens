@@ -15,7 +15,7 @@
 // hardcodes scoring numbers — they come from the evaluator/framework.
 // =============================================================================
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { discoverUSProject, type USProjectDiscoveryResult, type DiscoveryEvidence } from '@/lib/construction/projectDiscovery'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -23,6 +23,22 @@ import { getActiveProject, getActiveVersion, subscribeToProjects, updateVersionA
 import { evaluateApprovalReadiness } from '@/lib/approval-readiness/evaluator'
 import { printReport } from '@/lib/printReport'
 import type { ApprovalReadinessResult, ApprovalMode, ApprovalFinding } from '@/lib/approval-readiness/types'
+import {
+  addContractorResponseInSupabase,
+  createReviewCommentInSupabase,
+  loadReviewWorkspaceFromSupabase,
+  updateReviewCommentStatusInSupabase,
+  upsertScheduleNarrativeInSupabase,
+  type ReviewWorkspaceCloudData,
+} from '@/lib/supabase/reviews'
+import {
+  createScheduleNarrative,
+  summarizeReviewComments,
+  type NewReviewCommentInput,
+  type ReviewComment,
+  type ReviewItemStatus,
+  type ScheduleNarrative,
+} from '@/lib/reviewWorkspace'
 
 const COLORS = {
   ink: '#13202e', blue: '#2563eb', red: '#dc2626', amber: '#f59e0b', green: '#16a34a', slate: '#1f2937',
@@ -298,7 +314,12 @@ export default function ApprovalReadinessPage() {
   const [running, setRunning] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [reportKind, setReportKind] = useState<null | 'executive' | 'complete'>(null)
-  const [activeTab, setActiveTab] = useState<'actions' | 'evidence'>('actions')
+  const [activeTab, setActiveTab] = useState<'comments' | 'narrative' | 'changes' | 'evidence'>('comments')
+  const [reviewData, setReviewData] = useState<ReviewWorkspaceCloudData>({ comments: [], narratives: {} })
+  const [reviewDataLoading, setReviewDataLoading] = useState(false)
+  const [reviewDataError, setReviewDataError] = useState<string | null>(null)
+  const [reviewMutation, setReviewMutation] = useState(false)
+  const [showAddComment, setShowAddComment] = useState(false)
   // Recompute for older saved versions too; no re-upload or score mutation.
   const discovery = useMemo(() => {
     if (!analysis?.traceTasks) return null
@@ -336,7 +357,7 @@ export default function ApprovalReadinessPage() {
       // Close any old finding/report state that belonged to the prior version.
       setExpanded(null)
       setReportKind(null)
-      setActiveTab('actions')
+      setActiveTab('comments')
       setRunning(false)
       setReady(true)
     }
@@ -344,6 +365,23 @@ export default function ApprovalReadinessPage() {
     syncActiveSelection()
     return subscribeToProjects(syncActiveSelection)
   }, [])
+
+  const reloadReviewWorkspace = useCallback(async () => {
+    if (!project?.id) {
+      setReviewData({ comments: [], narratives: {} })
+      return
+    }
+    setReviewDataLoading(true)
+    setReviewDataError(null)
+    const loaded = await loadReviewWorkspaceFromSupabase(project.id)
+    if (loaded.ok && loaded.data) setReviewData(loaded.data)
+    else setReviewDataError(loaded.error || 'Could not load the review workspace.')
+    setReviewDataLoading(false)
+  }, [project?.id])
+
+  useEffect(() => {
+    reloadReviewWorkspace()
+  }, [reloadReviewWorkspace])
 
   function runCheck() {
     if (!analysis) return
@@ -369,6 +407,153 @@ export default function ApprovalReadinessPage() {
     } finally {
       setRunning(false)
     }
+  }
+
+  async function addManualReviewComment(input: NewReviewCommentInput) {
+    if (!project?.id) return
+    setReviewMutation(true)
+    setReviewDataError(null)
+    const saved = await createReviewCommentInSupabase(project.id, input)
+    if (!saved.ok) setReviewDataError(saved.error || 'Could not add the review item.')
+    else {
+      setShowAddComment(false)
+      await reloadReviewWorkspace()
+    }
+    setReviewMutation(false)
+  }
+
+  async function importControlLensFindings() {
+    if (!project?.id || !version?.id || !result) return
+    const groups = buildActionGroups(result)
+    const candidates = [...groups.corrections, ...groups.clarifications]
+    const existingSignatures = new Set(
+      reviewData.comments.map(comment => [...(comment.sourceFindingIds || [])].sort().join('|')).filter(Boolean)
+    )
+    const pending = candidates.filter(group => {
+      const signature = group.findings.map(finding => finding.id).sort().join('|')
+      return signature && !existingSignatures.has(signature)
+    })
+    if (!pending.length) return
+
+    setReviewMutation(true)
+    setReviewDataError(null)
+    for (const group of pending) {
+      const activities = new Map<string, { activityId: string; activityCode?: string; activityName?: string }>()
+      for (const finding of group.findings) {
+        for (const activity of finding.affectedActivities || []) {
+          activities.set(activity.id, {
+            activityId: activity.id,
+            activityCode: activity.code,
+            activityName: activity.name,
+          })
+        }
+      }
+      const saved = await createReviewCommentInSupabase(project.id, {
+        source: 'CONVERTED_FROM_CL_FINDING',
+        sourceFindingIds: group.findings.map(finding => finding.id),
+        title: group.title,
+        concern: group.why,
+        requiredCorrection: `${group.action} Acceptance: ${group.acceptance}`,
+        classification: group.disposition === 'CORRECTION' ? 'REQUIRED' : 'ADVISORY',
+        approvalImpact: group.disposition === 'CORRECTION' ? 'BLOCKS_APPROVAL' : 'NON_BLOCKING',
+        responsibleParty: 'Contractor / Scheduler',
+        firstVersionId: version.id,
+        affectedActivities: Array.from(activities.values()),
+        issueImmediately: true,
+      })
+      if (!saved.ok) {
+        setReviewDataError(saved.error || `Could not create the review comment for ${group.title}.`)
+        break
+      }
+    }
+    await reloadReviewWorkspace()
+    setReviewMutation(false)
+  }
+
+  async function changeCommentStatus(commentId: string, status: ReviewItemStatus) {
+    setReviewMutation(true)
+    setReviewDataError(null)
+    const saved = await updateReviewCommentStatusInSupabase(commentId, status)
+    if (!saved.ok) setReviewDataError(saved.error || 'Could not update the review item.')
+    await reloadReviewWorkspace()
+    setReviewMutation(false)
+  }
+
+  async function submitContractorResponse(commentId: string, response: string, correctionMade: string) {
+    if (!version?.id) return
+    setReviewMutation(true)
+    setReviewDataError(null)
+    const saved = await addContractorResponseInSupabase({
+      commentId,
+      versionId: version.id,
+      response,
+      correctionMade,
+    })
+    if (!saved.ok) setReviewDataError(saved.error || 'Could not save the contractor response.')
+    await reloadReviewWorkspace()
+    setReviewMutation(false)
+  }
+
+  const narrativeForCurrentVersion = useMemo(() => {
+    if (!version?.id) return null
+    const saved = reviewData.narratives[version.id]
+    if (saved) return saved
+
+    const versions = [...(project?.versions || [])]
+      .filter((item: any) => !item.deletedAt)
+      .sort((a: any, b: any) => new Date(a.dataDate || a.uploadedAt).getTime() - new Date(b.dataDate || b.uploadedAt).getTime())
+    const currentIndex = versions.findIndex((item: any) => item.id === version.id)
+    const priorVersion = currentIndex > 0 ? versions[currentIndex - 1] : null
+    const priorNarrative = priorVersion ? reviewData.narratives[priorVersion.id] : undefined
+    const narrative = createScheduleNarrative(version.id, reviewPurpose, priorNarrative)
+    const currentForecast = analysis?.projectedEnd || analysis?.forecastCompletion || analysis?.contractEnd
+    const priorForecast = priorVersion?.analysis?.projectedEnd || priorVersion?.analysis?.forecastCompletion || priorVersion?.analysis?.contractEnd
+    const summary = summarizeReviewComments(reviewData.comments)
+
+    narrative.sections = narrative.sections.map(section => {
+      if (section.key === 'EXECUTIVE_SUMMARY') return {
+        ...section,
+        automatedFacts: [
+          { id: 'data-date', label: 'Data date', currentValue: shortDate(version.dataDate || analysis?.dataDate), source: 'XER' as const },
+          { id: 'forecast', label: 'Current forecast', currentValue: shortDate(currentForecast), priorValue: shortDate(priorForecast), source: 'XER' as const },
+          { id: 'open-comments', label: 'Open review comments', currentValue: String(summary.open), source: 'COMMENT_REGISTER' as const },
+        ],
+      }
+      if (section.key === 'CONTRACT_MILESTONES') return {
+        ...section,
+        automatedFacts: [
+          { id: 'contract-end', label: 'Authorized completion', currentValue: shortDate(project?.contractDates?.originalContractCompletion), source: 'PROJECT_BASIS' as const },
+          { id: 'forecast-end', label: 'Current XER forecast', currentValue: shortDate(currentForecast), priorValue: shortDate(priorForecast), source: 'XER' as const },
+        ],
+      }
+      if (section.key === 'CHANGES_FROM_PRIOR_VERSION') return {
+        ...section,
+        automatedFacts: [
+          { id: 'activity-count', label: 'Activities', currentValue: String(analysis?.totalActivities ?? analysis?.traceTasks?.length ?? '—'), priorValue: priorVersion ? String(priorVersion.analysis?.totalActivities ?? priorVersion.analysis?.traceTasks?.length ?? '—') : undefined, source: 'XER' as const },
+          { id: 'data-date-change', label: 'Data date', currentValue: shortDate(version.dataDate || analysis?.dataDate), priorValue: shortDate(priorVersion?.dataDate || priorVersion?.analysis?.dataDate), source: 'XER' as const },
+        ],
+      }
+      if (section.key === 'OWNER_COMMENT_RESPONSES') return {
+        ...section,
+        automatedFacts: [
+          { id: 'issued-comments', label: 'Comments issued', currentValue: String(summary.issued), source: 'COMMENT_REGISTER' as const },
+          { id: 'blocking-comments', label: 'Approval-blocking comments open', currentValue: String(summary.blocking), source: 'COMMENT_REGISTER' as const },
+          { id: 'closed-comments', label: 'Comments closed', currentValue: String(summary.closed), source: 'COMMENT_REGISTER' as const },
+        ],
+      }
+      return section
+    })
+    return narrative
+  }, [analysis, project, reviewData.comments, reviewData.narratives, reviewPurpose, version])
+
+  async function saveNarrative(narrative: ScheduleNarrative, issue: boolean) {
+    if (!project?.id) return
+    setReviewMutation(true)
+    setReviewDataError(null)
+    const saved = await upsertScheduleNarrativeInSupabase(project.id, narrative, issue)
+    if (!saved.ok) setReviewDataError(saved.error || 'Could not save the schedule narrative.')
+    await reloadReviewWorkspace()
+    setReviewMutation(false)
   }
 
   if (!ready) return <Shell><div className="p-6 text-sm text-slate-500">Loading…</div></Shell>
@@ -425,28 +610,8 @@ export default function ApprovalReadinessPage() {
         </div>
       </div>
 
-      <div className="flex gap-2 mb-4" role="tablist" aria-label="Schedule review views">
-        <button role="tab" aria-selected={activeTab === 'actions'} onClick={() => setActiveTab('actions')} className={`rounded-lg border px-5 py-3 text-[13px] font-bold ${activeTab === 'actions' ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>Required Actions</button>
-        <button role="tab" aria-selected={activeTab === 'evidence'} onClick={() => setActiveTab('evidence')} className={`rounded-lg border px-5 py-3 text-[13px] font-bold ${activeTab === 'evidence' ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>Scope &amp; Evidence</button>
-        <Link href="/dashboard/lens" className="rounded-lg border border-slate-200 bg-white px-5 py-3 text-[13px] font-bold text-slate-600 hover:bg-slate-50">Schedule Detail</Link>
-        <Link href="/dashboard/trace" className="rounded-lg border border-slate-200 bg-white px-5 py-3 text-[13px] font-bold text-slate-600 hover:bg-slate-50">Logic Trace</Link>
-      </div>
-
-      {activeTab === 'actions' && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 mb-4">
-        <div className="text-xs text-slate-600">The action report summarizes what must be corrected or clarified. The full evidence appendix preserves technical detail.</div>
-        <div className="flex gap-2">
-          <button disabled={!result} onClick={() => setReportKind('executive')} className="text-[11px] font-bold px-3 py-2 rounded-lg text-white disabled:opacity-40" style={{ background: COLORS.ink }}>Action Report</button>
-          <button disabled={!result} onClick={() => setReportKind('complete')} className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200 disabled:opacity-40">Full Evidence Appendix</button>
-        </div>
-        {!result && <p className="text-xs text-slate-500">Run the check below to enable reports.</p>}
-      </div>}
-      {activeTab === 'evidence' && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 mb-4">
-        <div className="text-xs text-slate-600">The evidence appendix includes discovery, domain results, every finding, affected activities, and available supporting evidence.</div>
-        <button disabled={!result} onClick={() => setReportKind('complete')} className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200 disabled:opacity-40">Full Evidence Appendix</button>
-      </div>}
-      {activeTab === 'evidence' && <ProjectDiscoveryPanel discovery={discovery} />}
       {/* Review purpose + perspective + run */}
-      {activeTab === 'actions' && <div className="rounded-2xl border border-slate-200 bg-white p-4 mb-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 mb-4">
         <div className="grid grid-cols-1 xl:grid-cols-[240px_1fr_auto] gap-4 items-end">
           <label>
             <span className="block text-[10px] font-extrabold uppercase tracking-wide text-slate-500 mb-1.5">Review purpose</span>
@@ -476,26 +641,87 @@ export default function ApprovalReadinessPage() {
                     : 'Run Schedule Review'}
           </button>
         </div>
-      </div>}
+      </div>
 
-      {activeTab === 'actions' && !result && !running && (
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
-          <div className="text-2xl mb-2">☝️</div>
-          <div className="text-[13px] font-bold" style={{ color: COLORS.ink }}>Choose the review purpose and perspective</div>
-          <div className="text-[11px] text-slate-500 mt-1">Control Lens will review this selected version and surface what requires attention. The result stays with this version when you leave and return.</div>
+      <div className="flex gap-1 border-b border-slate-200 mb-4 overflow-x-auto" role="tablist" aria-label="Review workspace">
+        {([
+          ['comments', 'Comment Register'],
+          ['narrative', 'Schedule Narrative'],
+          ['changes', 'Changes Since Prior Version'],
+          ['evidence', 'Supporting Evidence'],
+        ] as const).map(([tab, label]) => (
+          <button key={tab} role="tab" aria-selected={activeTab === tab} onClick={() => setActiveTab(tab)}
+            className={`whitespace-nowrap border-b-2 px-4 py-3 text-[12px] font-bold ${activeTab === tab ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {reviewDataError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4 text-[11px] text-red-800">{reviewDataError}</div>}
+
+      {activeTab === 'evidence' && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 mb-4">
+        <div className="text-xs text-slate-600">The evidence appendix preserves discovery, domains, findings, affected activities and schedule traceability.</div>
+        <div className="flex gap-2">
+          <Link href="/dashboard/lens" className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200">Schedule Detail</Link>
+          <Link href="/dashboard/trace" className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200">Logic Trace</Link>
+          <button disabled={!result} onClick={() => setReportKind('complete')} className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200 disabled:opacity-40">Full Evidence Appendix</button>
+        </div>
+      </div>}
+      {activeTab === 'evidence' && <ProjectDiscoveryPanel discovery={discovery} />}
+
+      {activeTab === 'comments' && !result && !running && (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-4 mb-4 text-center">
+          <div className="text-[13px] font-bold" style={{ color: COLORS.ink }}>Run the schedule review to generate Control Lens findings</div>
+          <div className="text-[11px] text-slate-500 mt-1">Reviewer-added comments can still be entered below before the automated review is run.</div>
         </div>
       )}
 
-      {activeTab === 'actions' && running && !result && (
+      {activeTab === 'comments' && running && !result && (
         <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-[13px] text-slate-500">
           Running check…
         </div>
       )}
 
+      {activeTab === 'comments' && (
+        <CommentRegisterPanel
+          comments={reviewData.comments}
+          loading={reviewDataLoading}
+          disabled={reviewMutation}
+          result={result}
+          mode={mode}
+          onAdd={() => setShowAddComment(true)}
+          onImport={importControlLensFindings}
+          onStatusChange={changeCommentStatus}
+          onResponse={submitContractorResponse}
+        />
+      )}
+
+      {activeTab === 'narrative' && narrativeForCurrentVersion && (
+        <ScheduleNarrativePanel
+          key={`${narrativeForCurrentVersion.versionId}-${narrativeForCurrentVersion.updatedAt}`}
+          narrative={narrativeForCurrentVersion}
+          disabled={reviewMutation}
+          onSave={saveNarrative}
+        />
+      )}
+
+      {activeTab === 'changes' && (
+        <VersionChangesPanel project={project} version={version} />
+      )}
+
+      {showAddComment && version?.id && (
+        <AddReviewItemModal
+          versionId={version.id}
+          disabled={reviewMutation}
+          onCancel={() => setShowAddComment(false)}
+          onSave={addManualReviewComment}
+        />
+      )}
+
       {result && (
         <>
           {/* Reviewer-first decision summary. The status leads; the score supports. */}
-          {activeTab === 'actions' && <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4 print:break-inside-avoid">
+          {activeTab === 'comments' && <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4 print:break-inside-avoid">
             <div className="flex flex-wrap items-start gap-5">
               <div className="flex-1 min-w-[320px]">
                 <div className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-slate-500 mb-1">Control Lens Readiness Status</div>
@@ -583,7 +809,7 @@ export default function ApprovalReadinessPage() {
           )}
 
           {/* Contractor-facing disposition groups. Evidence stays attached to each observation. */}
-          {activeTab === 'actions' && (() => {
+          {activeTab === 'evidence' && (() => {
             const { corrections, clarifications } = buildActionGroups(result)
             const recommendations = result.findings.filter(f => approvalKind(f) === 'RECOMMENDATION')
             return <div className="space-y-4">
@@ -694,6 +920,279 @@ export default function ApprovalReadinessPage() {
       )}
     </Shell>
   )
+}
+
+// ---------------------------------------------------------------------------
+const CLOSED_REVIEW_STATUSES: ReviewItemStatus[] = ['CLOSED', 'WITHDRAWN', 'VOID']
+
+function reviewStatusLabel(status: ReviewItemStatus): string {
+  return {
+    DRAFT: 'Draft',
+    OPEN: 'Open',
+    CORRECTED_PENDING_VERIFICATION: 'Correction detected',
+    PARTIALLY_CORRECTED: 'Partially corrected',
+    NOT_CORRECTED: 'Not corrected',
+    NEEDS_REVIEWER_DECISION: 'Reviewer decision',
+    CLOSED: 'Closed',
+    REOPENED: 'Reopened',
+    WITHDRAWN: 'Withdrawn',
+    VOID: 'Void',
+  }[status]
+}
+
+function reviewStatusClasses(status: ReviewItemStatus): string {
+  if (status === 'CLOSED') return 'bg-green-50 text-green-700 border-green-200'
+  if (status === 'CORRECTED_PENDING_VERIFICATION') return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+  if (status === 'PARTIALLY_CORRECTED' || status === 'NEEDS_REVIEWER_DECISION') return 'bg-amber-50 text-amber-700 border-amber-200'
+  if (status === 'OPEN' || status === 'NOT_CORRECTED' || status === 'REOPENED') return 'bg-red-50 text-red-700 border-red-200'
+  return 'bg-slate-100 text-slate-600 border-slate-200'
+}
+
+function CommentRegisterPanel({
+  comments,
+  loading,
+  disabled,
+  result,
+  mode,
+  onAdd,
+  onImport,
+  onStatusChange,
+  onResponse,
+}: {
+  comments: ReviewComment[]
+  loading: boolean
+  disabled: boolean
+  result: ApprovalReadinessResult | null
+  mode: ApprovalMode
+  onAdd: () => void
+  onImport: () => Promise<void>
+  onStatusChange: (commentId: string, status: ReviewItemStatus) => Promise<void>
+  onResponse: (commentId: string, response: string, correctionMade: string) => Promise<void>
+}) {
+  const [filter, setFilter] = useState<'open' | 'all'>('open')
+  const [openId, setOpenId] = useState<string | null>(null)
+  const [responses, setResponses] = useState<Record<string, { response: string; correction: string }>>({})
+  const summary = summarizeReviewComments(comments)
+  const displayed = comments.filter(comment => filter === 'all' || !CLOSED_REVIEW_STATUSES.includes(comment.status))
+  const actionGroups = result ? buildActionGroups(result) : { corrections: [], clarifications: [] }
+  const existingSignatures = new Set(comments.map(comment => [...(comment.sourceFindingIds || [])].sort().join('|')).filter(Boolean))
+  const unissuedCount = [...actionGroups.corrections, ...actionGroups.clarifications].filter(group => {
+    const signature = group.findings.map(finding => finding.id).sort().join('|')
+    return signature && !existingSignatures.has(signature)
+  }).length
+
+  async function sendResponse(comment: ReviewComment) {
+    const draft = responses[comment.id]
+    if (!draft?.response.trim()) return
+    await onResponse(comment.id, draft.response, draft.correction)
+    setResponses(current => ({ ...current, [comment.id]: { response: '', correction: '' } }))
+  }
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div>
+          <h2 className="text-[15px] font-extrabold text-slate-900">Review Comment Register</h2>
+          <p className="text-[11px] text-slate-500 mt-1">Permanent numbers carry across every submission. Only the authorized reviewer closes an issued comment.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {mode === 'REVIEWER' && unissuedCount > 0 && <button disabled={disabled} onClick={onImport} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-700 disabled:opacity-50">Add {unissuedCount} CL item{unissuedCount === 1 ? '' : 's'} to register</button>}
+          {mode === 'REVIEWER' && <button disabled={disabled} onClick={onAdd} className="rounded-lg bg-blue-600 px-3 py-2 text-[11px] font-bold text-white disabled:opacity-50">+ Add Review Item</button>}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-2 mb-4">
+        {[
+          ['Issued', summary.issued, 'text-slate-900'],
+          ['Closed', summary.closed, 'text-green-700'],
+          ['Pending verification', summary.pendingVerification, 'text-emerald-700'],
+          ['Partially corrected', summary.partiallyCorrected, 'text-amber-700'],
+          ['Not corrected', summary.notCorrected, 'text-red-700'],
+          ['Blocking approval', summary.blocking, 'text-red-700'],
+        ].map(([label, value, color]) => <div key={String(label)} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="text-[9px] font-bold uppercase tracking-wide text-slate-500">{label}</div>
+          <div className={`text-[20px] font-black mt-1 ${color}`}>{value}</div>
+        </div>)}
+      </div>
+
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <div className="text-[12px] font-bold text-slate-800">{filter === 'open' ? `${summary.open + summary.drafts} active items` : `${comments.length} total items`}</div>
+        <div className="flex gap-1">
+          <button onClick={() => setFilter('open')} className={`rounded-md px-3 py-1.5 text-[10px] font-bold ${filter === 'open' ? 'bg-slate-900 text-white' : 'border border-slate-200 text-slate-600'}`}>Open items</button>
+          <button onClick={() => setFilter('all')} className={`rounded-md px-3 py-1.5 text-[10px] font-bold ${filter === 'all' ? 'bg-slate-900 text-white' : 'border border-slate-200 text-slate-600'}`}>All</button>
+        </div>
+      </div>
+
+      {loading ? <div className="border border-slate-200 rounded-lg p-8 text-center text-[12px] text-slate-500">Loading review comments…</div> : displayed.length === 0 ? (
+        <div className="border border-dashed border-slate-300 rounded-lg p-8 text-center">
+          <div className="text-[13px] font-bold text-slate-800">No {filter === 'open' ? 'open ' : ''}review items</div>
+          <div className="text-[11px] text-slate-500 mt-1">Add a reviewer concern or convert grouped Control Lens findings into numbered comments.</div>
+        </div>
+      ) : <div className="border border-slate-200 rounded-lg overflow-hidden">
+        {displayed.map(comment => {
+          const isOpen = openId === comment.id
+          const latestResponse = comment.responses[comment.responses.length - 1]
+          const draft = responses[comment.id] || { response: '', correction: '' }
+          return <div key={comment.id} className="border-b border-slate-200 last:border-b-0">
+            <button onClick={() => setOpenId(isOpen ? null : comment.id)} className="w-full px-3 py-3 text-left hover:bg-slate-50">
+              <div className="grid grid-cols-[64px_1fr_auto_18px] gap-3 items-center">
+                <span className="font-mono text-[11px] font-extrabold text-blue-600">{comment.commentNumber}</span>
+                <div className="min-w-0">
+                  <div className="text-[12px] font-extrabold text-slate-900 truncate">{comment.title}</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">{comment.source === 'REVIEWER_ADDED' ? 'Reviewer added' : comment.source === 'CL_DETECTED' ? 'Control Lens detected' : 'Converted from CL finding'} · {comment.classification.replace('_', ' ')}</div>
+                </div>
+                <span className={`rounded-full border px-2 py-1 text-[9px] font-bold whitespace-nowrap ${reviewStatusClasses(comment.status)}`}>{reviewStatusLabel(comment.status)}</span>
+                <span className="text-slate-400">{isOpen ? '⌃' : '⌄'}</span>
+              </div>
+            </button>
+            {isOpen && <div className="border-t border-slate-100 bg-slate-50/60 p-4">
+              <div className="grid md:grid-cols-2 gap-4 text-[11px]">
+                <div><div className="font-bold text-slate-500 uppercase tracking-wide text-[9px] mb-1">Owner concern</div><p className="text-slate-700 leading-relaxed">{comment.concern}</p></div>
+                <div><div className="font-bold text-slate-500 uppercase tracking-wide text-[9px] mb-1">Required correction</div><p className="text-slate-700 leading-relaxed">{comment.requiredCorrection || 'Reviewer clarification required.'}</p></div>
+              </div>
+              {comment.requirementReference && <div className="mt-3 text-[10px] text-slate-600"><b>Reference:</b> {comment.requirementReference}</div>}
+              {comment.affectedActivities.length > 0 && <div className="mt-3 text-[10px] text-slate-600"><b>Affected activities:</b> {comment.affectedActivities.slice(0, 8).map(activity => activity.activityCode || activity.activityId).join(' · ')}{comment.affectedActivities.length > 8 ? ` · +${comment.affectedActivities.length - 8} more` : ''}</div>}
+
+              {latestResponse && <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 mt-3">
+                <div className="text-[9px] font-bold uppercase tracking-wide text-blue-600">Latest contractor response</div>
+                <div className="text-[11px] text-slate-700 mt-1">{latestResponse.response}</div>
+                {latestResponse.correctionMade && <div className="text-[10px] text-slate-600 mt-1"><b>Correction:</b> {latestResponse.correctionMade}</div>}
+              </div>}
+
+              {mode === 'PRE_SUBMISSION' && !CLOSED_REVIEW_STATUSES.includes(comment.status) && comment.status !== 'DRAFT' && <div className="grid md:grid-cols-2 gap-2 mt-3">
+                <textarea value={draft.response} onChange={event => setResponses(current => ({ ...current, [comment.id]: { ...draft, response: event.target.value } }))} placeholder="Contractor response" className="min-h-[76px] rounded-lg border border-slate-300 bg-white p-2.5 text-[11px] outline-none focus:border-blue-500" />
+                <textarea value={draft.correction} onChange={event => setResponses(current => ({ ...current, [comment.id]: { ...draft, correction: event.target.value } }))} placeholder="Correction made and affected activity IDs" className="min-h-[76px] rounded-lg border border-slate-300 bg-white p-2.5 text-[11px] outline-none focus:border-blue-500" />
+              </div>}
+
+              <div className="flex flex-wrap justify-end gap-2 mt-3">
+                {mode === 'REVIEWER' && comment.status === 'DRAFT' && <button disabled={disabled} onClick={() => onStatusChange(comment.id, 'OPEN')} className="rounded-md bg-blue-600 px-3 py-2 text-[10px] font-bold text-white disabled:opacity-50">Issue comment</button>}
+                {mode === 'PRE_SUBMISSION' && !CLOSED_REVIEW_STATUSES.includes(comment.status) && comment.status !== 'DRAFT' && <button disabled={disabled || !draft.response.trim()} onClick={() => sendResponse(comment)} className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-[10px] font-bold text-blue-700 disabled:opacity-40">Submit contractor response</button>}
+                {mode === 'REVIEWER' && !CLOSED_REVIEW_STATUSES.includes(comment.status) && comment.status !== 'DRAFT' && <button disabled={disabled} onClick={() => onStatusChange(comment.id, 'CLOSED')} className="rounded-md bg-green-600 px-3 py-2 text-[10px] font-bold text-white disabled:opacity-50">Reviewer close</button>}
+                {mode === 'REVIEWER' && comment.status === 'CLOSED' && <button disabled={disabled} onClick={() => onStatusChange(comment.id, 'REOPENED')} className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-bold text-red-700 disabled:opacity-50">Reopen</button>}
+              </div>
+            </div>}
+          </div>
+        })}
+      </div>}
+
+      {summary.blocking > 0 && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-[11px] font-semibold text-red-800">Not ready for approval — {summary.blocking} required comment{summary.blocking === 1 ? '' : 's'} remain unresolved.</div>}
+    </section>
+  )
+}
+
+function AddReviewItemModal({ versionId, disabled, onCancel, onSave }: {
+  versionId: string
+  disabled: boolean
+  onCancel: () => void
+  onSave: (input: NewReviewCommentInput) => Promise<void>
+}) {
+  const [title, setTitle] = useState('')
+  const [concern, setConcern] = useState('')
+  const [reference, setReference] = useState('')
+  const [correction, setCorrection] = useState('')
+  const [classification, setClassification] = useState<'REQUIRED' | 'ADVISORY' | 'OBSERVATION'>('REQUIRED')
+  const [blocksApproval, setBlocksApproval] = useState(true)
+
+  async function save(issueImmediately: boolean) {
+    if (!title.trim() || !concern.trim()) return
+    await onSave({
+      source: 'REVIEWER_ADDED',
+      title,
+      concern,
+      requirementReference: reference,
+      requiredCorrection: correction,
+      classification,
+      approvalImpact: blocksApproval ? 'BLOCKS_APPROVAL' : 'NON_BLOCKING',
+      responsibleParty: 'Contractor / Scheduler',
+      firstVersionId: versionId,
+      issueImmediately,
+    })
+  }
+
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" role="dialog" aria-modal="true" aria-label="Add review item">
+    <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-xl">
+      <div className="flex items-start justify-between border-b border-slate-200 p-5">
+        <div><h2 className="text-[16px] font-extrabold text-slate-900">Add Review Item</h2><p className="text-[11px] text-slate-500 mt-1">Control Lens will assign the next permanent comment number.</p></div>
+        <button onClick={onCancel} className="text-slate-400 hover:text-slate-700" aria-label="Close">✕</button>
+      </div>
+      <div className="p-5 space-y-3">
+        <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Comment title *</span><input value={title} onChange={event => setTitle(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-[12px] outline-none focus:border-blue-500" placeholder="Example: Contract completion milestone is not identified" /></label>
+        <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Owner concern *</span><textarea value={concern} onChange={event => setConcern(event.target.value)} className="mt-1 min-h-[80px] w-full rounded-lg border border-slate-300 px-3 py-2 text-[12px] outline-none focus:border-blue-500" /></label>
+        <div className="grid md:grid-cols-2 gap-3">
+          <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Contract / specification reference</span><input value={reference} onChange={event => setReference(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-[12px] outline-none focus:border-blue-500" /></label>
+          <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Classification</span><select value={classification} onChange={event => setClassification(event.target.value as any)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-[12px]"><option value="REQUIRED">Required</option><option value="ADVISORY">Advisory</option><option value="OBSERVATION">Observation</option></select></label>
+        </div>
+        <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Required correction</span><textarea value={correction} onChange={event => setCorrection(event.target.value)} className="mt-1 min-h-[70px] w-full rounded-lg border border-slate-300 px-3 py-2 text-[12px] outline-none focus:border-blue-500" /></label>
+        <label className="flex items-center gap-2 text-[11px] font-semibold text-slate-700"><input type="checkbox" checked={blocksApproval} onChange={event => setBlocksApproval(event.target.checked)} />This item blocks approval until resolved</label>
+      </div>
+      <div className="flex justify-end gap-2 border-t border-slate-200 p-4">
+        <button onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-[11px] font-bold text-slate-600">Cancel</button>
+        <button disabled={disabled || !title.trim() || !concern.trim()} onClick={() => save(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-[11px] font-bold text-slate-700 disabled:opacity-40">Save draft</button>
+        <button disabled={disabled || !title.trim() || !concern.trim()} onClick={() => save(true)} className="rounded-lg bg-blue-600 px-4 py-2 text-[11px] font-bold text-white disabled:opacity-40">Add as open comment</button>
+      </div>
+    </div>
+  </div>
+}
+
+function ScheduleNarrativePanel({ narrative, disabled, onSave }: {
+  narrative: ScheduleNarrative
+  disabled: boolean
+  onSave: (narrative: ScheduleNarrative, issue: boolean) => Promise<void>
+}) {
+  const [draft, setDraft] = useState<ScheduleNarrative>(narrative)
+  const [selectedKey, setSelectedKey] = useState(narrative.sections[0]?.key)
+  const section = draft.sections.find(item => item.key === selectedKey) || draft.sections[0]
+  if (!section) return null
+
+  function updateText(text: string) {
+    setDraft(current => ({
+      ...current,
+      sections: current.sections.map(item => item.key === section.key ? {
+        ...item,
+        schedulerText: text,
+        state: 'SCHEDULER_UPDATED',
+        updatedAt: new Date().toISOString(),
+      } : item),
+      updatedAt: new Date().toISOString(),
+    }))
+  }
+
+  return <section className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
+    <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+      <div><h2 className="text-[15px] font-extrabold text-slate-900">Schedule Update Narrative</h2><p className="text-[11px] text-slate-500 mt-1">Objective XER facts are protected. The scheduler provides cause, responsibility and corrective action.</p></div>
+      <button disabled={disabled} onClick={() => onSave(draft, false)} className="rounded-lg bg-blue-600 px-3 py-2 text-[11px] font-bold text-white disabled:opacity-50">Save narrative</button>
+    </div>
+    <div className="grid lg:grid-cols-[250px_1fr] gap-4">
+      <div className="rounded-lg border border-slate-200 p-2 h-fit">
+        {draft.sections.map((item, index) => <button key={item.key} onClick={() => setSelectedKey(item.key)} className={`w-full rounded-md px-3 py-2.5 text-left text-[11px] flex items-start justify-between gap-2 ${item.key === section.key ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}><span>{index + 1}. {item.title}</span><span className={`mt-1 h-2 w-2 rounded-full flex-shrink-0 ${item.state === 'SCHEDULER_UPDATED' || item.state === 'CURRENT' ? 'bg-green-500' : item.state === 'NO_LONGER_SUPPORTED' ? 'bg-red-500' : item.automatedFacts.length ? 'bg-blue-500' : 'bg-amber-500'}`} /></button>)}
+      </div>
+      <div className="rounded-lg border border-slate-200 p-4">
+        <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3 mb-3"><div><h3 className="text-[14px] font-extrabold text-slate-900">{section.title}</h3><p className="text-[10px] text-slate-500 mt-1">{section.state === 'CARRIED_CONFIRMATION_REQUIRED' ? 'Carried from the previous version — confirmation required.' : section.state.replaceAll('_', ' ').toLowerCase()}</p></div>{section.state === 'CARRIED_CONFIRMATION_REQUIRED' && <span className="rounded-full bg-amber-50 px-2 py-1 text-[9px] font-bold text-amber-700">Update required</span>}</div>
+        {section.automatedFacts.length > 0 && <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 mb-3"><div className="text-[9px] font-bold uppercase tracking-wide text-blue-600 mb-2">Updated automatically from the schedule</div><div className="grid md:grid-cols-2 gap-2">{section.automatedFacts.map(fact => <div key={fact.id} className="text-[10px] text-slate-600"><b className="text-slate-800">{fact.label}:</b> {fact.currentValue}{fact.priorValue && fact.priorValue !== '—' ? <span className="text-slate-400"> · prior {fact.priorValue}</span> : null}</div>)}</div></div>}
+        <label className="block text-[10px] font-bold uppercase tracking-wide text-slate-500 mb-1">Scheduler narrative</label>
+        <textarea value={section.schedulerText} onChange={event => updateText(event.target.value)} className="min-h-[260px] w-full rounded-lg border border-slate-300 p-3 text-[12px] leading-relaxed outline-none focus:border-blue-500" placeholder="Explain what changed, why it changed, the responsible party, mitigation and supporting reference. Control Lens does not infer causation from the XER." />
+        <div className="text-[10px] text-slate-500 mt-2">The XER supports dates and logic changes. Causation and responsibility remain scheduler-entered statements.</div>
+      </div>
+    </div>
+  </section>
+}
+
+function VersionChangesPanel({ project, version }: { project: any; version: any }) {
+  const versions = [...(project?.versions || [])]
+    .filter((item: any) => !item.deletedAt)
+    .sort((a: any, b: any) => new Date(a.dataDate || a.uploadedAt).getTime() - new Date(b.dataDate || b.uploadedAt).getTime())
+  const index = versions.findIndex((item: any) => item.id === version?.id)
+  const prior = index > 0 ? versions[index - 1] : null
+  return <section className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
+    <h2 className="text-[15px] font-extrabold text-slate-900">Changes Since Prior Version</h2>
+    <p className="text-[11px] text-slate-500 mt-1">Use the deterministic version comparison for added/deleted activities, relationship changes, duration changes and forecast movement.</p>
+    {prior ? <div className="grid md:grid-cols-[1fr_auto_1fr] gap-3 items-center mt-4">
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4"><div className="text-[9px] font-bold uppercase text-slate-500">Prior submission</div><div className="text-[12px] font-extrabold text-slate-900 mt-1">{prior.versionLabel || prior.fileName}</div><div className="text-[10px] text-slate-500 mt-1">Data date: {shortDate(prior.dataDate || prior.analysis?.dataDate)}</div></div>
+      <span className="text-slate-400 text-center">→</span>
+      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4"><div className="text-[9px] font-bold uppercase text-blue-600">Current submission</div><div className="text-[12px] font-extrabold text-slate-900 mt-1">{version?.versionLabel || version?.fileName}</div><div className="text-[10px] text-slate-500 mt-1">Data date: {shortDate(version?.dataDate || version?.analysis?.dataDate)}</div></div>
+    </div> : <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-[11px] text-slate-500 mt-4">This is the first schedule version. Upload a later submission before running a version comparison.</div>}
+    {prior && <div className="flex justify-end mt-4"><Link href="/dashboard/changes" className="rounded-lg bg-blue-600 px-4 py-2 text-[11px] font-bold text-white">Open Version Comparison →</Link></div>}
+  </section>
 }
 
 // ---------------------------------------------------------------------------
