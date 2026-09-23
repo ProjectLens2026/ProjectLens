@@ -13,6 +13,7 @@ import { activityToGanttRange, type FloatPath } from '@/lib/multipleFloatPaths'
 import type { Task } from '@/lib/xerParser'
 import { evaluatePathCredibility, pathActivityStart, pathActivityFinish, sortPathActivitiesByFinish, type PathCredibilityResult } from '@/lib/construction/pathCredibility'
 import { analyzeCLPathIntelligence } from '@/lib/construction/clPathIntelligence'
+import { buildScheduleReviewSnapshot } from '@/lib/scheduleReviewSnapshot'
 
 export default function ControlLensAnalysisPage() {
   const [analysis, setAnalysis] = useState<any>(null)
@@ -71,28 +72,38 @@ export default function ControlLensAnalysisPage() {
     catch (e) { console.error('[Lens] CL Path Intelligence failed:', e); return null }
   }, [analysis])
 
-  const clFindingGroups = useMemo(() => {
-    if (!clPathIntelligence?.findings) return [] as any[]
-    const severityRank: Record<string, number> = { HIGH: 3, MEDIUM: 2, REVIEW: 1 }
-    const grouped = new Map<string, any>()
-    for (const f of clPathIntelligence.findings) {
-      const key = String(f.title || 'Reviewer check').trim().toLowerCase()
-      const existing = grouped.get(key)
-      if (!existing) {
-        grouped.set(key, { ...f, count: 1, evidence: Array.from(new Set(f.evidence || [])) })
-      } else {
-        existing.count += 1
-        existing.evidence = Array.from(new Set([...(existing.evidence || []), ...(f.evidence || [])]))
-        if ((severityRank[f.severity] || 0) > (severityRank[existing.severity] || 0)) existing.severity = f.severity
-      }
+  // Full Analysis and Review Schedule must render one canonical approval
+  // decision. The legacy health score remains schedule telemetry only and must
+  // never create a second, contradictory approval result.
+  const reviewSnapshot = useMemo(() => {
+    try {
+      return buildScheduleReviewSnapshot(analysis, {
+        versionId: version?.id,
+        mode: version?.approvalResult?.mode === 'PRE_SUBMISSION' ? 'PRE_SUBMISSION' : 'REVIEWER',
+      })
+    } catch (e) {
+      console.error('[Lens] Canonical schedule review failed:', e)
+      return null
     }
-    return Array.from(grouped.values()).sort((a: any, b: any) =>
-      (severityRank[b.severity] || 0) - (severityRank[a.severity] || 0) || b.count - a.count
-    )
-  }, [clPathIntelligence])
+  }, [analysis, version?.approvalResult?.mode, version?.id])
 
-  const highPriorityGroups = clFindingGroups.filter((g: any) => g.severity === 'HIGH')
-  const reviewGroups = clFindingGroups.filter((g: any) => g.severity !== 'HIGH')
+  const approvalFindingGroups = useMemo(() => (
+    (reviewSnapshot?.approval.findings || [])
+      .filter(finding => finding.kind !== 'RECOMMENDATION')
+      .map(finding => ({
+        id: finding.id,
+        title: finding.title,
+        detail: finding.whatFound,
+        count: finding.affectedActivities?.length || 0,
+        severity: finding.severity,
+        criticalGate: finding.criticalGate,
+        domain: finding.primaryDomain,
+      }))
+      .sort((a, b) => Number(b.criticalGate) - Number(a.criticalGate) || b.severity - a.severity || b.count - a.count)
+  ), [reviewSnapshot])
+
+  const highPriorityGroups = approvalFindingGroups.filter(group => group.criticalGate || group.severity >= 4)
+  const reviewGroups = approvalFindingGroups.filter(group => !group.criticalGate && group.severity < 4)
 
   async function handleGenerate() {
     if (!project || !version || !analysis) return
@@ -146,11 +157,12 @@ export default function ControlLensAnalysisPage() {
     if (isNaN(h)) return '—'
     return Math.round(h / 8) + 'd'
   }
-  function conditionColor(cond: string) {
-    if (cond === 'Recovery Required') return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-900' }
-    if (cond === 'Attention Needed') return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-900' }
-    if (cond === 'Monitor Closely') return { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-900' }
-    return { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-900' }
+  function readinessTone(status?: string) {
+    if (status === 'NOT_READY') return { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-900', icon: '❌' }
+    if (status === 'REVIEW_REQUIRED') return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-900', icon: '⚠️' }
+    if (status === 'READY_WITH_COMMENTS') return { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-900', icon: '📋' }
+    if (status === 'READY') return { bg: 'bg-green-50', border: 'border-green-200', text: 'text-green-900', icon: '✅' }
+    return { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-900', icon: '—' }
   }
 
   if (!analysis || !project) {
@@ -184,7 +196,8 @@ export default function ControlLensAnalysisPage() {
   }
 
   const a = analysis
-  const condColor = conditionColor(a.condition)
+  const approval = reviewSnapshot?.approval
+  const decisionTone = readinessTone(approval?.readinessStatus)
   const hasNarrative = !!(narrativeText && narrativeText.trim())
 
   return (
@@ -226,20 +239,25 @@ export default function ControlLensAnalysisPage() {
           </div>
         </div>
 
-        {/* Condition banner */}
-        <div className={`${condColor.bg} ${condColor.border} border rounded-xl p-4 flex items-center gap-4`}>
-          <div className="text-3xl">{a.condition === 'Recovery Required' ? '🔴' : a.condition === 'Attention Needed' ? '⚠️' : '🟢'}</div>
+        {/* Canonical approval decision — shared with Review Schedule */}
+        <div className={`${decisionTone.bg} ${decisionTone.border} border rounded-xl p-4 flex items-center gap-4`}>
+          <div className="text-3xl">{decisionTone.icon}</div>
           <div className="flex-1">
-            <div className={`font-bold text-sm ${condColor.text}`}>
-              {a.condition?.toUpperCase()} {a.delayDays > 0 && `— PROJECT IS ${a.delayDays} DAYS BEHIND CONTRACT`}
+            <div className={`font-bold text-sm ${decisionTone.text}`}>
+              {approval?.readinessLabel || approval?.recommendation || 'REVIEW DECISION UNAVAILABLE'}
             </div>
             <div className="text-xs mt-1 opacity-80">
-              {a.negativeFloat} of {a.totalActivities} activities carry negative float · {a.notStarted} activities not yet started · {a.outOfSequence?.length || 0} out-of-sequence
+              {approval?.readinessReason || 'The canonical approval review could not be calculated for this version.'}
             </div>
+            {approval && <div className="text-[11px] mt-1.5 font-semibold opacity-80">
+              Critical Gates: {approval.criticalGates.passed ? 'PASS' : 'FAIL'} · Critical {approval.counts.critical} · Major {approval.counts.major} · Out-of-sequence {a.outOfSequence?.length || 0}
+            </div>
+            }
           </div>
           <div className="text-center flex-shrink-0">
-            <div className={`text-3xl font-extrabold ${condColor.text}`}>{a.healthScore}</div>
-            <div className="text-[10px] opacity-70">Health Score / 100</div>
+            <div className={`text-3xl font-extrabold ${decisionTone.text}`}>{approval?.totalScore ?? '—'}</div>
+            <div className="text-[10px] opacity-70">Readiness Score / 100</div>
+            {approval && <div className={`text-xs font-extrabold mt-0.5 ${decisionTone.text}`}>{approval.grade}</div>}
           </div>
         </div>
 
@@ -323,33 +341,33 @@ export default function ControlLensAnalysisPage() {
                 {/* CONTROL LENS APPROVAL SUMMARY — summary first, evidence on demand */}
                 {scheduleFilter === 'cl-summary' && (
                   <div>
-                    {!clPathIntelligence ? (
-                      <div className="text-center py-8 text-slate-400 text-sm">Project understanding is not available for this version. Re-upload the XER if relationship/task evidence is missing.</div>
+                    {!approval?.projectUnderstanding ? (
+                      <div className="text-center py-8 text-slate-400 text-sm">The canonical project understanding is not available for this version. Re-upload the XER if relationship/task evidence is missing.</div>
                     ) : (
                       <>
                         <div className="rounded-xl border-2 border-slate-300 bg-white p-5 mb-4">
                           <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                             <div>
                               <div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-blue-700">Control Lens Approval Summary</div>
-                              <div className="text-xl font-extrabold text-slate-950 mt-1">{clPathIntelligence.understanding.projectNature}</div>
-                              <div className="text-sm font-semibold text-slate-600 mt-2">{clPathIntelligence.understanding.deliveryNature.join(' → ')}</div>
+                              <div className="text-xl font-extrabold text-slate-950 mt-1">{approval.projectUnderstanding.projectNature}</div>
+                              <div className="text-sm font-semibold text-slate-600 mt-2">{approval.projectUnderstanding.deliveryNature.join(' → ')}</div>
                             </div>
-                            {clPathIntelligence.understanding.completionTarget && (
+                            {approval.projectUnderstanding.completionTarget && (
                               <div className="rounded-lg bg-slate-950 text-white px-4 py-3 min-w-[190px]">
                                 <div className="text-[9px] font-extrabold uppercase tracking-wider text-slate-300">Completion target</div>
-                                <div className="font-mono text-sm font-bold mt-1">{clPathIntelligence.understanding.completionTarget.code}</div>
-                                <div className="text-sm font-extrabold mt-0.5">{fmtDate(clPathIntelligence.understanding.completionTarget.finish)}</div>
+                                <div className="font-mono text-sm font-bold mt-1">{approval.projectUnderstanding.completionTarget.code}</div>
+                                <div className="text-sm font-extrabold mt-0.5">{fmtDate(approval.projectUnderstanding.completionTarget.finish)}</div>
                               </div>
                             )}
                           </div>
                           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-4">
                             <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
                               <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Detected areas</div>
-                              <div className="text-sm font-bold text-slate-800 mt-1 leading-relaxed">{clPathIntelligence.understanding.areas.join(' · ') || 'Review Required'}</div>
+                              <div className="text-sm font-bold text-slate-800 mt-1 leading-relaxed">{approval.projectUnderstanding.areas.join(' · ') || 'Review Required'}</div>
                             </div>
                             <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
                               <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Detected systems</div>
-                              <div className="text-sm font-bold text-slate-800 mt-1 leading-relaxed">{clPathIntelligence.understanding.systems.join(' · ') || 'Review Required'}</div>
+                              <div className="text-sm font-bold text-slate-800 mt-1 leading-relaxed">{approval.projectUnderstanding.systems.join(' · ') || 'Review Required'}</div>
                             </div>
                           </div>
                         </div>
@@ -405,7 +423,7 @@ export default function ControlLensAnalysisPage() {
                               </div>
                               <span className="text-sm font-extrabold text-blue-700">View Path →</span>
                             </div>
-                            {clPathIntelligence.criticalPath && <div className="text-xs font-medium text-slate-700 mt-3 leading-relaxed">{clPathIntelligence.criticalPath.connectionNote}</div>}
+                            {clPathIntelligence?.criticalPath && <div className="text-xs font-medium text-slate-700 mt-3 leading-relaxed">{clPathIntelligence.criticalPath.connectionNote}</div>}
                           </button>
                           <button type="button" onClick={() => setScheduleFilter('cl-longest')} className="text-left rounded-xl border-2 border-violet-200 bg-violet-50 p-5 hover:border-violet-400 transition-colors">
                             <div className="flex items-center justify-between gap-3">
@@ -415,7 +433,7 @@ export default function ControlLensAnalysisPage() {
                               </div>
                               <span className="text-sm font-extrabold text-violet-700">View Path →</span>
                             </div>
-                            {clPathIntelligence.longestPath && <div className="text-xs font-medium text-slate-700 mt-3 leading-relaxed">{clPathIntelligence.longestPath.connectionNote}</div>}
+                            {clPathIntelligence?.longestPath && <div className="text-xs font-medium text-slate-700 mt-3 leading-relaxed">{clPathIntelligence.longestPath.connectionNote}</div>}
                           </button>
                         </div>
                       </>
