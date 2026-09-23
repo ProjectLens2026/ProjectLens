@@ -497,7 +497,6 @@ export default function ApprovalReadinessPage() {
   const narrativeForCurrentVersion = useMemo(() => {
     if (!version?.id) return null
     const saved = reviewData.narratives[version.id]
-    if (saved) return saved
 
     const versions = [...(project?.versions || [])]
       .filter((item: any) => !item.deletedAt)
@@ -505,10 +504,21 @@ export default function ApprovalReadinessPage() {
     const currentIndex = versions.findIndex((item: any) => item.id === version.id)
     const priorVersion = currentIndex > 0 ? versions[currentIndex - 1] : null
     const priorNarrative = priorVersion ? reviewData.narratives[priorVersion.id] : undefined
-    const narrative = createScheduleNarrative(version.id, reviewPurpose, priorNarrative)
+    const narrative = saved
+      ? { ...saved, reviewPurpose, sections: saved.sections.map(section => ({ ...section, automatedFacts: [...section.automatedFacts] })) }
+      : createScheduleNarrative(version.id, reviewPurpose, priorNarrative)
     const currentForecast = analysis?.projectedEnd || analysis?.forecastCompletion || analysis?.contractEnd
     const priorForecast = priorVersion?.analysis?.projectedEnd || priorVersion?.analysis?.forecastCompletion || priorVersion?.analysis?.contractEnd
     const summary = summarizeReviewComments(reviewData.comments)
+    const detectedGroups = result ? (() => {
+      const grouped = buildActionGroups(result)
+      const existingSignatures = new Set(reviewData.comments.map(comment => [...(comment.sourceFindingIds || [])].sort().join('|')).filter(Boolean))
+      return [...grouped.corrections, ...grouped.clarifications].filter(group => {
+        const signature = group.findings.map(finding => finding.id).sort().join('|')
+        return signature && !existingSignatures.has(signature)
+      })
+    })() : []
+    const openComments = reviewData.comments.filter(comment => !CLOSED_REVIEW_STATUSES.includes(comment.status) && comment.status !== 'DRAFT')
 
     narrative.sections = narrative.sections.map(section => {
       if (section.key === 'EXECUTIVE_SUMMARY') return {
@@ -517,6 +527,7 @@ export default function ApprovalReadinessPage() {
           { id: 'data-date', label: 'Data date', currentValue: shortDate(version.dataDate || analysis?.dataDate), source: 'XER' as const },
           { id: 'forecast', label: 'Current forecast', currentValue: shortDate(currentForecast), priorValue: shortDate(priorForecast), source: 'XER' as const },
           { id: 'open-comments', label: 'Open review comments', currentValue: String(summary.open), source: 'COMMENT_REGISTER' as const },
+          { id: 'detected-comments', label: 'Detected proposed comments', currentValue: String(detectedGroups.length), source: 'COMMENT_REGISTER' as const },
         ],
       }
       if (section.key === 'CONTRACT_MILESTONES') return {
@@ -539,12 +550,24 @@ export default function ApprovalReadinessPage() {
           { id: 'issued-comments', label: 'Comments issued', currentValue: String(summary.issued), source: 'COMMENT_REGISTER' as const },
           { id: 'blocking-comments', label: 'Approval-blocking comments open', currentValue: String(summary.blocking), source: 'COMMENT_REGISTER' as const },
           { id: 'closed-comments', label: 'Comments closed', currentValue: String(summary.closed), source: 'COMMENT_REGISTER' as const },
+          ...openComments.map(comment => ({
+            id: `comment-${comment.id}`,
+            label: `${comment.commentNumber} — ${comment.title}`,
+            currentValue: `${reviewStatusLabel(comment.status)}. ${comment.requiredCorrection || comment.concern}`,
+            source: 'COMMENT_REGISTER' as const,
+          })),
+          ...detectedGroups.map((group, index) => ({
+            id: `detected-${group.id}`,
+            label: `Proposed ${String(index + 1).padStart(2, '0')} — ${group.title}`,
+            currentValue: `${group.disposition === 'CORRECTION' ? 'Required correction' : 'Clarification'}: ${group.action}`,
+            source: 'COMMENT_REGISTER' as const,
+          })),
         ],
       }
       return section
     })
     return narrative
-  }, [analysis, project, reviewData.comments, reviewData.narratives, reviewPurpose, version])
+  }, [analysis, project, result, reviewData.comments, reviewData.narratives, reviewPurpose, version])
 
   async function saveNarrative(narrative: ScheduleNarrative, issue: boolean) {
     if (!project?.id) return
@@ -700,6 +723,8 @@ export default function ApprovalReadinessPage() {
         <ScheduleNarrativePanel
           key={`${narrativeForCurrentVersion.versionId}-${narrativeForCurrentVersion.updatedAt}`}
           narrative={narrativeForCurrentVersion}
+          projectName={project?.name || 'Project'}
+          versionLabel={version?.versionLabel || version?.fileName || 'Schedule version'}
           disabled={reviewMutation}
           onSave={saveNarrative}
         />
@@ -976,10 +1001,11 @@ function CommentRegisterPanel({
   const displayed = comments.filter(comment => filter === 'all' || !CLOSED_REVIEW_STATUSES.includes(comment.status))
   const actionGroups = result ? buildActionGroups(result) : { corrections: [], clarifications: [] }
   const existingSignatures = new Set(comments.map(comment => [...(comment.sourceFindingIds || [])].sort().join('|')).filter(Boolean))
-  const unissuedCount = [...actionGroups.corrections, ...actionGroups.clarifications].filter(group => {
+  const proposedGroups = [...actionGroups.corrections, ...actionGroups.clarifications].filter(group => {
     const signature = group.findings.map(finding => finding.id).sort().join('|')
     return signature && !existingSignatures.has(signature)
-  }).length
+  })
+  const unissuedCount = proposedGroups.length
 
   async function sendResponse(comment: ReviewComment) {
     const draft = responses[comment.id]
@@ -996,17 +1022,16 @@ function CommentRegisterPanel({
           <p className="text-[11px] text-slate-500 mt-1">Permanent numbers carry across every submission. Only the authorized reviewer closes an issued comment.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {mode === 'REVIEWER' && unissuedCount > 0 && <button disabled={disabled} onClick={onImport} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-700 disabled:opacity-50">Add {unissuedCount} CL item{unissuedCount === 1 ? '' : 's'} to register</button>}
           {mode === 'REVIEWER' && <button disabled={disabled} onClick={onAdd} className="rounded-lg bg-blue-600 px-3 py-2 text-[11px] font-bold text-white disabled:opacity-50">+ Add Review Item</button>}
         </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-6 gap-2 mb-4">
         {[
+          ['Detected drafts', unissuedCount, 'text-blue-700'],
           ['Issued', summary.issued, 'text-slate-900'],
           ['Closed', summary.closed, 'text-green-700'],
           ['Pending verification', summary.pendingVerification, 'text-emerald-700'],
-          ['Partially corrected', summary.partiallyCorrected, 'text-amber-700'],
           ['Not corrected', summary.notCorrected, 'text-red-700'],
           ['Blocking approval', summary.blocking, 'text-red-700'],
         ].map(([label, value, color]) => <div key={String(label)} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -1023,10 +1048,23 @@ function CommentRegisterPanel({
         </div>
       </div>
 
+      {proposedGroups.length > 0 && <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 mb-3">
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-2">
+          <div><div className="text-[11px] font-extrabold text-blue-900">{mode === 'REVIEWER' ? 'Proposed owner comments detected by Control Lens' : 'Detected corrections for this submission'}</div><div className="text-[10px] text-blue-700 mt-0.5">Visible automatically. They are not official owner comments until issued into the register.</div></div>
+          {mode === 'REVIEWER' && <button disabled={disabled} onClick={onImport} className="rounded-md bg-blue-600 px-3 py-2 text-[10px] font-bold text-white disabled:opacity-50">Issue all {proposedGroups.length} comments</button>}
+        </div>
+        <div className="space-y-1.5">
+          {proposedGroups.map((group, index) => <details key={group.id} className="rounded-md border border-blue-100 bg-white px-3 py-2">
+            <summary className="cursor-pointer text-[11px] font-bold text-slate-800"><span className="font-mono text-blue-600 mr-2">PROPOSED-{String(index + 1).padStart(2, '0')}</span>{group.title}</summary>
+            <div className="grid md:grid-cols-2 gap-3 mt-2 border-t border-slate-100 pt-2 text-[10px] text-slate-600"><div><b className="text-slate-800">Why:</b> {group.why}</div><div><b className="text-slate-800">Required response:</b> {group.action}</div></div>
+          </details>)}
+        </div>
+      </div>}
+
       {loading ? <div className="border border-slate-200 rounded-lg p-8 text-center text-[12px] text-slate-500">Loading review comments…</div> : displayed.length === 0 ? (
         <div className="border border-dashed border-slate-300 rounded-lg p-8 text-center">
-          <div className="text-[13px] font-bold text-slate-800">No {filter === 'open' ? 'open ' : ''}review items</div>
-          <div className="text-[11px] text-slate-500 mt-1">Add a reviewer concern or convert grouped Control Lens findings into numbered comments.</div>
+          <div className="text-[13px] font-bold text-slate-800">No {filter === 'open' ? 'issued open ' : ''}review items</div>
+          <div className="text-[11px] text-slate-500 mt-1">Detected drafts are shown above; reviewer-added and issued comments appear here.</div>
         </div>
       ) : <div className="border border-slate-200 rounded-lg overflow-hidden">
         {displayed.map(comment => {
@@ -1134,8 +1172,10 @@ function AddReviewItemModal({ versionId, disabled, onCancel, onSave }: {
   </div>
 }
 
-function ScheduleNarrativePanel({ narrative, disabled, onSave }: {
+function ScheduleNarrativePanel({ narrative, projectName, versionLabel, disabled, onSave }: {
   narrative: ScheduleNarrative
+  projectName: string
+  versionLabel: string
   disabled: boolean
   onSave: (narrative: ScheduleNarrative, issue: boolean) => Promise<void>
 }) {
@@ -1160,7 +1200,7 @@ function ScheduleNarrativePanel({ narrative, disabled, onSave }: {
   return <section className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
     <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
       <div><h2 className="text-[15px] font-extrabold text-slate-900">Schedule Update Narrative</h2><p className="text-[11px] text-slate-500 mt-1">Objective XER facts are protected. The scheduler provides cause, responsibility and corrective action.</p></div>
-      <button disabled={disabled} onClick={() => onSave(draft, false)} className="rounded-lg bg-blue-600 px-3 py-2 text-[11px] font-bold text-white disabled:opacity-50">Save narrative</button>
+      <div className="flex gap-2"><button onClick={() => printReport('schedule-narrative-print-area', { title: `${projectName} — Schedule Narrative`, footerLabel: versionLabel })} className="rounded-lg border border-slate-300 px-3 py-2 text-[11px] font-bold text-slate-700">Print / Save PDF</button><button disabled={disabled} onClick={() => onSave(draft, false)} className="rounded-lg bg-blue-600 px-3 py-2 text-[11px] font-bold text-white disabled:opacity-50">Save narrative</button></div>
     </div>
     <div className="grid lg:grid-cols-[250px_1fr] gap-4">
       <div className="rounded-lg border border-slate-200 p-2 h-fit">
@@ -1173,6 +1213,15 @@ function ScheduleNarrativePanel({ narrative, disabled, onSave }: {
         <textarea value={section.schedulerText} onChange={event => updateText(event.target.value)} className="min-h-[260px] w-full rounded-lg border border-slate-300 p-3 text-[12px] leading-relaxed outline-none focus:border-blue-500" placeholder="Explain what changed, why it changed, the responsible party, mitigation and supporting reference. Control Lens does not infer causation from the XER." />
         <div className="text-[10px] text-slate-500 mt-2">The XER supports dates and logic changes. Causation and responsibility remain scheduler-entered statements.</div>
       </div>
+    </div>
+    <div id="schedule-narrative-print-area" className="fixed -left-[10000px] top-0 w-[760px] bg-white p-6" aria-hidden="true">
+      <div className="border-b-2 border-slate-900 pb-3 mb-4"><div className="text-[10px] font-bold uppercase tracking-widest text-blue-600">Control Lens Schedule Narrative</div><div className="text-[20px] font-black text-slate-900 mt-1">{projectName}</div><div className="text-[11px] text-slate-500 mt-1">{versionLabel} · {narrative.reviewPurpose.replaceAll('_', ' ')}</div></div>
+      {draft.sections.map((item, index) => <section key={item.key} className="mb-5 break-inside-avoid">
+        <h2 className="border-b border-slate-300 pb-1 text-[13px] font-extrabold text-slate-900">{index + 1}. {item.title}</h2>
+        {item.automatedFacts.length > 0 && <div className="mt-2 space-y-1">{item.automatedFacts.map(fact => <div key={fact.id} className="text-[10px] text-slate-700"><b>{fact.label}:</b> {fact.currentValue}{fact.priorValue && fact.priorValue !== '—' ? ` · Prior: ${fact.priorValue}` : ''}</div>)}</div>}
+        <div className="mt-2 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-800">{item.schedulerText || 'No scheduler narrative entered for this section.'}</div>
+      </section>)}
+      <div className="mt-6 border-t border-slate-300 pt-2 text-[9px] text-slate-500">Schedule facts are generated from the selected XER and project basis. Causation, responsibility and mitigation statements are scheduler-entered.</div>
     </div>
   </section>
 }
