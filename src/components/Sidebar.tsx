@@ -428,8 +428,8 @@ export default function Sidebar({ user }: SidebarProps) {
   // Portfolio) remains separate and unchanged below.
   const allViews = activeProject ? [
     { href: '/dashboard', icon: '⊞', label: 'Overview', group: 'PROJECT WORKSPACE', requires: 'view' as const },
-    { href: '/dashboard/lens', icon: '⌕', label: 'Full CPM Analysis', group: 'PROJECT WORKSPACE', requires: 'view' as const },
     { href: '/dashboard/approval', icon: '✅', label: 'Review Schedule', group: 'PROJECT WORKSPACE', requires: 'view' as const },
+    { href: '/dashboard/lens', icon: '⌕', label: 'Full CPM Analysis', group: 'PROJECT WORKSPACE', requires: 'view' as const },
     { href: '/dashboard/controls', icon: '⚙', label: 'Project Controls', group: 'PROJECT WORKSPACE', requires: 'view' as const },
     { href: '/dashboard/reports', icon: '📄', label: 'Reports', group: 'PROJECT WORKSPACE', requires: 'view' as const },
     { href: '/dashboard/projects', icon: '▤', label: 'Schedules & Versions', group: 'PROJECT WORKSPACE', requires: 'view' as const },

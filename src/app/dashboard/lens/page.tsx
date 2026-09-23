@@ -34,6 +34,13 @@ export default function ControlLensAnalysisPage() {
   }, [])
 
   useEffect(() => {
+    const requestedTab = new URLSearchParams(window.location.search).get('tab')
+    if (requestedTab && ['schedule-filter', 'logic', 'noties', 'longlead', 'field', 'plain', 'ai'].includes(requestedTab)) {
+      setActiveTab(requestedTab)
+    }
+  }, [])
+
+  useEffect(() => {
     setNarrativeText(version?.aiNarrative || '')
     setIsEditing(false)
     setNarrativeError(null)
@@ -149,7 +156,11 @@ export default function ControlLensAnalysisPage() {
   if (!analysis || !project) {
     return (
       <div className="flex flex-col h-full">
-        <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center flex-shrink-0">
+        <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0">
+          <Link href="/dashboard/approval" className="text-xs font-bold text-blue-600 hover:text-blue-800 whitespace-nowrap">
+            ← Back to Review Schedule
+          </Link>
+          <div className="h-6 border-l border-slate-200" />
           <div>
             <span className="font-bold text-slate-900 text-base">Full Analysis</span>
             <span className="text-slate-400 text-sm ml-2">· No active project</span>
@@ -179,11 +190,18 @@ export default function ControlLensAnalysisPage() {
   return (
     <div className="flex flex-col h-full">
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0 no-print">
+        <Link href="/dashboard/approval" className="text-xs font-bold text-blue-600 hover:text-blue-800 whitespace-nowrap">
+          ← Back to Review Schedule
+        </Link>
+        <div className="h-6 border-l border-slate-200" />
         <div>
           <span className="font-bold text-slate-900 text-base">Full Analysis</span>
           <span className="text-slate-400 text-sm ml-2">· {project.name}</span>
         </div>
         <div className="ml-auto flex gap-2">
+          <Link href="/dashboard" className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400 hover:text-blue-600 font-semibold">
+            Overview
+          </Link>
           <button onClick={() => window.print()} className="text-xs border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg hover:border-slate-400 font-semibold flex items-center gap-1.5">
             🖨 Print / Save PDF
           </button>
