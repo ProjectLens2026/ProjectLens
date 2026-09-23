@@ -20,7 +20,11 @@ import { discoverUSProject, type USProjectDiscoveryResult, type DiscoveryEvidenc
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { getActiveProject, getActiveVersion, subscribeToProjects, updateVersionApprovalResult } from '@/lib/projectStore'
-import { evaluateApprovalReadiness } from '@/lib/approval-readiness/evaluator'
+import {
+  buildScheduleReviewSnapshot,
+  reviewFindingSourceKey,
+  type ScheduleReviewSnapshot,
+} from '@/lib/scheduleReviewSnapshot'
 import { printReport } from '@/lib/printReport'
 import type { ApprovalReadinessResult, ApprovalMode, ApprovalFinding } from '@/lib/approval-readiness/types'
 import {
@@ -207,6 +211,22 @@ function buildActionGroups(result: ApprovalReadinessResult): { corrections: Acti
   }
 }
 
+function legacyFindingSignature(findings: ApprovalFinding[]): string {
+  return findings.map(finding => finding.id).sort().join('|')
+}
+
+function canonicalFindingSignature(findings: ApprovalFinding[]): string {
+  return findings.map(reviewFindingSourceKey).sort().join('|')
+}
+
+function existingFindingSignatures(comments: ReviewComment[]): Set<string> {
+  return new Set(
+    comments
+      .map(comment => [...(comment.sourceFindingIds || [])].sort().join('|'))
+      .filter(Boolean),
+  )
+}
+
 function discoveryLabel(value?: string): string {
   if (!value || /^(general|unknown|unclassified)$/i.test(value)) return 'Not identified'
   return value.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2')
@@ -311,6 +331,7 @@ export default function ApprovalReadinessPage() {
   const [mode, setMode] = useState<ApprovalMode>('PRE_SUBMISSION')
   const [reviewPurpose, setReviewPurpose] = useState<ReviewPurpose>('PERIODIC_UPDATE')
   const [result, setResult] = useState<ApprovalReadinessResult | null>(null)
+  const [reviewSnapshot, setReviewSnapshot] = useState<ScheduleReviewSnapshot | null>(null)
   const [running, setRunning] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [reportKind, setReportKind] = useState<null | 'executive' | 'complete'>(null)
@@ -343,15 +364,23 @@ export default function ApprovalReadinessPage() {
       setAnalysis(v?.analysis || null)
       setReviewPurpose(defaultReviewPurpose(v))
 
-      // IMPORTANT: clear old-version UI when the newly selected version has no
-      // saved Approval Readiness result. Never let one project's result bleed
-      // into another project/version.
-      if (v?.approvalResult) {
-        setResult(v.approvalResult as ApprovalReadinessResult)
-        setMode((v.approvalResult.mode as ApprovalMode) || 'PRE_SUBMISSION')
-      } else {
-        setResult(null)
-        setMode('PRE_SUBMISSION')
+      // Full CPM Analysis and Review Schedule must consume the same current
+      // version evidence. Build the shared snapshot immediately so detected
+      // concerns are visible without requiring a second, disconnected run.
+      const selectedMode = (v?.approvalResult?.mode as ApprovalMode) || 'PRE_SUBMISSION'
+      setMode(selectedMode)
+      try {
+        const snapshot = buildScheduleReviewSnapshot(v?.analysis || null, {
+          versionId: v?.id,
+          mode: selectedMode,
+          projectType: 'ALL',
+        })
+        setReviewSnapshot(snapshot)
+        setResult(snapshot?.approval || (v?.approvalResult as ApprovalReadinessResult) || null)
+      } catch (error) {
+        console.error('[approval] shared review snapshot failed:', error)
+        setReviewSnapshot(null)
+        setResult((v?.approvalResult as ApprovalReadinessResult) || null)
       }
 
       // Close any old finding/report state that belonged to the prior version.
@@ -395,7 +424,13 @@ export default function ApprovalReadinessPage() {
     }
     setRunning(true)
     try {
-      const res = evaluateApprovalReadiness(analysis, { mode, projectType: 'ALL' })
+      const snapshot = buildScheduleReviewSnapshot(analysis, {
+        versionId: version?.id,
+        mode,
+        projectType: 'ALL',
+      })
+      const res = snapshot?.approval || null
+      setReviewSnapshot(snapshot)
       setResult(res)
       // persist so it survives leaving the page
       if (res && project?.id && version?.id) {
@@ -426,12 +461,11 @@ export default function ApprovalReadinessPage() {
     if (!project?.id || !version?.id || !result) return
     const groups = buildActionGroups(result)
     const candidates = [...groups.corrections, ...groups.clarifications]
-    const existingSignatures = new Set(
-      reviewData.comments.map(comment => [...(comment.sourceFindingIds || [])].sort().join('|')).filter(Boolean)
-    )
+    const existingSignatures = existingFindingSignatures(reviewData.comments)
     const pending = candidates.filter(group => {
-      const signature = group.findings.map(finding => finding.id).sort().join('|')
-      return signature && !existingSignatures.has(signature)
+      const canonical = canonicalFindingSignature(group.findings)
+      const legacy = legacyFindingSignature(group.findings)
+      return canonical && !existingSignatures.has(canonical) && !existingSignatures.has(legacy)
     })
     if (!pending.length) return
 
@@ -450,7 +484,7 @@ export default function ApprovalReadinessPage() {
       }
       const saved = await createReviewCommentInSupabase(project.id, {
         source: 'CONVERTED_FROM_CL_FINDING',
-        sourceFindingIds: group.findings.map(finding => finding.id),
+        sourceFindingIds: group.findings.map(reviewFindingSourceKey),
         title: group.title,
         concern: group.why,
         requiredCorrection: `${group.action} Acceptance: ${group.acceptance}`,
@@ -512,10 +546,11 @@ export default function ApprovalReadinessPage() {
     const summary = summarizeReviewComments(reviewData.comments)
     const detectedGroups = result ? (() => {
       const grouped = buildActionGroups(result)
-      const existingSignatures = new Set(reviewData.comments.map(comment => [...(comment.sourceFindingIds || [])].sort().join('|')).filter(Boolean))
+      const existingSignatures = existingFindingSignatures(reviewData.comments)
       return [...grouped.corrections, ...grouped.clarifications].filter(group => {
-        const signature = group.findings.map(finding => finding.id).sort().join('|')
-        return signature && !existingSignatures.has(signature)
+        const canonical = canonicalFindingSignature(group.findings)
+        const legacy = legacyFindingSignature(group.findings)
+        return canonical && !existingSignatures.has(canonical) && !existingSignatures.has(legacy)
       })
     })() : []
     const openComments = reviewData.comments.filter(comment => !CLOSED_REVIEW_STATUSES.includes(comment.status) && comment.status !== 'DRAFT')
@@ -617,6 +652,13 @@ export default function ApprovalReadinessPage() {
     return <ApprovalReport result={result} mode={mode} kind={reportKind} project={project} discovery={discovery} onBack={() => setReportKind(null)} />
   }
 
+  const reviewCommentSummary = summarizeReviewComments(reviewData.comments)
+  const workflowBlocking = reviewCommentSummary.blocking > 0
+  const snapshotActionGroups = reviewSnapshot
+    ? buildActionGroups(reviewSnapshot.approval)
+    : { corrections: [], clarifications: [] }
+  const snapshotConcernGroups = snapshotActionGroups.corrections.length + snapshotActionGroups.clarifications.length
+
   return (
     <Shell project={project}>
       <div className="rounded-xl border border-slate-200 bg-white p-4 mb-4">
@@ -667,6 +709,10 @@ export default function ApprovalReadinessPage() {
       </div>
 
       <div className="flex gap-1 border-b border-slate-200 mb-4 overflow-x-auto" role="tablist" aria-label="Review workspace">
+        <Link href="/dashboard/lens" role="tab" aria-selected="false"
+          className="whitespace-nowrap border-b-2 border-transparent px-4 py-3 text-[12px] font-bold text-slate-500 hover:border-blue-300 hover:text-blue-600">
+          Full CPM Analysis ↗
+        </Link>
         {([
           ['comments', 'Comment Register'],
           ['narrative', 'Schedule Narrative'],
@@ -681,6 +727,45 @@ export default function ApprovalReadinessPage() {
       </div>
 
       {reviewDataError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4 text-[11px] text-red-800">{reviewDataError}</div>}
+
+      {activeTab === 'comments' && reviewSnapshot && <section className="rounded-2xl border border-blue-200 bg-white p-5 mb-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-blue-600">Unified CPM Review</div>
+            <h2 className="text-[15px] font-extrabold text-slate-900 mt-1">Full Analysis and Review Schedule now use the same version evidence</h2>
+            <p className="text-[11px] text-slate-500 mt-1 max-w-[700px]">Technical signals remain visible as CPM evidence. Control Lens consolidates related activity-level findings into reviewer concerns so the register does not create one owner comment for every affected activity.</p>
+          </div>
+          <Link href="/dashboard/lens" className="rounded-lg bg-slate-900 px-4 py-2 text-[11px] font-bold text-white">Open Full CPM Analysis →</Link>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-4">
+          {[
+            ['CPM signal groups', reviewSnapshot.reconciliation.technicalSignalGroups],
+            ['Activity-level occurrences', reviewSnapshot.reconciliation.technicalOccurrences],
+            ['Consolidated concerns', snapshotConcernGroups],
+            ['Blocking findings', reviewSnapshot.reconciliation.blockingFindings],
+          ].map(([label, value]) => <div key={String(label)} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="text-[9px] font-bold uppercase tracking-wide text-slate-500">{label}</div>
+            <div className="text-[20px] font-black text-slate-900 mt-1">{value}</div>
+          </div>)}
+        </div>
+
+        {reviewSnapshot.technicalSignals.length > 0 && <div className="mt-3 border border-slate-200 rounded-lg overflow-hidden">
+          {reviewSnapshot.technicalSignals.map(signal => <div key={signal.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-slate-100 last:border-b-0 px-3 py-2.5">
+            <div>
+              <div className="text-[11px] font-bold text-slate-800">{signal.label}</div>
+              <div className="text-[10px] text-slate-500 mt-0.5">{signal.summary}</div>
+              <div className="text-[9px] text-blue-600 mt-1">Evidence: {signal.evidenceLocation}</div>
+            </div>
+            <div className="text-right">
+              <div className="font-mono text-[14px] font-black text-slate-900">{signal.count}</div>
+              <div className={`text-[8px] font-bold uppercase ${signal.treatment === 'REVIEW_REQUIRED' ? 'text-amber-700' : 'text-slate-400'}`}>{signal.treatment.replaceAll('_', ' ')}</div>
+            </div>
+          </div>)}
+        </div>}
+
+        {!reviewSnapshot.decisionIntegrity.internallyConsistent && <div role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-[11px] font-semibold text-red-800">{reviewSnapshot.decisionIntegrity.explanation}</div>}
+      </section>}
 
       {activeTab === 'evidence' && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 mb-4">
         <div className="text-xs text-slate-600">The evidence appendix preserves discovery, domains, findings, affected activities and schedule traceability.</div>
@@ -750,17 +835,20 @@ export default function ApprovalReadinessPage() {
             <div className="flex flex-wrap items-start gap-5">
               <div className="flex-1 min-w-[320px]">
                 <div className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-slate-500 mb-1">Control Lens Readiness Status</div>
-                <div className="text-[24px] md:text-[28px] font-black leading-tight" style={{ color: readinessColor(result.readinessStatus) }}>
-                  {contextualReadinessLabel(result, mode)}
+                <div className="text-[24px] md:text-[28px] font-black leading-tight" style={{ color: workflowBlocking ? COLORS.red : readinessColor(result.readinessStatus) }}>
+                  {workflowBlocking ? 'NOT READY — OPEN REVIEW COMMENTS' : contextualReadinessLabel(result, mode)}
                 </div>
                 <div className="text-[12px] text-slate-600 leading-relaxed mt-2 max-w-[720px]">
-                  {result.readinessReason || 'Control Lens combines schedule logic, sequencing, path credibility and readiness evidence. The authorized reviewer makes the final approval decision.'}
+                  {workflowBlocking
+                    ? `${reviewCommentSummary.blocking} issued approval-blocking comment${reviewCommentSummary.blocking === 1 ? '' : 's'} remain unresolved. Technical score cannot override the review workflow.`
+                    : result.readinessReason || 'Control Lens combines schedule logic, sequencing, path credibility and readiness evidence. The authorized reviewer makes the final approval decision.'}
                 </div>
                 <div className="flex flex-wrap gap-2 mt-3">
                   <Chip label={`Critical Gates: ${result.criticalGates.passed ? 'PASS' : 'FAIL'}`} color={result.criticalGates.passed ? COLORS.green : COLORS.red} />
                   <Chip label={`Critical: ${result.counts.critical}`} color={result.counts.critical ? COLORS.red : COLORS.slate} />
                   <Chip label={`Major: ${result.counts.major}`} color={result.counts.major ? COLORS.amber : COLORS.slate} />
                   <Chip label={`Minor: ${result.counts.minor}`} color={COLORS.slate} />
+                  {workflowBlocking && <Chip label={`Open Review Blockers: ${reviewCommentSummary.blocking}`} color={COLORS.red} />}
                 </div>
                 {!result.criticalGates.passed && (
                   <div className="mt-2 text-[11px] font-semibold" style={{ color: COLORS.red }}>
@@ -771,12 +859,12 @@ export default function ApprovalReadinessPage() {
 
               <div className="flex items-center gap-4 flex-shrink-0">
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-center min-w-[120px]">
-                  <div className="text-[9px] uppercase tracking-wide font-extrabold text-slate-500">Readiness Score</div>
+                  <div className="text-[9px] uppercase tracking-wide font-extrabold text-slate-500">Technical Score</div>
                   <div className="font-mono text-[30px] font-extrabold leading-none mt-1" style={{ color: gradeColor(result.grade) }}>
                     {result.totalScore}<span className="text-[13px] text-slate-400">/100</span>
                   </div>
                   <div className="text-[13px] font-extrabold mt-1" style={{ color: gradeColor(result.grade) }}>{result.grade}</div>
-                  <div className="text-[8.5px] text-slate-400 mt-1">supporting indicator</div>
+                  <div className="text-[8.5px] text-slate-400 mt-1">does not override open comments</div>
                 </div>
               </div>
             </div>
@@ -1000,10 +1088,11 @@ function CommentRegisterPanel({
   const summary = summarizeReviewComments(comments)
   const displayed = comments.filter(comment => filter === 'all' || !CLOSED_REVIEW_STATUSES.includes(comment.status))
   const actionGroups = result ? buildActionGroups(result) : { corrections: [], clarifications: [] }
-  const existingSignatures = new Set(comments.map(comment => [...(comment.sourceFindingIds || [])].sort().join('|')).filter(Boolean))
+  const existingSignatures = existingFindingSignatures(comments)
   const proposedGroups = [...actionGroups.corrections, ...actionGroups.clarifications].filter(group => {
-    const signature = group.findings.map(finding => finding.id).sort().join('|')
-    return signature && !existingSignatures.has(signature)
+    const canonical = canonicalFindingSignature(group.findings)
+    const legacy = legacyFindingSignature(group.findings)
+    return canonical && !existingSignatures.has(canonical) && !existingSignatures.has(legacy)
   })
   const unissuedCount = proposedGroups.length
 
