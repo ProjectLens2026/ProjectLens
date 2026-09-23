@@ -12,7 +12,7 @@
 
 import type { ApprovalDomainId, RuleStrength, Grade } from './types'
 
-export const FRAMEWORK_VERSION = '1.0.0'
+export const FRAMEWORK_VERSION = '1.1.0'
 
 // --------------------------------------------------------- Domain weights (=100)
 export interface DomainDef {
@@ -46,11 +46,11 @@ export function domainWeight(id: ApprovalDomainId): number {
 export interface GradeBand { grade: Grade; min: number; recommendation: string }
 
 export const GRADE_BANDS: GradeBand[] = [
-  { grade: 'A',   min: 95, recommendation: 'Approval Ready / No Material Comments' },
-  { grade: 'A-',  min: 90, recommendation: 'Approval Ready with Minor Comments' },
-  { grade: 'B+',  min: 85, recommendation: 'Approved with Comments' },
-  { grade: 'B',   min: 80, recommendation: 'Approved with Comments / Reviewer Judgment' },
-  { grade: 'C',   min: 70, recommendation: 'Revise & Resubmit' },
+  { grade: 'A',   min: 97, recommendation: 'Technically Ready for Approval Review' },
+  { grade: 'A-',  min: 93, recommendation: 'Approval Review with Minor Comments' },
+  { grade: 'B+',  min: 88, recommendation: 'Reviewer Action Required' },
+  { grade: 'B',   min: 83, recommendation: 'Material Comments Require Resolution' },
+  { grade: 'C',   min: 75, recommendation: 'Revise & Resubmit' },
   { grade: 'D/F', min: 0,  recommendation: 'Not Approval Ready' },
 ]
 
@@ -63,33 +63,33 @@ export function gradeFor(score: number): GradeBand {
 // A consolidated finding deducts from its PRIMARY domain only (ruling 3).
 // Base deduction by severity, scaled by rule strength. All configurable.
 export const SEVERITY_DEDUCTION: Record<1 | 2 | 3 | 4 | 5, number> = {
-  1: 0.5,
-  2: 1,
-  3: 2,
-  4: 4,
-  5: 6,
+  1: 1,
+  2: 2,
+  3: 4,
+  4: 7,
+  5: 10,
 }
 
 export const STRENGTH_MULTIPLIER: Record<RuleStrength, number> = {
   REQUIRED: 1.0,   // full weight — a real prerequisite failure
-  EXPECTED: 0.45,  // deviation triggers verification, modest penalty
-  ADVISORY: 0.15,  // "needs review" observation — should barely move the score
+  EXPECTED: 0.7,   // credible schedule-quality deviation requiring resolution
+  ADVISORY: 0.25,  // non-contractual observation with limited score impact
 }
 
 // A single finding can never remove more than this from one domain.
-export const MAX_DEDUCTION_PER_FINDING = 8
+export const MAX_DEDUCTION_PER_FINDING = 10
 
 // Diminishing returns: within a domain, the Nth finding (sorted by size desc)
 // is weighted by DIMINISHING_WEIGHTS[N] (falling back to the tail). This makes
 // the score measure MATERIAL concern, not raw violation count — 15 similar
 // review items don't linearly wipe a domain; a reviewer notes the pattern once.
-export const DIMINISHING_WEIGHTS = [1.0, 0.5, 0.3, 0.2, 0.15]
-export const DIMINISHING_TAIL = 0.08
+export const DIMINISHING_WEIGHTS = [1.0, 0.65, 0.45, 0.3, 0.2]
+export const DIMINISHING_TAIL = 0.12
 
 // Non-critical findings can remove at most this fraction of a domain's weight.
 // A domain only goes below this floor when a genuine REQUIRED failure of
 // severity >= this threshold exists (a real, material deficiency).
-export const DOMAIN_SOFT_CAP_FRAC = 0.6
+export const DOMAIN_SOFT_CAP_FRAC = 0.75
 export const REQUIRED_FAILURE_SEVERITY = 4
 
 export function computeDeduction(
@@ -141,6 +141,11 @@ export const CRITICAL_GATES: CriticalGateDef[] = [
     id: 'GATE_NETWORK_INTEGRITY', label: 'Network Integrity',
     universal: true, triggerDomains: ['AR-03'], minSeverity: 5,
     reason: 'Severe logic/network integrity deficiency undermines schedule reliability.',
+  },
+  {
+    id: 'GATE_P6_CALCULATION_INTEGRITY', label: 'P6 Calculation Integrity',
+    universal: true, triggerDomains: ['AR-07'], minSeverity: 5,
+    reason: 'A prohibited setting or constraint overrides the CPM network and undermines calculated dates or float.',
   },
   {
     id: 'GATE_TURNOVER', label: 'Ready for Service / Turnover Credibility',

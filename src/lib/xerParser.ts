@@ -1,3 +1,5 @@
+import { discoverUSProject, type USProjectDiscoveryResult } from './construction/projectDiscovery'
+
 export interface Task {
   task_id: string
   task_code: string
@@ -18,6 +20,12 @@ export interface Task {
   target_end_date: string
   clndr_id: string
   wbs_id?: string
+  cstr_type?: string
+  cstr_date?: string
+  cstr_type2?: string
+  cstr_date2?: string
+  duration_type?: string
+  complete_pct_type?: string
 }
 export interface Calendar {
   clndr_id: string
@@ -31,6 +39,18 @@ export interface Relationship {
   pred_task_id: string
   pred_type: string
   lag_hr_cnt: string
+}
+export interface ActivityCodeType {
+  actv_code_type_id: string
+  actv_code_type: string
+  proj_id: string
+  actv_code_type_scope: string
+}
+export interface TaskActivityCode {
+  task_id: string
+  actv_code_type_id: string
+  actv_code_id: string
+  proj_id: string
 }
 // Day 15 — Trace Logic: lightweight task shape stored for every activity so
 // the Trace Logic view can walk predecessor/successor chains without needing
@@ -56,6 +76,13 @@ export interface TraceTask {
   act_end_date: string
   target_start_date: string
   target_end_date: string
+  clndr_id?: string
+  cstr_type?: string
+  cstr_date?: string
+  cstr_type2?: string
+  cstr_date2?: string
+  duration_type?: string
+  complete_pct_type?: string
   // raw WBS — source truth, no inference
   wbs_id?: string
   wbs_name?: string
@@ -81,6 +108,10 @@ export interface ParsedXER {
   succMap: Record<string, string[]>
   calendars: Record<string, Calendar>
   wbsNodes: Record<string, WbsNode>   // Brick 1 — raw WBS hierarchy
+  projectSettings: Record<string, string>   // Raw PROJECT row used for auditable P6 defaults
+  scheduleOptions: Record<string, string>   // Raw SCHEDOPTIONS row used for calculation-integrity review
+  activityCodeTypes: Record<string, ActivityCodeType>
+  taskActivityCodes: TaskActivityCode[]
 }
 export interface XERAnalysis {
   totalActivities: number
@@ -105,6 +136,11 @@ export interface XERAnalysis {
   traceRelationships?: Relationship[]      // Day 15 — Trace Logic edge list
   traceTasks?: Record<string, TraceTask>   // Day 15 — Trace Logic node dict
   wbsNodes?: Record<string, WbsNode>       // Brick 1 — raw WBS hierarchy
+  calendars?: Record<string, Calendar>     // P6 setting / calendar-scope review
+  projectSettings?: Record<string, string> // Raw PROJECT defaults from the submitted XER
+  scheduleOptions?: Record<string, string> // Raw P6 scheduling options from the submitted XER
+  activityCodeTypes?: Record<string, ActivityCodeType> // P6 code dictionaries and scope
+  taskActivityCodes?: TaskActivityCode[]              // Activity-code assignments
   healthScore: number
   condition: string
   delayDays: number
@@ -138,6 +174,8 @@ export interface XERAnalysis {
   risksCritical?: number
   risksHigh?: number
   risksMedium?: number
+  // Phase 4A - deterministic, non-scoring U.S. project discovery result.
+  projectDiscovery?: USProjectDiscoveryResult
 }
 export interface SequenceViolation {
   pred: Task
@@ -183,6 +221,10 @@ export function parseXER(content: string): ParsedXER {
   const relationships: Relationship[] = []
   const calendars: Record<string, Calendar> = {}
   const wbsRaw: Record<string, { wbs_id: string; wbs_name: string; parent_wbs_id?: string }> = {}
+  let projectSettings: Record<string, string> = {}
+  let scheduleOptions: Record<string, string> = {}
+  const activityCodeTypes: Record<string, ActivityCodeType> = {}
+  const taskActivityCodes: TaskActivityCode[] = []
   let projectName = ''
   let dataDate = ''
   let contractEnd = ''
@@ -197,12 +239,25 @@ export function parseXER(content: string): ParsedXER {
     } else if (line.startsWith('%R')) {
       const values = line.split('\t').slice(1)
       if (currentTable === 'PROJECT') {
-        const row: any = {}
-        currentFields.forEach((f, i) => row[f] = values[i])
+        const row: Record<string, string> = {}
+        currentFields.forEach((f, i) => row[f] = values[i] || '')
+        projectSettings = row
         projectName = row.proj_short_name || ''
         dataDate = row.last_recalc_date || ''
         contractEnd = row.plan_end_date || ''
         projectedEnd = row.scd_end_date || ''
+      } else if (currentTable === 'SCHEDOPTIONS') {
+        const row: Record<string, string> = {}
+        currentFields.forEach((f, i) => row[f] = values[i] || '')
+        scheduleOptions = row
+      } else if (currentTable === 'ACTVTYPE') {
+        const row: Record<string, string> = {}
+        currentFields.forEach((f, i) => row[f] = values[i] || '')
+        if (row.actv_code_type_id) activityCodeTypes[row.actv_code_type_id] = row as unknown as ActivityCodeType
+      } else if (currentTable === 'TASKACTV') {
+        const row: Record<string, string> = {}
+        currentFields.forEach((f, i) => row[f] = values[i] || '')
+        if (row.task_id && row.actv_code_type_id) taskActivityCodes.push(row as unknown as TaskActivityCode)
       } else if (currentTable === 'CALENDAR') {
         const cal: any = {}
         currentFields.forEach((f, i) => cal[f] = values[i] || '')
@@ -253,7 +308,11 @@ export function parseXER(content: string): ParsedXER {
     if (!succMap[r.pred_task_id]) succMap[r.pred_task_id] = []
     succMap[r.pred_task_id].push(r.task_id)
   }
-  return { projectName, dataDate, contractEnd, projectedEnd, tasks, relationships, predMap, succMap, calendars, wbsNodes }
+  return {
+    projectName, dataDate, contractEnd, projectedEnd,
+    tasks, relationships, predMap, succMap, calendars, wbsNodes,
+    projectSettings, scheduleOptions, activityCodeTypes, taskActivityCodes,
+  }
 }
 export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   const { tasks, relationships, predMap, succMap, calendars, wbsNodes } = parsed
@@ -777,6 +836,13 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       early_end_date: t.early_end_date,
       target_start_date: t.target_start_date,
       target_end_date: t.target_end_date,
+      clndr_id: t.clndr_id,
+      cstr_type: t.cstr_type,
+      cstr_date: t.cstr_date,
+      cstr_type2: t.cstr_type2,
+      cstr_date2: t.cstr_date2,
+      duration_type: t.duration_type,
+      complete_pct_type: t.complete_pct_type,
       act_start_date: t.act_start_date,
       act_end_date: t.act_end_date,
     }))
@@ -804,6 +870,13 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       act_end_date: t.act_end_date,
       target_start_date: t.target_start_date,
       target_end_date: t.target_end_date,
+      clndr_id: t.clndr_id,
+      cstr_type: t.cstr_type,
+      cstr_date: t.cstr_date,
+      cstr_type2: t.cstr_type2,
+      cstr_date2: t.cstr_date2,
+      duration_type: t.duration_type,
+      complete_pct_type: t.complete_pct_type,
       // Brick 1 — raw WBS truth (no inference)
       wbs_id: t.wbs_id,
       wbs_name: wnode?.wbs_name,
@@ -811,6 +884,16 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       wbs_path: wnode?.full_path,
     }
   }
+
+  // Phase 4A - discover project nature and select reference scaffolds before
+  // later rules judge sequencing. This output is persisted with the analysis,
+  // but it does not alter health/readiness scores or emit findings.
+  const projectDiscovery = discoverUSProject({
+    projectName: parsed.projectName,
+    traceTasks,
+    traceRelationships: relationships,
+    wbsNodes,
+  })
 
   return {
     totalActivities: taskArr.length,
@@ -828,6 +911,11 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     traceRelationships: relationships,  // Day 15 — Trace Logic
     traceTasks,                          // Day 15 — Trace Logic
     wbsNodes,                            // Brick 1 — raw WBS hierarchy
+    calendars,                           // P6 schedule-quality settings
+    projectSettings: parsed.projectSettings,
+    scheduleOptions: parsed.scheduleOptions,
+    activityCodeTypes: parsed.activityCodeTypes,
+    taskActivityCodes: parsed.taskActivityCodes,
     healthScore, condition, delayDays,
     dataDate: parsed.dataDate,
     projectStartDate, projectStartSource,
@@ -855,5 +943,6 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     risksCritical,
     risksHigh,
     risksMedium,
+    projectDiscovery,
   }
 }

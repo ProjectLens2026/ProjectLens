@@ -20,6 +20,7 @@ import type {
   ReadinessStatus,
 } from './approval-readiness/types'
 import type { ProjectTypeKey } from './approval-readiness/framework'
+import { reviewOpenEndedLogic } from './approval-readiness/qualityRules'
 
 export type TechnicalSignalId =
   | 'CONTRACT_DELAY'
@@ -162,7 +163,7 @@ export function buildScheduleTechnicalSignals(analysis: ScheduleAnalysisLike): S
   const delayDays = finiteCount(analysis.delayDays)
   const negativeFloat = finiteCount(analysis.negativeFloat)
   const outOfSequence = listCount(analysis.outOfSequence)
-  const openEnds = listCount(analysis.noTies)
+  const openEnds = reviewOpenEndedLogic(analysis).unauthorized.length
   const longLeadAtRisk = Math.max(
     finiteCount(analysis.longLeadAtRisk),
     Array.isArray(analysis.longLeadItems)
@@ -291,4 +292,3 @@ export function buildScheduleReviewSnapshot(
     decisionIntegrity: decisionIntegrity(approval, findings),
   }
 }
-

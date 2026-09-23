@@ -27,6 +27,7 @@ import {
   type ScheduleReviewSnapshot,
 } from '@/lib/scheduleReviewSnapshot'
 import { printReport } from '@/lib/printReport'
+import { reviewOpenEndedLogic } from '@/lib/approval-readiness/qualityRules'
 import type { ApprovalReadinessResult, ApprovalMode, ApprovalFinding } from '@/lib/approval-readiness/types'
 import {
   addContractorResponseInSupabase,
@@ -135,7 +136,7 @@ function technicalEvidenceRows(signal: ScheduleTechnicalSignal, analysis: any): 
     }))
   }
   if (signal.id === 'OPEN_ENDS') {
-    return (analysis.noTies || []).map((task: any, index: number) => ({
+    return reviewOpenEndedLogic(analysis).unauthorized.map((task: any, index: number) => ({
       id: String(task.task_id || task.task_code || index),
       code: String(task.task_code || '—'),
       name: String(task.task_name || 'Unnamed activity'),
@@ -194,6 +195,18 @@ function actionFamily(f: ApprovalFinding): string {
   if (text.includes('may not reflect the field phasing')) return 'FIELD_PHASING'
   if (text.includes('construction sequence needs verification')) return 'CONSTRUCTION_SEQUENCE'
   if (text.includes('readiness path is incomplete')) return 'READINESS_PATH'
+  if (text.includes('open-ended network logic')) return 'NETWORK_OPEN_ENDS'
+  if (text.includes('status, actual dates, and remaining duration')) return 'STATUS_DATE_INTEGRITY'
+  if (text.includes('out-of-sequence progress requires')) return 'PROGRESS_LOGIC'
+  if (text.includes('prohibited leads') || text.includes('start-to-finish relationships')) return 'PROHIBITED_RELATIONSHIPS'
+  if (text.includes('long positive lags')) return 'LONG_LAGS'
+  if (text.includes('duration benchmark')) return 'ACTIVITY_DURATIONS'
+  if (text.includes('mandatory constraints') || text.includes('constraints require contractual basis')) return 'CONSTRAINTS'
+  if (text.includes('p6 longest-path calculation') || text.includes('critical activity definition is not longest path')) return 'LONGEST_PATH_SETTING'
+  if (text.includes('duration type differs') || text.includes('percent complete type') || text.includes('project level calendars') || text.includes('assigned calendar') || text.includes('retained logic') || text.includes('8-hour day')) return 'P6_SETTINGS'
+  if (text.includes('procurement items require') || text.includes('long-lead procurement requires')) return 'PROCUREMENT_READINESS'
+  if (text.includes('zero original duration')) return 'ACTIVITY_DURATIONS'
+  if (text.includes('lacks wbs assignment') || text.includes('activity ids exceed') || text.includes('activity-code')) return 'WBS_ASSIGNMENT'
   return `OTHER:${f.primaryDomain}`
 }
 
@@ -233,6 +246,66 @@ const ACTION_COPY: Record<string, Pick<ActionGroup, 'title' | 'why' | 'action' |
     why: 'The schedule may not show a credible chain from installation through startup, testing and turnover.',
     action: 'Add or map the missing readiness steps and dependencies, or identify the equivalent activities already in the schedule.',
     acceptance: 'Each applicable system has a traceable readiness path to the governing completion target.',
+  },
+  NETWORK_OPEN_ENDS: {
+    title: 'Close unauthorized network open ends',
+    why: 'Activities outside the recognized project-start and project-finish endpoints are not fully tied into the CPM network, so calculated dates and float may be unreliable.',
+    action: 'Connect every listed activity to valid predecessor and successor logic or document the approved endpoint exception.',
+    acceptance: 'Only the approved project start lacks a predecessor and only the approved project finish lacks a successor.',
+  },
+  STATUS_DATE_INTEGRITY: {
+    title: 'Reconcile activity status, actual dates, and remaining work',
+    why: 'Contradictory status records corrupt progress, remaining duration, logic calculations, and the credibility of the update data date.',
+    action: 'Validate each item against daily reports and approved update records; preserve truthful actual dates and correct the status or remaining duration.',
+    acceptance: 'No future actuals, impossible date sequences, status/date contradictions, or remaining duration on completed work remain.',
+  },
+  PROHIBITED_RELATIONSHIPS: {
+    title: 'Remove prohibited leads and Start-to-Finish relationships',
+    why: 'These relationship methods obscure the executable sequence and can distort float.',
+    action: 'Replace negative lags and Start-to-Finish relationships with explicit activities and conventional CPM logic.',
+    acceptance: 'No negative lags or Start-to-Finish relationships remain unless the governing requirement expressly permits an approved exception.',
+  },
+  LONG_LAGS: {
+    title: 'Replace or justify long positive lags',
+    why: 'Long lags can hide curing, delivery, review, access, or waiting work that should be visible and statusable.',
+    action: 'Convert hidden work into named activities and explain any retained lag in the schedule narrative.',
+    acceptance: 'Every retained lag has a documented basis and does not replace measurable work or proper logic.',
+  },
+  ACTIVITY_DURATIONS: {
+    title: 'Subdivide excessive non-procurement durations',
+    why: 'Activities longer than the reviewable update period conceal progress, handoffs, and delay causes.',
+    action: 'Break the listed work into measurable, logic-connected activities or provide the project-specific basis for the longer duration.',
+    acceptance: 'Non-procurement activities meet the governing duration limit or carry an accepted exception.',
+  },
+  CONSTRAINTS: {
+    title: 'Remove or substantiate schedule constraints',
+    why: 'Constraints can override calculated logic, manufacture float, or force dates that the network does not support.',
+    action: 'Remove mandatory constraints and verify every other constraint against an authorized contractual milestone or approved exception.',
+    acceptance: 'Only authorized milestone constraints remain and the longest path is driven by executable network logic.',
+  },
+  P6_SETTINGS: {
+    title: 'Correct mandatory P6 calculation settings',
+    why: 'Duration type, percent-complete type, and calendar scope directly affect how P6 calculates progress, dates, remaining duration, and float.',
+    action: 'Apply the governing P6 settings consistently and rerun the schedule before resubmission.',
+    acceptance: 'Retained Logic is used, activities use the required duration and percent-complete methods, and submitted calendars are assigned and controlled at project level.',
+  },
+  LONGEST_PATH_SETTING: {
+    title: 'Calculate and validate the P6 longest path',
+    why: 'The submitted XER does not evidence a calculated driving path to the completion target.',
+    action: 'Enable Define Critical Activities as Longest Path, reschedule, and trace the resulting chain to the governing contract completion milestone.',
+    acceptance: 'The exported XER carries a continuous P6 driving path that reaches the selected completion target.',
+  },
+  PROCUREMENT_READINESS: {
+    title: 'Resolve long-lead procurement exposure',
+    why: 'Low-float procurement can control installation and commissioning before the risk becomes visible in the field.',
+    action: 'Confirm approval, release, fabrication, delivery, required-on-site, installation successor, supplier commitment, and mitigation dates.',
+    acceptance: 'Each listed item has a current, logic-connected procurement path and an executable recovery or confirmation plan.',
+  },
+  WBS_ASSIGNMENT: {
+    title: 'Correct WBS, activity IDs, and project coding',
+    why: 'Incomplete schedule structure prevents reliable filtering, reconciliation, reporting, and transfer into the required federal control systems.',
+    action: 'Complete WBS assignment, correct overlength IDs, and establish the required project-level activity-code dictionary and assignments.',
+    acceptance: 'Activities follow the approved ID convention, WBS, and applicable project-level SDEF coding structure.',
   },
 }
 
@@ -1512,6 +1585,7 @@ function ReviewDecisionHero({ result, mode, workflowBlocking, blockingComments, 
             : result.readinessReason || 'Control Lens combines schedule logic, sequencing, path credibility and readiness evidence. The authorized reviewer makes the final decision.'}
         </p>
         <div className="flex flex-wrap gap-2 mt-4">
+          <Chip label="Benchmark: U.S. / UFGS" color={COLORS.blue} />
           <Chip label={`Critical Gates: ${result.criticalGates.passed ? 'PASS' : 'FAIL'}`} color={result.criticalGates.passed ? COLORS.green : COLORS.red} />
           <Chip label={`${openComments} open comments`} color={openComments ? COLORS.red : COLORS.green} />
           <Chip label={`${correctionGroups} corrections`} color={correctionGroups ? COLORS.red : COLORS.green} />
