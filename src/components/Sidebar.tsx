@@ -420,19 +420,21 @@ export default function Sidebar({ user }: SidebarProps) {
   function fmtSnap(d?: string): string {
     return formatDisplayDate(d)
   }
-  // Per-project navigation intentionally exposes only the five workspaces that
+  // Per-project navigation intentionally exposes only the six workspaces that
   // answer the user's real questions. Detailed tools remain available inside
-  // Review Schedule, Project Controls, Reports, and Schedules & Versions.
+  // Full CPM Analysis, Review Schedule, Project Controls, Reports, and
+  // Schedules & Versions.
   // Workspace-level navigation (Enterprise, Archive, Deleted, Settings,
   // Portfolio) remains separate and unchanged below.
   const allViews = activeProject ? [
     { href: '/dashboard', icon: '⊞', label: 'Overview', group: 'PROJECT WORKSPACE', requires: 'view' as const },
+    { href: '/dashboard/lens', icon: '⌕', label: 'Full CPM Analysis', group: 'PROJECT WORKSPACE', requires: 'view' as const },
     { href: '/dashboard/approval', icon: '✅', label: 'Review Schedule', group: 'PROJECT WORKSPACE', requires: 'view' as const },
     { href: '/dashboard/controls', icon: '⚙', label: 'Project Controls', group: 'PROJECT WORKSPACE', requires: 'view' as const },
     { href: '/dashboard/reports', icon: '📄', label: 'Reports', group: 'PROJECT WORKSPACE', requires: 'view' as const },
     { href: '/dashboard/projects', icon: '▤', label: 'Schedules & Versions', group: 'PROJECT WORKSPACE', requires: 'view' as const },
   ] : []
-  // All five destinations are available to anyone who can view the active
+  // All six destinations are available to anyone who can view the active
   // project. Permission checks remain inside the destination pages/actions.
   const views = allViews
   const isEnterpriseActive = pathname.startsWith('/dashboard/enterprise')
@@ -957,7 +959,7 @@ export default function Sidebar({ user }: SidebarProps) {
                 </div>
                 {/* CONTROL_LENS_PROJECT_NAV_V2 — one compact project menu.
                     Project/version selection remains above. Detailed tools
-                    are reached from the five destinations below. */}
+                    are reached from the six destinations below. */}
                 {isActive && (
                   <div className="ml-5 pl-2 border-l border-white/10 mt-2 mb-2">
                     <div className="px-2 pt-1.5 pb-1">
