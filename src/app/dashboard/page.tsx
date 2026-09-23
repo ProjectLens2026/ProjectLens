@@ -465,17 +465,11 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
           <span className="font-bold text-slate-900 text-base">Overview</span>
           <span className="text-slate-400 text-sm ml-2">· {project.name}{project.projectId ? ` · ${project.projectId}` : ''}</span>
         </div>
-        <div className="flex items-center gap-2 print:hidden">
-          <span className="text-xs text-slate-400">{version.versionLabel || xerFile}</span>
-          <Link href="/dashboard/lens" className="bg-white text-slate-800 border border-slate-300 hover:bg-slate-50 text-xs font-semibold px-3 py-1.5 rounded-md">
-            Full CPM Analysis
-          </Link>
-          <Link href="/dashboard/approval" className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded-md">
-            Review Schedule
-          </Link>
-          <Link href="/dashboard/upload" className="bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 text-xs font-semibold px-3 py-1.5 rounded-md flex items-center gap-1.5">
-            + Upload Schedule
-          </Link>
+        <div className="flex items-center gap-3 print:hidden">
+          <span className="text-xs text-slate-400">Selected version: {version.versionLabel || xerFile}</span>
+          <button onClick={() => window.print()} className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+            Print / Save PDF
+          </button>
         </div>
       </div>
 
@@ -603,40 +597,6 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
           </div>
         </Card>
 
-        <Card>
-          <div className="flex items-start justify-between gap-4 mb-4">
-            <div>
-              <SectionTitle>Detailed P6 Schedule Analysis</SectionTitle>
-              <div className="text-[11px] text-slate-500">The complete Control Lens CPM analysis remains available. Overview summarizes the project; these tools preserve the underlying schedule evidence.</div>
-            </div>
-            <Link href="/dashboard/lens" className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded-lg whitespace-nowrap">Open Full Analysis →</Link>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <Link href="/dashboard/lens" className="rounded-lg border border-slate-200 p-3 hover:border-blue-300 hover:bg-blue-50 transition-colors">
-              <div className="text-xs font-bold text-slate-900">CPM & Schedule Detail</div>
-              <div className="text-[10px] text-slate-500 mt-1">Activities, dates, float, constraints, relationships, and schedule metrics.</div>
-            </Link>
-            <Link href="/dashboard/trace" className="rounded-lg border border-slate-200 p-3 hover:border-blue-300 hover:bg-blue-50 transition-colors">
-              <div className="text-xs font-bold text-slate-900">Logic Trace</div>
-              <div className="text-[10px] text-slate-500 mt-1">Trace predecessor and successor logic through the selected XER.</div>
-            </Link>
-            <Link href="/dashboard/reports/critical-path" className="rounded-lg border border-slate-200 p-3 hover:border-blue-300 hover:bg-blue-50 transition-colors">
-              <div className="text-xs font-bold text-slate-900">Critical & Longest Path</div>
-              <div className="text-[10px] text-slate-500 mt-1">Review the submitted controlling paths and completion-driving activities.</div>
-            </Link>
-            <Link href="/dashboard/reports/schedule-quality" className="rounded-lg border border-slate-200 p-3 hover:border-blue-300 hover:bg-blue-50 transition-colors">
-              <div className="text-xs font-bold text-slate-900">Schedule Quality</div>
-              <div className="text-[10px] text-slate-500 mt-1">Open ends, constraints, lags, calendars, durations, and coding checks.</div>
-            </Link>
-          </div>
-        </Card>
-
-        <div className="flex flex-wrap gap-2 pb-4">
-          <Link href="/dashboard/lens" className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-lg">Full CPM Analysis</Link>
-          <Link href="/dashboard/approval" className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-lg">Review Schedule</Link>
-          <Link href="/dashboard/project-setup" className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold px-4 py-2 rounded-lg">Project Setup</Link>
-          <Link href="/dashboard/projects" className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold px-4 py-2 rounded-lg">Schedules & Versions</Link>
-        </div>
       </div>
     </div>
   )
@@ -657,26 +617,6 @@ function Card({ children, compact }: { children: React.ReactNode; compact?: bool
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <div className="text-sm font-semibold text-slate-800 mb-3">{children}</div>
-}
-
-function HealthBanner({ score, label, narrative }: { score: number; label: string; narrative: string }) {
-  const tone = score >= 80 ? 'green' : score >= 60 ? 'amber' : 'red'
-  const bg = tone === 'green' ? 'bg-emerald-50 border-emerald-200' : tone === 'amber' ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200'
-  const titleColor = tone === 'green' ? 'text-emerald-900' : tone === 'amber' ? 'text-amber-900' : 'text-red-900'
-  const bodyColor = tone === 'green' ? 'text-emerald-800' : tone === 'amber' ? 'text-amber-800' : 'text-red-800'
-  const icon = tone === 'green' ? '✓' : tone === 'amber' ? '👁' : '⚠'
-  return (
-    <div className={clsx('border rounded-xl p-3 flex items-center gap-3', bg)}>
-      <div className="text-2xl flex-shrink-0">{icon}</div>
-      <div className="flex-1">
-        <div className={clsx('text-sm font-semibold', titleColor)}>{label} · Health {score}/100</div>
-        <div className={clsx('text-xs mt-0.5', bodyColor)}>{narrative}</div>
-      </div>
-      <Link href="/dashboard/lens" className={clsx('text-xs px-3 py-1.5 rounded-md font-semibold bg-white border whitespace-nowrap', tone === 'green' ? 'text-emerald-800 border-emerald-200 hover:bg-emerald-50' : tone === 'amber' ? 'text-amber-800 border-amber-200 hover:bg-amber-50' : 'text-red-800 border-red-200 hover:bg-red-50')}>
-        Full Analysis →
-      </Link>
-    </div>
-  )
 }
 
 function DateCell({ label, value, sub, highlightColor }: { label: string; value: string; sub?: string; highlightColor?: 'red' | 'amber' }) {

@@ -668,9 +668,17 @@ export default function ApprovalReadinessPage() {
             <div className="text-[14px] font-extrabold text-slate-900 mt-1">{version?.versionLabel || version?.fileName || 'Current version'}</div>
             <div className="text-[11px] text-slate-500 mt-1">Data date: {shortDate(version?.dataDate || analysis?.dataDate)} · File: {version?.fileName || '—'}</div>
           </div>
-          <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2 text-right">
-            <div className="text-[9px] font-extrabold uppercase tracking-wide text-blue-600">Review level</div>
-            <div className="text-[11px] font-bold text-blue-900 mt-0.5">Version-specific review</div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2 text-right">
+              <div className="text-[9px] font-extrabold uppercase tracking-wide text-blue-600">Review level</div>
+              <div className="text-[11px] font-bold text-blue-900 mt-0.5">Version-specific review</div>
+            </div>
+            <button disabled={!result} onClick={() => setReportKind('executive')} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[11px] font-bold text-slate-700 disabled:opacity-40">
+              Executive Report
+            </button>
+            <button disabled={!result} onClick={() => setReportKind('complete')} className="rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-bold text-white disabled:opacity-40">
+              Complete Review / Print
+            </button>
           </div>
         </div>
       </div>
@@ -709,10 +717,6 @@ export default function ApprovalReadinessPage() {
       </div>
 
       <div className="flex gap-1 border-b border-slate-200 mb-4 overflow-x-auto" role="tablist" aria-label="Review workspace">
-        <Link href="/dashboard/lens" role="tab" aria-selected="false"
-          className="whitespace-nowrap border-b-2 border-transparent px-4 py-3 text-[12px] font-bold text-slate-500 hover:border-blue-300 hover:text-blue-600">
-          Full CPM Analysis ↗
-        </Link>
         {([
           ['comments', 'Comment Register'],
           ['narrative', 'Schedule Narrative'],
@@ -732,10 +736,9 @@ export default function ApprovalReadinessPage() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-blue-600">Unified CPM Review</div>
-            <h2 className="text-[15px] font-extrabold text-slate-900 mt-1">Full Analysis and Review Schedule now use the same version evidence</h2>
+            <h2 className="text-[15px] font-extrabold text-slate-900 mt-1">CPM findings carried into this schedule review</h2>
             <p className="text-[11px] text-slate-500 mt-1 max-w-[700px]">Technical signals remain visible as CPM evidence. Control Lens consolidates related activity-level findings into reviewer concerns so the register does not create one owner comment for every affected activity.</p>
           </div>
-          <Link href="/dashboard/lens" className="rounded-lg bg-slate-900 px-4 py-2 text-[11px] font-bold text-white">Open Full CPM Analysis →</Link>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-4">
@@ -755,7 +758,7 @@ export default function ApprovalReadinessPage() {
             <div>
               <div className="text-[11px] font-bold text-slate-800">{signal.label}</div>
               <div className="text-[10px] text-slate-500 mt-0.5">{signal.summary}</div>
-              <div className="text-[9px] text-blue-600 mt-1">Evidence: {signal.evidenceLocation}</div>
+              <div className="text-[9px] text-blue-600 mt-1">CPM evidence area: {signal.evidenceLocation.replace('Full CPM Analysis → ', '')}</div>
             </div>
             <div className="text-right">
               <div className="font-mono text-[14px] font-black text-slate-900">{signal.count}</div>
@@ -770,7 +773,6 @@ export default function ApprovalReadinessPage() {
       {activeTab === 'evidence' && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 mb-4">
         <div className="text-xs text-slate-600">The evidence appendix preserves discovery, domains, findings, affected activities and schedule traceability.</div>
         <div className="flex gap-2">
-          <Link href="/dashboard/lens" className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200">Schedule Detail</Link>
           <Link href="/dashboard/trace" className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200">Logic Trace</Link>
           <button disabled={!result} onClick={() => setReportKind('complete')} className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200 disabled:opacity-40">Full Evidence Appendix</button>
         </div>
