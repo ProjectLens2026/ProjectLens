@@ -3,7 +3,7 @@
 // =============================================================================
 // src/components/ReportHeader.tsx
 // =============================================================================
-// The "cover sheet" block at the top of every ControlLens report.
+// Neutral cover-sheet block shared by exported schedule reports.
 //
 // Layout (mirrors EstimateLens for visual consistency):
 //   ┌─────────────────────────────────────────────────────────────────────┐
@@ -14,8 +14,8 @@
 //   │  Project Name     040ADV-26-R      Washington, DC   Org Name        │
 //   └─────────────────────────────────────────────────────────────────────┘
 //
-// The 4-bar logo mark is the canonical ControlLens identity from
-// public/controllens-final.svg, inlined here as small rectangles.
+// Exported documents intentionally use a project-controls identity so client
+// teams can issue them without repeating the application brand.
 // =============================================================================
 
 import { REPORT_TAGLINE, fmtReportDate } from '@/lib/reports'
@@ -56,24 +56,11 @@ export default function ReportHeader({
 
   return (
     <div className="mb-6">
-      {/* Top row — logo + wordmark on the left, report title on the right */}
+      {/* Top row — neutral discipline label + report title */}
       <div className="flex items-start justify-between gap-6 pb-4 border-b-2" style={{ borderColor: '#13202e' }}>
-        <div className="flex items-start gap-3">
-          {/* 4-bar logo mark — canonical ControlLens identity */}
-          <div className="flex flex-col gap-[3px] mt-1.5">
-            <span className="block h-[5px] rounded-[1px]" style={{ width: '22px', background: '#2563eb' }} />
-            <span className="block h-[5px] rounded-[1px]" style={{ width: '30px', background: '#dc2626' }} />
-            <span className="block h-[5px] rounded-[1px]" style={{ width: '18px', background: '#16a34a' }} />
-            <span className="block h-[5px] rounded-[1px]" style={{ width: '25px', background: '#1f2937' }} />
-          </div>
-          <div>
-            <div className="text-[20px] font-extrabold leading-tight tracking-tight" style={{ color: '#13202e' }}>
-              CONTROL<span style={{ color: '#2563eb' }}>LENS</span>
-            </div>
-            <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500 mt-0.5">
-              {REPORT_TAGLINE}
-            </div>
-          </div>
+        <div>
+          <div className="text-[20px] font-extrabold leading-tight tracking-tight" style={{ color: '#13202e' }}>PROJECT CONTROLS</div>
+          <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500 mt-0.5">{REPORT_TAGLINE}</div>
         </div>
 
         <div className="text-right">

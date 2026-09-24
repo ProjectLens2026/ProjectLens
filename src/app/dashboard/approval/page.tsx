@@ -173,6 +173,10 @@ function findingTitle(f: ApprovalFinding): string {
   return f.whatFound || 'Finding description unavailable — run the check again'
 }
 
+function neutralReportText(value?: string | null): string {
+  return String(value || '').replace(/Control\s*Lens/gi, 'the automated schedule review')
+}
+
 type ActionDisposition = 'CORRECTION' | 'CLARIFICATION'
 
 interface ActionGroup {
@@ -714,21 +718,21 @@ export default function ApprovalReadinessPage() {
     const clarificationCount = result ? buildActionGroups(result).clarifications.length : 0
 
     const generatedDrafts: Record<string, string> = {
-      EXECUTIVE_SUMMARY: `Control Lens reviewed the selected schedule dated ${shortDate(version.dataDate || analysis?.dataDate)}. The current automated disposition is ${result?.readinessLabel || result?.recommendation || 'review pending'} with ${summary.open} open formal review comment${summary.open === 1 ? '' : 's'}. The current forecast is ${shortDate(currentForecast)}. This draft is generated from the XER, project basis and comment register and should be confirmed by the scheduler or authorized reviewer before issue.`,
-      CONTRACT_MILESTONES: `The authorized completion currently recorded in the Project Control Basis is ${shortDate(project?.contractDates?.originalContractCompletion)}. The selected XER forecasts completion on ${shortDate(currentForecast)}${priorVersion ? `, compared with ${shortDate(priorForecast)} in the prior version` : ''}. Control Lens reports these dates without determining entitlement; approved time modifications remain the contractual source of truth.`,
+      EXECUTIVE_SUMMARY: `The selected schedule dated ${shortDate(version.dataDate || analysis?.dataDate)} was reviewed. The current automated disposition is ${result?.readinessLabel || result?.recommendation || 'review pending'} with ${summary.open} open formal review comment${summary.open === 1 ? '' : 's'}. The current forecast is ${shortDate(currentForecast)}. This draft is generated from the XER, project basis and comment register and should be confirmed by the scheduler or authorized reviewer before issue.`,
+      CONTRACT_MILESTONES: `The authorized completion currently recorded in the Project Control Basis is ${shortDate(project?.contractDates?.originalContractCompletion)}. The selected XER forecasts completion on ${shortDate(currentForecast)}${priorVersion ? `, compared with ${shortDate(priorForecast)} in the prior version` : ''}. These dates are reported without determining entitlement; approved time modifications remain the contractual source of truth.`,
       PROGRESS_THIS_PERIOD: `The selected XER reports ${complete} completed, ${inProgress} in-progress and ${notStarted} not-started activities as of ${shortDate(version.dataDate || analysis?.dataDate)}. The scheduler should confirm the physical-progress basis and add any material accomplishments that are not represented by these schedule statuses.`,
-      NEXT_PERIOD_WORK: `Control Lens identified the current schedule status and available near-term activity evidence from the selected XER. The scheduler should confirm the work planned for the next reporting period, responsible trades, access needs and prerequisite approvals before this narrative is issued.`,
+      NEXT_PERIOD_WORK: `The current schedule status and available near-term activity evidence were identified from the selected XER. The scheduler should confirm the work planned for the next reporting period, responsible trades, access needs and prerequisite approvals before this narrative is issued.`,
       CHANGES_FROM_PRIOR_VERSION: priorVersion
         ? `This version contains ${analysis?.totalActivities ?? taskValues.length} activities and advances the data date to ${shortDate(version.dataDate || analysis?.dataDate)}. The prior version contained ${priorVersion.analysis?.totalActivities ?? Object.keys(priorVersion.analysis?.traceTasks || {}).length} activities with a data date of ${shortDate(priorVersion.dataDate || priorVersion.analysis?.dataDate)}. Forecast completion changed from ${shortDate(priorForecast)} to ${shortDate(currentForecast)}. Review the Changes Since Prior Version tab for the detailed comparison.`
-        : `This is the first available schedule version for comparison. Control Lens cannot state changes from a prior XER until an earlier version is available.`,
-      LONGEST_AND_CRITICAL_PATHS: `Control Lens reviewed the submitted critical and longest-path evidence. ${result?.pathReview?.criticalPath?.note || 'Critical-path credibility requires reviewer confirmation.'} ${result?.pathReview?.longestPath?.note || 'Longest-path credibility requires reviewer confirmation.'} Detailed activity traces remain in Full CPM Analysis.`,
+        : `This is the first available schedule version for comparison. Changes from a prior XER cannot be stated until an earlier version is available.`,
+      LONGEST_AND_CRITICAL_PATHS: `The submitted critical and longest-path evidence was reviewed. ${neutralReportText(result?.pathReview?.criticalPath?.note) || 'Critical-path credibility requires reviewer confirmation.'} ${neutralReportText(result?.pathReview?.longestPath?.note) || 'Longest-path credibility requires reviewer confirmation.'} Detailed activity traces remain in Full CPM Analysis.`,
       DELAYS_AND_CONSTRAINTS: `The selected XER shows ${Number(analysis?.delayDays || 0)} calendar days of forecast variance, ${technicalSignal('NEGATIVE_FLOAT')} activities with negative float, ${technicalSignal('OUT_OF_SEQUENCE')} out-of-sequence conditions and ${technicalSignal('OPEN_ENDS')} unauthorized open ends. These are schedule signals; causation, responsibility and entitlement require scheduler/reviewer confirmation.`,
-      PROCUREMENT_AND_LONG_LEAD: `Control Lens identified ${technicalSignal('LONG_LEAD_AT_RISK')} incomplete long-lead item${technicalSignal('LONG_LEAD_AT_RISK') === 1 ? '' : 's'} at risk under the current float threshold. Confirm required-on-site dates, submittal/approval status, fabrication, delivery and downstream installation interfaces before issue.`,
-      SUBMITTALS_RFIS_APPROVALS: `The XER contains ${submittalCount} activities whose names indicate submittal, shop-drawing, RFI, review or approval work. Control Lens reports the schedule evidence only. The scheduler should confirm current document status, responsible party and any effect on field work.`,
+      PROCUREMENT_AND_LONG_LEAD: `The review identified ${technicalSignal('LONG_LEAD_AT_RISK')} incomplete long-lead item${technicalSignal('LONG_LEAD_AT_RISK') === 1 ? '' : 's'} at risk under the current float threshold. Confirm required-on-site dates, submittal/approval status, fabrication, delivery and downstream installation interfaces before issue.`,
+      SUBMITTALS_RFIS_APPROVALS: `The XER contains ${submittalCount} activities whose names indicate submittal, shop-drawing, RFI, review or approval work. The schedule evidence is reported without inferring document status. The scheduler should confirm current status, responsible party and any effect on field work.`,
       TESTING_COMMISSIONING_TURNOVER: `The XER contains ${commissioningCount} activities whose names indicate startup, testing, commissioning, training, acceptance or turnover work. Confirm that the submitted logic connects system readiness through final completion and that the stated sequence matches the project requirements.`,
-      CORRECTIVE_ACTIONS: `Control Lens currently groups the automated review into ${correctionCount} correction group${correctionCount === 1 ? '' : 's'} and ${clarificationCount} clarification group${clarificationCount === 1 ? '' : 's'}. The contractor/scheduler should describe the corrective action, responsible party and planned completion date for each issued item.`,
+      CORRECTIVE_ACTIONS: `The automated review currently groups the findings into ${correctionCount} correction group${correctionCount === 1 ? '' : 's'} and ${clarificationCount} clarification group${clarificationCount === 1 ? '' : 's'}. The contractor/scheduler should describe the corrective action, responsible party and planned completion date for each issued item.`,
       OWNER_COMMENT_RESPONSES: `${summary.issued} formal comment${summary.issued === 1 ? ' has' : 's have'} been issued; ${summary.closed} ${summary.closed === 1 ? 'is' : 'are'} closed and ${summary.open} remain open. Responses and claimed corrections should be recorded in the Comment Register so the next XER can verify whether each item was corrected, remains open or was reopened.`,
-      ASSUMPTIONS_AND_SUPPORT: `This Control Lens draft is based on the selected XER, the current Project Control Basis and the formal Comment Register. It does not infer contractual entitlement, causation or responsibility. The scheduler or authorized reviewer should confirm the statements and identify any supporting documents before approving or issuing the narrative.`,
+      ASSUMPTIONS_AND_SUPPORT: `This automated draft is based on the selected XER, the current Project Control Basis and the formal Comment Register. It does not infer contractual entitlement, causation or responsibility. The scheduler or authorized reviewer should confirm the statements and identify any supporting documents before approving or issuing the narrative.`,
     }
 
     narrative.sections = narrative.sections.map(section => {
@@ -1318,7 +1322,7 @@ function ScheduleNarrativePanel({ narrative, projectName, versionLabel, disabled
 
   return <section className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
     <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-      <div><div className="flex items-center gap-2"><h2 className="text-[15px] font-extrabold text-slate-900">Schedule Update Narrative</h2>{narrative.issuedAt && <span className="rounded-full bg-green-50 px-2 py-1 text-[9px] font-bold text-green-700">Approved / Issued</span>}</div><p className="text-[11px] text-slate-500 mt-1">Control Lens prepares every section from the XER, project basis and comment register. The scheduler or reviewer confirms, edits and approves the draft.</p></div>
+      <div><div className="flex items-center gap-2"><h2 className="text-[15px] font-extrabold text-slate-900">Schedule Update Narrative</h2>{narrative.issuedAt && <span className="rounded-full bg-green-50 px-2 py-1 text-[9px] font-bold text-green-700">Approved / Issued</span>}</div><p className="text-[11px] text-slate-500 mt-1">An automated draft is prepared from the XER, project basis and comment register. The scheduler or reviewer confirms, edits and approves each section.</p></div>
       <div className="flex flex-wrap gap-2"><button onClick={() => printReport('schedule-narrative-print-area', { title: `${projectName} — Schedule Narrative`, footerLabel: versionLabel })} className="rounded-lg border border-slate-300 px-3 py-2 text-[11px] font-bold text-slate-700">Print / Save PDF</button><button disabled={disabled} onClick={() => onSave(draft, false)} className="rounded-lg border border-blue-300 px-3 py-2 text-[11px] font-bold text-blue-700 disabled:opacity-50">Save draft</button><button disabled={disabled} onClick={() => onSave(draft, true)} className="rounded-lg bg-blue-600 px-3 py-2 text-[11px] font-bold text-white disabled:opacity-50">Approve / Issue</button></div>
     </div>
     <div className="grid lg:grid-cols-[250px_1fr] gap-4">
@@ -1326,21 +1330,21 @@ function ScheduleNarrativePanel({ narrative, projectName, versionLabel, disabled
         {draft.sections.map((item, index) => <button key={item.key} onClick={() => setSelectedKey(item.key)} className={`w-full rounded-md px-3 py-2.5 text-left text-[11px] flex items-start justify-between gap-2 ${item.key === section.key ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}><span>{index + 1}. {item.title}</span><span className={`mt-1 h-2 w-2 rounded-full flex-shrink-0 ${item.state === 'SCHEDULER_UPDATED' || item.state === 'CURRENT' ? 'bg-green-500' : item.state === 'NO_LONGER_SUPPORTED' ? 'bg-red-500' : item.automatedFacts.length ? 'bg-blue-500' : 'bg-amber-500'}`} /></button>)}
       </div>
       <div className="rounded-lg border border-slate-200 p-4">
-        <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3 mb-3"><div><h3 className="text-[14px] font-extrabold text-slate-900">{section.title}</h3><p className="text-[10px] text-slate-500 mt-1">{section.state === 'AUTO_UPDATED' ? 'Control Lens draft — confirmation required.' : section.state === 'CARRIED_CONFIRMATION_REQUIRED' ? 'Carried from the previous version — confirmation required.' : section.state.replaceAll('_', ' ').toLowerCase()}</p></div>{(section.state === 'AUTO_UPDATED' || section.state === 'CARRIED_CONFIRMATION_REQUIRED') && <span className="rounded-full bg-amber-50 px-2 py-1 text-[9px] font-bold text-amber-700">Confirm before issue</span>}</div>
+        <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3 mb-3"><div><h3 className="text-[14px] font-extrabold text-slate-900">{section.title}</h3><p className="text-[10px] text-slate-500 mt-1">{section.state === 'AUTO_UPDATED' ? 'Automated draft — confirmation required.' : section.state === 'CARRIED_CONFIRMATION_REQUIRED' ? 'Carried from the previous version — confirmation required.' : section.state.replaceAll('_', ' ').toLowerCase()}</p></div>{(section.state === 'AUTO_UPDATED' || section.state === 'CARRIED_CONFIRMATION_REQUIRED') && <span className="rounded-full bg-amber-50 px-2 py-1 text-[9px] font-bold text-amber-700">Confirm before issue</span>}</div>
         {section.automatedFacts.length > 0 && <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 mb-3"><div className="text-[9px] font-bold uppercase tracking-wide text-blue-600 mb-2">Updated automatically from the schedule</div><div className="grid md:grid-cols-2 gap-2">{section.automatedFacts.map(fact => <div key={fact.id} className="text-[10px] text-slate-600"><b className="text-slate-800">{fact.label}:</b> {fact.currentValue}{fact.priorValue && fact.priorValue !== '—' ? <span className="text-slate-400"> · prior {fact.priorValue}</span> : null}</div>)}</div></div>}
-        <label className="block text-[10px] font-bold uppercase tracking-wide text-slate-500 mb-1">Control Lens draft / approved narrative</label>
-        <textarea value={section.schedulerText} onChange={event => updateText(event.target.value)} className="min-h-[260px] w-full rounded-lg border border-slate-300 p-3 text-[12px] leading-relaxed outline-none focus:border-blue-500" placeholder="Control Lens will prepare a generic draft from detected schedule facts. Add project-specific cause, responsibility, mitigation and references where required." />
+        <label className="block text-[10px] font-bold uppercase tracking-wide text-slate-500 mb-1">Draft / approved narrative</label>
+        <textarea value={section.schedulerText} onChange={event => updateText(event.target.value)} className="min-h-[260px] w-full rounded-lg border border-slate-300 p-3 text-[12px] leading-relaxed outline-none focus:border-blue-500" placeholder="A generic draft is prepared from detected schedule facts. Add project-specific cause, responsibility, mitigation and references where required." />
         <div className="text-[10px] text-slate-500 mt-2">Detected facts are drafted automatically. Causation, responsibility, entitlement and project-specific commitments require human confirmation.</div>
       </div>
     </div>
     <div id="schedule-narrative-print-area" className="fixed -left-[10000px] top-0 w-[760px] bg-white p-6" aria-hidden="true">
-      <div className="border-b-2 border-slate-900 pb-3 mb-4"><div className="text-[10px] font-bold uppercase tracking-widest text-blue-600">Control Lens Schedule Narrative</div><div className="text-[20px] font-black text-slate-900 mt-1">{projectName}</div><div className="text-[11px] text-slate-500 mt-1">{versionLabel} · {narrative.reviewPurpose.replaceAll('_', ' ')}</div></div>
+      <div className="border-b-2 border-slate-900 pb-3 mb-4"><div className="text-[10px] font-bold uppercase tracking-widest text-blue-600">Schedule Update Narrative</div><div className="text-[20px] font-black text-slate-900 mt-1">{projectName}</div><div className="text-[11px] text-slate-500 mt-1">{versionLabel} · {narrative.reviewPurpose.replaceAll('_', ' ')}</div></div>
       {draft.sections.map((item, index) => <section key={item.key} className="mb-5 break-inside-avoid">
         <h2 className="border-b border-slate-300 pb-1 text-[13px] font-extrabold text-slate-900">{index + 1}. {item.title}</h2>
         {item.automatedFacts.length > 0 && <div className="mt-2 space-y-1">{item.automatedFacts.map(fact => <div key={fact.id} className="text-[10px] text-slate-700"><b>{fact.label}:</b> {fact.currentValue}{fact.priorValue && fact.priorValue !== '—' ? ` · Prior: ${fact.priorValue}` : ''}</div>)}</div>}
         <div className="mt-2 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-800">{item.schedulerText || 'No scheduler narrative entered for this section.'}</div>
       </section>)}
-      <div className="mt-6 border-t border-slate-300 pt-2 text-[9px] text-slate-500">Drafted by Control Lens from the selected XER, Project Control Basis and Comment Register. Confirmed edits and issue approval remain the responsibility of the scheduler or authorized reviewer.</div>
+      <div className="mt-6 border-t border-slate-300 pt-2 text-[9px] text-slate-500">Prepared from the selected XER, Project Control Basis and Comment Register. Confirmed edits and issue approval remain the responsibility of the scheduler or authorized reviewer.</div>
     </div>
   </section>
 }
@@ -1443,7 +1447,7 @@ function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis,
   const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit' })
   const code = (project?.projectId || project?.name || 'PRJ').toString().replace(/\s+/g, '').toUpperCase().slice(0, 14)
   const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-  const reportNo = `CL-AR-${code}-${kind === 'executive' ? 'EXEC' : 'FULL'}-${ymd}`
+  const reportNo = `SR-AR-${code}-${kind === 'executive' ? 'EXEC' : 'FULL'}-${ymd}`
   const voice = mode === 'PRE_SUBMISSION' ? 'Pre-Submission Check (Contractor)' : 'Reviewer Check (Owner / PM)'
   const gc = gradeColor(result.grade)
 
@@ -1485,22 +1489,7 @@ function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis,
           {/* ── Cover header ─────────────────────────────────────────── */}
           <div className="border-b-2 pb-4 mb-5" style={{ borderColor: COLORS.ink }}>
             <div className="flex items-start justify-between">
-              <div className="flex items-start gap-3">
-                <div className="flex flex-col gap-[3px] mt-1">
-                  <span className="block h-[5px] rounded-[1px]" style={{ width: 22, background: COLORS.blue }} />
-                  <span className="block h-[5px] rounded-[1px]" style={{ width: 30, background: COLORS.red }} />
-                  <span className="block h-[5px] rounded-[1px]" style={{ width: 18, background: COLORS.green }} />
-                  <span className="block h-[5px] rounded-[1px]" style={{ width: 25, background: COLORS.slate }} />
-                </div>
-                <div>
-                  <div className="text-[18px] font-extrabold leading-tight" style={{ color: COLORS.ink }}>
-                    CONTROL<span style={{ color: COLORS.blue }}>LENS</span>
-                  </div>
-                  <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500 mt-0.5">
-                    Approval Readiness
-                  </div>
-                </div>
-              </div>
+              <div><div className="text-[18px] font-extrabold leading-tight" style={{ color: COLORS.ink }}>PROJECT CONTROLS</div><div className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500 mt-0.5">Schedule Review &amp; Analysis</div></div>
               <div className="text-right">
                 <div className="font-mono text-[10px] text-slate-500">{reportNo}</div>
                 <div className="font-mono text-[10px] text-slate-500">{today}</div>
@@ -1528,11 +1517,11 @@ function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis,
           <SectionBar>Executive Summary</SectionBar>
           <div className="flex items-start gap-6 mb-4 print:break-inside-avoid">
             <div className="flex-1">
-              <div className="text-[9px] font-extrabold uppercase tracking-[0.14em] text-slate-500 mb-1">Control Lens Readiness Status</div>
+              <div className="text-[9px] font-extrabold uppercase tracking-[0.14em] text-slate-500 mb-1">Schedule Readiness Status</div>
               <div className="text-[18px] font-black uppercase tracking-wide mb-1" style={{ color: readinessColor(result.readinessStatus) }}>
-                {result.readinessLabel || result.recommendation}
+                {neutralReportText(result.readinessLabel || result.recommendation)}
               </div>
-              <div className="text-[10.5px] text-slate-600 leading-relaxed mb-2">{result.readinessReason || result.recommendation}</div>
+              <div className="text-[10.5px] text-slate-600 leading-relaxed mb-2">{neutralReportText(result.readinessReason || result.recommendation)}</div>
               <div className="text-[10.5px] text-slate-600">
                 Critical Gates: <b style={{ color: result.criticalGates.passed ? COLORS.green : COLORS.red }}>{result.criticalGates.passed ? 'PASS' : 'FAIL'}</b>
                 {'  ·  '}Critical {result.counts.critical} · Major {result.counts.major} · Minor {result.counts.minor}
@@ -1540,7 +1529,7 @@ function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis,
               </div>
               {!result.criticalGates.passed && (
                 <div className="text-[10px] mt-1 font-semibold" style={{ color: COLORS.red }}>
-                  {result.criticalGates.failed.map(g => `✗ ${g.label} — ${g.reason}`).join('  ·  ')}
+                  {result.criticalGates.failed.map(g => `✗ ${neutralReportText(g.label)} — ${neutralReportText(g.reason)}`).join('  ·  ')}
                 </div>
               )}
             </div>
@@ -1576,7 +1565,7 @@ function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis,
                 return <div key={signal.id} className="rounded-lg border border-slate-200 p-3 print:break-inside-avoid">
                   <div className="flex items-start gap-3">
                     <div className="min-w-[48px] text-center rounded bg-blue-50 border border-blue-100 px-2 py-1 font-mono text-[16px] font-black text-blue-700">{signal.count}</div>
-                    <div className="flex-1"><div className="text-[11px] font-extrabold" style={{ color: COLORS.ink }}>{signal.label}</div><div className="text-[9.5px] text-slate-600 mt-0.5">{signal.summary}</div></div>
+                    <div className="flex-1"><div className="text-[11px] font-extrabold" style={{ color: COLORS.ink }}>{neutralReportText(signal.label)}</div><div className="text-[9.5px] text-slate-600 mt-0.5">{neutralReportText(signal.summary)}</div></div>
                     <div className="text-[8px] font-bold uppercase text-slate-400">{signal.treatment.replaceAll('_', ' ')}</div>
                   </div>
                   {kind === 'complete' && rows.length > 0 && <table className="w-full text-[9.5px] mt-2">
@@ -1612,7 +1601,7 @@ function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis,
                             <span className="text-[10.5px] font-extrabold" style={{ color: COLORS.ink }}>{p.label}</span>
                             <span className="text-[8px] font-extrabold uppercase" style={{ color: c }}>{p.status.replace('_', ' ')}</span>
                           </div>
-                          <div className="text-[9px] text-slate-600 leading-relaxed mt-1">{p.note}</div>
+                          <div className="text-[9px] text-slate-600 leading-relaxed mt-1">{neutralReportText(p.note)}</div>
                         </div>
                       )
                     })}
@@ -1636,7 +1625,7 @@ function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis,
                   <div className="flex-1"><div className="text-[12px] font-extrabold" style={{ color: COLORS.ink }}>{group.title}</div><div className="text-[9.5px] text-slate-500 mt-0.5">{group.findings.length} observations · {group.affectedCount} affected activities</div></div>
                 </div>
                 <div className="grid grid-cols-3 gap-3 mt-2 text-[10px]">
-                  <div><b>Why:</b> {group.why}</div><div><b>Action:</b> {group.action}</div><div><b>Acceptance:</b> {group.acceptance}</div>
+                  <div><b>Why:</b> {neutralReportText(group.why)}</div><div><b>Action:</b> {neutralReportText(group.action)}</div><div><b>Acceptance:</b> {neutralReportText(group.acceptance)}</div>
                 </div>
                 <div className="mt-2 text-[9.5px] text-slate-600">{group.findings.map(f => `${f.id} — ${findingTitle(f)}`).join(' · ')}</div>
               </div>)}
@@ -1659,7 +1648,7 @@ function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis,
 
           {/* footer */}
           <div className="flex items-center justify-between pt-3 mt-4 border-t-2 text-[10px] text-slate-400" style={{ borderColor: COLORS.ink }}>
-            <span>Generated by <b style={{ color: COLORS.ink }}>ControlLens</b> — Approval Readiness. Advisory; the P6 schedule of record and the authorized reviewer govern. Score is provisional pending calibration.</span>
+            <span>Prepared from the selected P6 schedule and recorded project basis. Advisory; the schedule of record and the authorized reviewer govern. Score is provisional pending calibration.</span>
             <span className="font-mono">{reportNo}</span>
           </div>
         </div>

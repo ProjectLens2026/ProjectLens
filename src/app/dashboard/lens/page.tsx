@@ -8,12 +8,13 @@
 // =============================================================================
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
-import { getActiveProject, getActiveVersion, updateVersionNarrative } from '@/lib/projectStore'
+import { getActiveProject, getActiveVersion } from '@/lib/projectStore'
 import { activityToGanttRange, type FloatPath } from '@/lib/multipleFloatPaths'
-import type { Task } from '@/lib/xerParser'
+import { hoursToDays, type Task } from '@/lib/xerParser'
 import { evaluatePathCredibility, pathActivityStart, pathActivityFinish, sortPathActivitiesByFinish, type PathCredibilityResult } from '@/lib/construction/pathCredibility'
 import { analyzeCLPathIntelligence } from '@/lib/construction/clPathIntelligence'
 import { buildScheduleReviewSnapshot } from '@/lib/scheduleReviewSnapshot'
+import { reviewOpenEndedLogic } from '@/lib/approval-readiness/qualityRules'
 
 export default function ControlLensAnalysisPage() {
   const [analysis, setAnalysis] = useState<any>(null)
@@ -23,10 +24,7 @@ export default function ControlLensAnalysisPage() {
   const [scheduleFilter, setScheduleFilter] = useState<
     'cl-summary' | 'cl-critical' | 'cl-longest' | 'critical' | 'lookahead' | 'not-started' | 'finished'
   >('cl-summary')
-  const [narrativeText, setNarrativeText] = useState('')
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [isEditing, setIsEditing] = useState(false)
-  const [narrativeError, setNarrativeError] = useState<string | null>(null)
+  const [logicGapFilter, setLogicGapFilter] = useState<'all' | 'pred' | 'succ' | 'both'>('all')
 
   useEffect(() => {
     refresh()
@@ -36,17 +34,10 @@ export default function ControlLensAnalysisPage() {
 
   useEffect(() => {
     const requestedTab = new URLSearchParams(window.location.search).get('tab')
-    if (requestedTab && ['schedule-filter', 'logic', 'noties', 'longlead', 'field', 'plain', 'ai'].includes(requestedTab)) {
+    if (requestedTab && ['schedule-filter', 'logic', 'noties', 'longlead', 'field'].includes(requestedTab)) {
       setActiveTab(requestedTab)
     }
   }, [])
-
-  useEffect(() => {
-    setNarrativeText(version?.aiNarrative || '')
-    setIsEditing(false)
-    setNarrativeError(null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version?.id])
 
   function refresh() {
     const p = getActiveProject()
@@ -105,52 +96,43 @@ export default function ControlLensAnalysisPage() {
   const highPriorityGroups = approvalFindingGroups.filter(group => group.criticalGate || group.severity >= 4)
   const reviewGroups = approvalFindingGroups.filter(group => !group.criticalGate && group.severity < 4)
 
-  async function handleGenerate() {
-    if (!project || !version || !analysis) return
-    setIsGenerating(true)
-    setNarrativeError(null)
-    try {
-      const res = await fetch('/api/generate-narrative', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ analysis, context: version.context || {} }),
-      })
-      if (!res.ok) {
-        const errText = await res.text().catch(() => '')
-        let errMsg = 'Could not generate the Operational Analysis. Try again.'
-        try {
-          const parsed = JSON.parse(errText)
-          if (parsed.error) errMsg = parsed.error
-        } catch {}
-        throw new Error(errMsg)
-      }
-      const data = await res.json()
-      const newNarrative = (data.narrative || '').trim()
-      if (!newNarrative) throw new Error('Generation returned an empty result. Try again.')
-      setNarrativeText(newNarrative)
-      updateVersionNarrative(project.id, version.id, newNarrative)
-    } catch (err: any) {
-      console.error('[ControlLens] Operational Analysis generation failed:', err)
-      setNarrativeError(err.message || 'Could not generate the Operational Analysis. Try again.')
-    } finally {
-      setIsGenerating(false)
+  const logicGapReview = useMemo(() => {
+    if (!analysis) return { rows: [] as any[], allowedCount: 0, missingPred: 0, missingSucc: 0, both: 0 }
+    const reviewed = reviewOpenEndedLogic(analysis)
+    const relationships = Array.isArray(analysis.traceRelationships) ? analysis.traceRelationships : []
+    const hasPredecessor = new Set(relationships.map((rel: any) => String(rel?.task_id || '')).filter(Boolean))
+    const hasSuccessor = new Set(relationships.map((rel: any) => String(rel?.pred_task_id || '')).filter(Boolean))
+    const rows = reviewed.unauthorized.map((task: any) => {
+      const id = String(task?.task_id || task?.id || '')
+      return { task, missingPred: !hasPredecessor.has(id), missingSucc: !hasSuccessor.has(id) }
+    })
+    return {
+      rows,
+      allowedCount: reviewed.allowedStart.length + reviewed.allowedFinish.length,
+      missingPred: rows.filter((row: any) => row.missingPred).length,
+      missingSucc: rows.filter((row: any) => row.missingSucc).length,
+      both: rows.filter((row: any) => row.missingPred && row.missingSucc).length,
     }
-  }
-  function handleEdit() { setIsEditing(true); setNarrativeError(null) }
-  function handleEditSave() {
-    if (!project || !version) return
-    updateVersionNarrative(project.id, version.id, narrativeText)
-    setIsEditing(false)
-  }
-  function handleEditCancel() { setNarrativeText(version?.aiNarrative || ''); setIsEditing(false) }
-  function handleClear() {
-    if (!project || !version) return
-    if (!confirm('Clear the Operational Analysis for this version? You can generate a new one anytime.')) return
-    setNarrativeText('')
-    updateVersionNarrative(project.id, version.id, '')
-    setIsEditing(false)
-    setNarrativeError(null)
-  }
+  }, [analysis])
+
+  const fieldStatusRows = useMemo(() => {
+    if (!analysis) return [] as any[]
+    const dataDateMs = scheduleDateMs(analysis.dataDate)
+    return (analysis.inProgressActivities || []).map((task: any) => {
+      const issues: string[] = []
+      const pct = Number.parseFloat(task.phys_complete_pct || '0')
+      const remaining = hoursToDays(task.remain_drtn_hr_cnt || '0', analysis.calendars?.[task.clndr_id])
+      const float = hoursToDays(task.total_float_hr_cnt || '0', analysis.calendars?.[task.clndr_id])
+      const actualStartMs = scheduleDateMs(task.act_start_date)
+      if (!task.act_start_date) issues.push('Missing actual start')
+      if (task.act_end_date) issues.push('Actual finish exists while status is in progress')
+      if (remaining <= 0) issues.push('No remaining duration')
+      if (actualStartMs && dataDateMs && actualStartMs > dataDateMs) issues.push('Actual start is after data date')
+      if (!Number.isFinite(pct) || pct < 0 || pct > 100) issues.push('Invalid physical percent')
+      if (task.complete_pct_type && !/PHYS/i.test(String(task.complete_pct_type))) issues.push('Percent-complete type is not Physical')
+      return { task, pct: Number.isFinite(pct) ? pct : 0, remaining, float, issues }
+    })
+  }, [analysis])
 
   function fmtFloat(hours: string | number) {
     const h = typeof hours === 'string' ? parseFloat(hours || '0') : hours
@@ -198,7 +180,16 @@ export default function ControlLensAnalysisPage() {
   const a = analysis
   const approval = reviewSnapshot?.approval
   const decisionTone = readinessTone(approval?.readinessStatus)
-  const hasNarrative = !!(narrativeText && narrativeText.trim())
+  const sequenceConflictCount = (a.outOfSequence || []).reduce((sum: number, item: any) => sum + Math.max(1, item.violations?.length || 0), 0)
+  const filteredLogicGaps = logicGapReview.rows.filter((row: any) => {
+    if (logicGapFilter === 'both') return row.missingPred && row.missingSucc
+    if (logicGapFilter === 'pred') return row.missingPred
+    if (logicGapFilter === 'succ') return row.missingSucc
+    return true
+  })
+  const longLeadRows = a.longLeadItems || []
+  const longLeadAtRisk = longLeadRows.filter((item: any) => item.status_code !== 'TK_Complete' && item.floatDays <= 14)
+  const fieldIssueCount = fieldStatusRows.filter((row: any) => row.issues.length > 0).length
 
   return (
     <div className="flex flex-col h-full">
@@ -279,8 +270,6 @@ export default function ControlLensAnalysisPage() {
               { id: 'noties', label: 'No Logic Ties', icon: '⛓️' },
               { id: 'longlead', label: 'Long Lead Items', icon: '📦' },
               { id: 'field', label: 'Field Reality', icon: '👷' },
-              { id: 'plain', label: 'Plain Language', icon: '💬' },
-              { id: 'ai', label: 'Operational Analysis', icon: '📝' },
             ].map(t => (
               <button key={t.id} onClick={() => setActiveTab(t.id)}
                 className={`px-4 py-3 text-xs font-semibold whitespace-nowrap transition-colors ${activeTab === t.id ? 'text-blue-600 border-b-2 border-blue-600 -mb-px' : 'text-slate-500 hover:text-slate-900'}`}>
@@ -612,81 +601,70 @@ export default function ControlLensAnalysisPage() {
               </div>
             )}
 
-            {/* OTHER TABS — unchanged from before */}
+            {/* CPM diagnostics — summary first, evidence on demand */}
             {activeTab === 'logic' && (
               <div>
-                <h3 className="text-sm font-bold mb-3">Construction Sequence Problems · {a.outOfSequence?.length || 0} affected</h3>
-                <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                  Activities whose actual progress conflicts with relationship logic.
+                <h3 className="text-sm font-bold">Sequence problems</h3>
+                <p className="text-xs text-slate-500 mt-1 mb-4">Actual progress that conflicts with predecessor logic, plus open-ended network conditions. Counts are conditions to review—not one formal comment per activity.</p>
+                <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 mb-4">
+                  <MetricCard label="Out-of-sequence activities" value={a.outOfSequence?.length || 0} tone="red" />
+                  <MetricCard label="Relationship conflicts" value={sequenceConflictCount} tone="red" />
+                  <MetricCard label="Missing predecessors" value={logicGapReview.missingPred} tone="amber" />
+                  <MetricCard label="Missing successors" value={logicGapReview.missingSucc} tone="amber" />
+                  <MetricCard label="Fully unlinked" value={logicGapReview.both} tone="slate" />
                 </div>
                 {(!a.outOfSequence || a.outOfSequence.length === 0) ? (
                   <div className="bg-green-50 border border-green-200 rounded-xl p-6 text-center">
                     <div className="text-3xl mb-2">✓</div>
-                    <div className="text-sm font-bold text-green-900">No sequence problems detected</div>
+                    <div className="text-sm font-bold text-green-900">No progress-versus-logic conflicts detected</div>
                   </div>
                 ) : (
-                  <>
-                    {['Procurement', 'Pre-Construction', 'Other'].map(category => {
-                      const items = (a.outOfSequence || []).filter((o: any) => o.category === category)
-                      if (items.length === 0) return null
-                      const catColor = category === 'Procurement' ? 'text-amber-700' : category === 'Pre-Construction' ? 'text-blue-700' : 'text-slate-700'
-                      return (
-                        <div key={category} className="mb-5">
-                          <div className={`text-xs font-bold mb-2 uppercase tracking-wider ${catColor}`}>{category} · {items.length}</div>
-                          <div className="space-y-2">
-                            {items.slice(0, 30).map((o: any, i: number) => {
-                              const violations = o.violations || []
-                              return (
-                                <div key={i} className="border border-slate-200 rounded-lg overflow-hidden bg-white">
-                                  <div className="bg-slate-50 px-3 py-2 border-b border-slate-100 flex items-center gap-3">
-                                    <div className="font-mono font-bold text-xs text-slate-900">{o.task.task_code}</div>
-                                    <div className="flex-1 text-xs text-slate-700 truncate">{o.task.task_name}</div>
-                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">{violations.length} violation{violations.length === 1 ? '' : 's'}</span>
-                                  </div>
-                                  <div className="divide-y divide-slate-100">
-                                    {violations.length === 0 ? (
-                                      <div className="px-3 py-2 text-[11px] text-slate-500 italic">Predecessor {o.pred?.task_code} — relationship logic violated</div>
-                                    ) : violations.map((v: any, vi: number) => (
-                                      <div key={vi} className="px-3 py-2 text-[11px] leading-relaxed">
-                                        <div className="flex items-start gap-2">
-                                          <span className="font-mono font-bold text-slate-700 w-24 flex-shrink-0">{v.pred.task_code}</span>
-                                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 flex-shrink-0">{v.relTypeLabel}</span>
-                                          <span className="flex-1 text-slate-600">{v.pred.task_name}</span>
-                                          <span className="text-[10px] font-bold text-red-700 flex-shrink-0">{v.varianceDays}d early</span>
-                                        </div>
-                                        <div className="mt-1 ml-26 text-[10px] text-slate-500 leading-snug">{v.description}</div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )
-                            })}
-                          </div>
+                  <div className="space-y-2">
+                    {(a.outOfSequence || []).slice(0, 50).map((o: any, i: number) => {
+                      const violations = o.violations || []
+                      const worst = violations.reduce((max: number, item: any) => Math.max(max, Math.abs(Number(item.varianceDays || 0))), 0)
+                      return <details key={o.task?.task_id || i} className="group border border-slate-200 rounded-lg bg-white">
+                        <summary className="cursor-pointer list-none px-3 py-3 flex items-center gap-3">
+                          <div className="min-w-0 flex-1"><span className="font-mono font-bold text-xs text-slate-900">{o.task.task_code}</span><span className="text-xs text-slate-700 ml-2">— {o.task.task_name}</span></div>
+                          <span className="text-[10px] font-bold rounded-full bg-red-50 text-red-700 px-2 py-1">{Math.max(1, violations.length)} conflict{violations.length === 1 ? '' : 's'}</span>
+                          {worst > 0 && <span className="text-[10px] font-semibold text-slate-500">up to {worst}d early</span>}
+                          <span className="text-slate-400 group-open:rotate-180">⌄</span>
+                        </summary>
+                        <div className="border-t border-slate-100 divide-y divide-slate-100">
+                          {violations.length === 0 ? <div className="px-3 py-2 text-[11px] text-slate-500">Relationship to {o.pred?.task_code || 'the predecessor'} conflicts with recorded progress.</div> : violations.map((v: any, vi: number) => <div key={vi} className="px-3 py-2 text-[11px] grid grid-cols-[110px_42px_1fr_auto] gap-2 items-start">
+                            <span className="font-mono font-bold text-slate-700">{v.pred.task_code}</span><span className="font-bold text-slate-500">{v.relTypeLabel}</span><span className="text-slate-600">{v.pred.task_name}</span><span className="font-bold text-red-700">{v.varianceDays}d early</span>
+                            <span className="col-start-3 col-span-2 text-[10px] text-slate-500">{v.description}</span>
+                          </div>)}
                         </div>
-                      )
+                      </details>
                     })}
-                  </>
+                  </div>
                 )}
               </div>
             )}
 
             {activeTab === 'noties' && (
               <div>
-                <h3 className="text-sm font-bold mb-3">Activities with no logic ties ({a.noTies?.length || 0})</h3>
-                <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                  Every activity should be connected. Activities with no ties are "floating" — they don't show up correctly in critical path analysis.
+                <h3 className="text-sm font-bold">Open-ended network logic</h3>
+                <p className="text-xs text-slate-500 mt-1 mb-4">Incomplete or open-ended logic is separated by type. Recognized project-start and project-finish milestones are excluded instead of being reported as errors.</p>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-4">
+                  <FilterMetric label="All open ends" value={logicGapReview.rows.length} active={logicGapFilter === 'all'} onClick={() => setLogicGapFilter('all')} />
+                  <FilterMetric label="Missing predecessor" value={logicGapReview.missingPred} active={logicGapFilter === 'pred'} onClick={() => setLogicGapFilter('pred')} />
+                  <FilterMetric label="Missing successor" value={logicGapReview.missingSucc} active={logicGapFilter === 'succ'} onClick={() => setLogicGapFilter('succ')} />
+                  <FilterMetric label="Fully unlinked" value={logicGapReview.both} active={logicGapFilter === 'both'} onClick={() => setLogicGapFilter('both')} />
                 </div>
+                {logicGapReview.allowedCount > 0 && <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-[11px] text-green-800 mb-3">{logicGapReview.allowedCount} recognized project-start/project-finish endpoint{logicGapReview.allowedCount === 1 ? '' : 's'} excluded from the concern count.</div>}
                 <div className="space-y-2">
-                  {(a.noTies || []).slice(0, 20).map((t: any, i: number) => (
-                    <div key={i} className="flex items-center gap-3 py-2 border-b border-slate-100 text-xs">
-                      <div className="font-mono font-semibold w-32 flex-shrink-0">{t.task_code}</div>
-                      <div className="flex-1 text-slate-700">{t.task_name}</div>
-                      <div className="text-red-600 font-bold w-14 text-right">{fmtFloat(t.total_float_hr_cnt)}</div>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">Logic gap</span>
+                  {filteredLogicGaps.slice(0, 100).map((row: any, i: number) => (
+                    <div key={row.task?.task_id || i} className="flex items-center gap-3 py-2.5 border-b border-slate-100 text-xs">
+                      <div className="font-mono font-semibold w-32 flex-shrink-0">{row.task.task_code}</div>
+                      <div className="flex-1 text-slate-700">{row.task.task_name}</div>
+                      <div className="text-slate-500">{statusLabel(row.task.status_code)}</div>
+                      <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${row.missingPred && row.missingSucc ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'}`}>{row.missingPred && row.missingSucc ? 'No predecessor or successor' : row.missingPred ? 'Missing predecessor' : 'Missing successor'}</span>
                     </div>
                   ))}
-                  {(!a.noTies || a.noTies.length === 0) && (
-                    <div className="text-sm text-green-700 text-center py-6">✓ All activities have proper logic ties</div>
+                  {filteredLogicGaps.length === 0 && (
+                    <div className="text-sm text-green-700 text-center py-6">✓ No unauthorized open ends in this view</div>
                   )}
                 </div>
               </div>
@@ -694,158 +672,83 @@ export default function ControlLensAnalysisPage() {
 
             {activeTab === 'longlead' && (
               <div>
-                <h3 className="text-sm font-bold mb-3">Long lead items ({a.longLeadItems?.length || 0}, 35+ days)</h3>
-                <div className="bg-blue-50 border-l-4 border-blue-500 p-3 text-xs text-blue-900 mb-4 leading-relaxed">
-                  Long lead items most commonly cause delays. Sorted by float — most critical first.
+                <h3 className="text-sm font-bold">Long-lead schedule activities</h3>
+                <p className="text-xs text-slate-500 mt-1 mb-4">Detected from procurement, submittal, fabrication, manufacturing, purchase, release or delivery language with an original duration of at least 35 calendar-specific workdays. “At risk” means incomplete with total float of 14 days or less.</p>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-4">
+                  <MetricCard label="Detected" value={longLeadRows.length} tone="slate" />
+                  <MetricCard label="At risk (≤14d float)" value={longLeadAtRisk.length} tone="red" />
+                  <MetricCard label="In progress" value={longLeadRows.filter((item: any) => item.status_code === 'TK_Active').length} tone="amber" />
+                  <MetricCard label="Not started" value={longLeadRows.filter((item: any) => item.status_code === 'TK_NotStart').length} tone="blue" />
                 </div>
+                <div className="grid grid-cols-12 gap-2 pb-2 border-b border-slate-200 text-[10px] font-bold uppercase text-slate-500"><div className="col-span-2">Activity ID</div><div className="col-span-5">Activity name</div><div className="col-span-1 text-right">Original</div><div className="col-span-1 text-right">Remaining</div><div className="col-span-1 text-right">Float</div><div className="col-span-2 text-right">XER status</div></div>
                 <div className="space-y-2">
-                  {(a.longLeadItems || []).slice(0, 20).map((ll: any, i: number) => (
+                  {longLeadRows.slice(0, 100).map((ll: any, i: number) => (
                     <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 text-xs">
                       <div className="col-span-2 font-mono font-semibold">{ll.task_code}</div>
                       <div className="col-span-5 text-slate-700">{ll.task_name}</div>
                       <div className="col-span-1 text-right">{ll.durationDays}d</div>
                       <div className="col-span-1 text-right">{ll.remainingDays}d</div>
                       <div className={`col-span-1 text-right font-bold ${ll.floatDays < 0 ? 'text-red-600' : ll.floatDays < 10 ? 'text-amber-600' : 'text-green-600'}`}>{ll.floatDays}d</div>
-                      <div className="col-span-2 text-right"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ll.status_code === 'TK_Complete' ? 'bg-green-100 text-green-700' : ll.status_code === 'TK_Active' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{ll.status_code === 'TK_Complete' ? 'Delivered' : ll.status_code === 'TK_Active' ? `${ll.phys_complete_pct}%` : 'Not ordered'}</span></div>
+                      <div className="col-span-2 text-right"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ll.status_code === 'TK_Complete' ? 'bg-green-100 text-green-700' : ll.status_code === 'TK_Active' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>{ll.status_code === 'TK_Complete' ? 'Complete' : ll.status_code === 'TK_Active' ? `In progress · ${Number.parseFloat(ll.phys_complete_pct || '0')}%` : 'Not started'}</span></div>
                     </div>
                   ))}
+                  {longLeadRows.length === 0 && <div className="text-sm text-slate-500 text-center py-8">No activities met the current long-lead detection rule.</div>}
                 </div>
               </div>
             )}
 
             {activeTab === 'field' && (
               <div>
-                <h3 className="text-sm font-bold mb-3">Field reality — in progress ({a.inProgress})</h3>
-                <div className="bg-amber-50 border-l-4 border-amber-500 p-3 text-xs text-amber-900 mb-4 leading-relaxed">
-                  Activities the schedule says are being worked right now. Verify with your superintendent.
+                <h3 className="text-sm font-bold">XER-reported field status</h3>
+                <p className="text-xs text-slate-500 mt-1 mb-4">This checks the internal consistency of activities reported “in progress.” It does not claim that the XER matches observed field conditions; the superintendent or inspector must confirm actual work.</p>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-4">
+                  <MetricCard label="Reported in progress" value={fieldStatusRows.length} tone="blue" />
+                  <MetricCard label="Needs verification" value={fieldIssueCount} tone="red" />
+                  <MetricCard label="Negative float" value={fieldStatusRows.filter((row: any) => row.float < 0).length} tone="amber" />
+                  <MetricCard label="Status internally consistent" value={fieldStatusRows.length - fieldIssueCount} tone="green" />
                 </div>
+                <div className="grid grid-cols-12 gap-2 pb-2 border-b border-slate-200 text-[10px] font-bold uppercase text-slate-500"><div className="col-span-2">Activity ID</div><div className="col-span-3">Activity name</div><div className="col-span-1">Actual start</div><div className="col-span-1 text-right">Physical</div><div className="col-span-1 text-right">Remaining</div><div className="col-span-1 text-right">Float</div><div className="col-span-3">Verification</div></div>
                 <div className="space-y-2">
-                  {(a.inProgressActivities || []).slice(0, 25).map((t: any, i: number) => {
-                    const pct = parseFloat(t.phys_complete_pct || '0')
-                    const fl = parseFloat(t.total_float_hr_cnt || '0')
+                  {fieldStatusRows.slice(0, 100).map((row: any, i: number) => {
+                    const t = row.task
                     return (
                       <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 text-xs items-center">
-                        <div className="col-span-3 font-mono font-semibold">{t.task_code}</div>
-                        <div className="col-span-5 text-slate-700">{t.task_name}</div>
-                        <div className="col-span-2">
-                          <div className="flex items-center gap-2"><span className="font-bold w-8">{pct}%</span>
-                          <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden"><div className={`h-full rounded-full ${pct > 90 ? 'bg-green-500' : pct > 50 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${pct}%` }} /></div></div>
-                        </div>
-                        <div className="col-span-1 text-right text-slate-500">{fmtFloat(t.remain_drtn_hr_cnt)}</div>
-                        <div className={`col-span-1 text-right font-bold ${fl < 0 ? 'text-red-600' : 'text-green-600'}`}>{fmtFloat(t.total_float_hr_cnt)}</div>
+                        <div className="col-span-2 font-mono font-semibold">{t.task_code}</div><div className="col-span-3 text-slate-700">{t.task_name}</div><div className="col-span-1 text-slate-500">{fmtDate(t.act_start_date) || '—'}</div><div className="col-span-1 text-right font-bold">{row.pct}%</div><div className="col-span-1 text-right text-slate-600">{row.remaining}d</div><div className={`col-span-1 text-right font-bold ${row.float < 0 ? 'text-red-600' : 'text-slate-700'}`}>{row.float}d</div><div className="col-span-3">{row.issues.length ? <span className="text-[10px] font-semibold text-red-700">{row.issues.join(' · ')}</span> : <span className="text-[10px] font-semibold text-green-700">No internal status conflict detected</span>}</div>
                       </div>
                     )
                   })}
+                  {fieldStatusRows.length === 0 && <div className="text-sm text-slate-500 text-center py-8">No activities are reported in progress in this XER.</div>}
                 </div>
               </div>
             )}
 
-            {activeTab === 'plain' && (
-              <div>
-                <h3 className="text-sm font-bold mb-3">Plain language summary</h3>
-                <div className="space-y-4 text-xs">
-                  {a.delayDays > 30 && (
-                    <div className="flex gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">🚨</div>
-                      <div>
-                        <div className="font-bold text-slate-900">The project is {a.delayDays} days behind contract</div>
-                        <div className="text-slate-600 mt-1 leading-relaxed">Contract completion was {fmtDate(a.contractEnd)}. Projected completion is now {fmtDate(a.projectedEnd)}.</div>
-                      </div>
-                    </div>
-                  )}
-                  {a.outOfSequence?.length > 0 && (
-                    <div className="flex gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center flex-shrink-0">📦</div>
-                      <div>
-                        <div className="font-bold text-slate-900">{a.outOfSequence.length} activities started in the wrong order</div>
-                        <div className="text-slate-600 mt-1 leading-relaxed">Work began before its predecessor was finished — usually a sign of trying to make up time.</div>
-                      </div>
-                    </div>
-                  )}
-                  {(a.longLeadItems || []).filter((l: any) => l.status_code === 'TK_NotStart' && l.floatDays < 0).length > 0 && (
-                    <div className="flex gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">⚡</div>
-                      <div>
-                        <div className="font-bold text-slate-900">Critical long lead items not yet ordered</div>
-                        <div className="text-slate-600 mt-1 leading-relaxed">{(a.longLeadItems || []).filter((l: any) => l.status_code === 'TK_NotStart' && l.floatDays < 0).length} items with negative float remain unordered.</div>
-                      </div>
-                    </div>
-                  )}
-                  {a.noTies?.length > 0 && (
-                    <div className="flex gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">⛓️</div>
-                      <div>
-                        <div className="font-bold text-slate-900">{a.noTies.length} activities have no logic ties</div>
-                        <div className="text-slate-600 mt-1 leading-relaxed">Their float calculations are unreliable.</div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'ai' && (
-              <div>
-                <div className="flex items-start justify-between gap-4 mb-3 flex-wrap">
-                  <div>
-                    <h3 className="text-sm font-bold">Operational Analysis</h3>
-                    <p className="text-xs text-slate-500 mt-0.5">A direct read of what the schedule is telling you.</p>
-                  </div>
-                  <div className="flex gap-2 flex-shrink-0">
-                    {!hasNarrative && !isGenerating && (
-                      <button onClick={handleGenerate} className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-lg flex items-center gap-1.5">
-                        📝 Generate Operational Analysis
-                      </button>
-                    )}
-                    {hasNarrative && !isEditing && !isGenerating && (
-                      <>
-                        <button onClick={handleEdit} className="border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1">✏️ Edit</button>
-                        <button onClick={handleGenerate} className="border border-blue-200 hover:bg-blue-50 text-blue-600 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1">🔄 Regenerate</button>
-                        <button onClick={handleClear} className="border border-slate-200 hover:border-red-200 hover:bg-red-50 hover:text-red-600 text-slate-600 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1">🗑️ Clear</button>
-                      </>
-                    )}
-                  </div>
-                </div>
-                {narrativeError && (
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-xs text-red-700">
-                    <div className="font-bold mb-1">Couldn't generate the Operational Analysis</div>
-                    <div>{narrativeError}</div>
-                  </div>
-                )}
-                {isGenerating && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 text-center">
-                    <div className="text-3xl mb-3 animate-pulse">📝</div>
-                    <div className="text-sm font-bold text-blue-900">Generating Operational Analysis...</div>
-                  </div>
-                )}
-                {!isGenerating && !hasNarrative && !narrativeError && (
-                  <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-8 text-center">
-                    <div className="text-4xl mb-3">📝</div>
-                    <div className="text-sm font-bold text-slate-700 mb-1">No Operational Analysis yet</div>
-                    <div className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">When you're ready, click Generate to produce a written report.</div>
-                    <button onClick={handleGenerate} className="mt-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg">📝 Generate Operational Analysis</button>
-                  </div>
-                )}
-                {hasNarrative && isEditing && !isGenerating && (
-                  <div>
-                    <textarea value={narrativeText} onChange={e => setNarrativeText(e.target.value)} rows={20}
-                      className="w-full p-4 border border-blue-300 rounded-lg text-xs text-slate-800 font-sans leading-relaxed focus:outline-none focus:border-blue-500 resize-y bg-white" />
-                    <div className="flex gap-2 mt-2 justify-end">
-                      <button onClick={handleEditCancel} className="px-4 py-2 text-slate-600 text-xs font-semibold border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
-                      <button onClick={handleEditSave} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg">Save Changes</button>
-                    </div>
-                  </div>
-                )}
-                {hasNarrative && !isEditing && !isGenerating && (
-                  <div className="bg-slate-50 border-l-4 border-blue-500 rounded-r-lg p-4 text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">{narrativeText}</div>
-                )}
-              </div>
-            )}
           </div>
         </div>
       </div>
     </div>
   )
+}
+
+function MetricCard({ label, value, tone }: { label: string; value: number; tone: 'red' | 'amber' | 'blue' | 'green' | 'slate' }) {
+  const color = tone === 'red' ? 'text-red-700' : tone === 'amber' ? 'text-amber-700' : tone === 'blue' ? 'text-blue-700' : tone === 'green' ? 'text-green-700' : 'text-slate-800'
+  return <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"><div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</div><div className={`text-xl font-extrabold mt-1 ${color}`}>{value}</div></div>
+}
+
+function FilterMetric({ label, value, active, onClick }: { label: string; value: number; active: boolean; onClick: () => void }) {
+  return <button onClick={onClick} className={`rounded-lg border px-3 py-2 text-left transition-colors ${active ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-slate-50 hover:border-slate-300'}`}><div className={`text-[10px] font-bold uppercase tracking-wide ${active ? 'text-blue-700' : 'text-slate-500'}`}>{label}</div><div className={`text-xl font-extrabold mt-1 ${active ? 'text-blue-700' : 'text-slate-800'}`}>{value}</div></button>
+}
+
+function statusLabel(status?: string): string {
+  if (status === 'TK_Complete') return 'Complete'
+  if (status === 'TK_Active') return 'In progress'
+  if (status === 'TK_NotStart') return 'Not started'
+  return status || 'Unknown'
+}
+
+function scheduleDateMs(value?: string | null): number | null {
+  if (!value) return null
+  const parsed = new Date(String(value).replace(' ', 'T')).getTime()
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 // =============================================================================

@@ -18,7 +18,7 @@ PROJECTS PAGE — Each project is top-level (P6 EPS-style). Multiple schedule ve
 
 DASHBOARD — Shows Key Dates (Data Date, NTP, Substantial Completion, Final Completion, Contract End, Projected End), Duration breakdown (Original/Remaining/At Completion), 4 clickable KPI cards (Days Behind Contract, Work Complete, Long Lead at Risk, Risks Detected), Immediate Attention Areas, 2 Weeks Lookahead.
 
-NOBELPM ANALYSIS (/dashboard/lens) — 7 tabs: Gantt Chart, Critical Path, 2 Week Lookahead, Logic Check, No Logic Ties, Long Lead, Field Reality, Plain Language, Narrative.
+FULL CPM ANALYSIS (/dashboard/lens) — Schedule Filters (approval summary, critical/longest path, P6 filters), Sequence Problems, No Logic Ties, Long Lead Items and Field Reality. Detailed CPM evidence stays separate from the formal Review Schedule decision and comment register.
 
 RISKS & ISSUES — Auto-detected risks classified Critical/High/Medium. Each risk has detail, recommendation, action items, affected activities.
 

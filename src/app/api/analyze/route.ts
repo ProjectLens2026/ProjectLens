@@ -12,13 +12,12 @@ export const maxDuration = 30
 // on its own.
 //
 // NOW: this route just acknowledges the parsed analysis and echoes it
-// back. All parsing happens client-side. Operational Analysis (narrative)
-// is generated separately via /api/generate-narrative ONLY when the PM
-// clicks "Generate Operational Analysis" on the Schedule Analysis page.
+// back. All parsing happens client-side. Schedule narratives are assembled
+// deterministically in the Review Schedule workspace from XER evidence,
+// project basis and the formal comment register.
 //
 // The benefit: uploads stay fast and reliable regardless of the report
-// service's status. PMs see their schedule analysis instantly. They
-// choose whether and when to generate the written narrative.
+// service's status. PMs see their schedule analysis instantly.
 // =============================================================================
 
 export async function POST(req: NextRequest) {
@@ -37,7 +36,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       analysis,
-      aiNarrative: '', // Always empty here. Generated on demand via /api/generate-narrative.
+      aiNarrative: '', // Legacy compatibility field; no paid narrative call is made.
       context: ctx,
     })
   } catch (error: any) {

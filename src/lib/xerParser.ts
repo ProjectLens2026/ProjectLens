@@ -202,7 +202,25 @@ export interface LongLeadItem extends Task {
   floatDays: number
   calendarName: string
 }
-const LONG_LEAD_KEYWORDS = ['PROC', 'PRO-', 'FABRICAT', 'DELIVER', 'PROCURE', 'LONG LEAD', 'LEAD TIME']
+function isProcurementLifecycleActivity(task: Pick<Task, 'task_name' | 'task_code'>): boolean {
+  const name = String(task.task_name || '').toUpperCase()
+  const code = String(task.task_code || '').toUpperCase()
+  const lifecycleLanguage = /\b(PROCUREMENT|PROCURE|PURCHASE|BUYOUT|SUBMITTAL|SHOP DRAWING|RELEASE|DELIVERY|DELIVER|LONG[ -]LEAD|LEAD TIME)\b|FABRICAT|MANUFACTUR/.test(name)
+  // Accept PROC only as a separated activity-code token. The former substring
+  // match incorrectly classified words and codes that merely contained “PROC”.
+  const procurementCode = /(^|[^A-Z0-9])PROC([^A-Z0-9]|$)/.test(code)
+  return lifecycleLanguage || procurementCode
+}
+
+function isRecognizedStartEndpoint(task: Task): boolean {
+  const text = `${task.task_code || ''} ${task.task_name || ''} ${task.task_type || ''}`.toUpperCase()
+  return /\b(NTP|NOTICE TO PROCEED|PROJECT START|START PROJECT|START MILESTONE)\b/.test(text)
+}
+
+function isRecognizedFinishEndpoint(task: Task): boolean {
+  const text = `${task.task_code || ''} ${task.task_name || ''} ${task.task_type || ''}`.toUpperCase()
+  return /\b(END PROJECT|PROJECT COMPLETE|FINAL COMPLETION|CONTRACT COMPLETION|FINISH MILESTONE)\b/.test(text)
+}
 export function hoursToDays(hours: string | number, calendar?: Calendar): number {
   const h = typeof hours === 'string' ? parseFloat(hours || '0') : hours
   if (isNaN(h) || h === 0) return 0
@@ -463,21 +481,24 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   const outOfSequence: OutOfSequence[] = Array.from(oosMap.values())
     .sort((a, b) => (a.task.task_code || '').localeCompare(b.task.task_code || ''))
 
-  // No logic ties
+  // Open-ended logic. Recognized project-start and project-finish milestones
+  // are legitimate endpoints and are not counted as missing logic.
   const noTies: Task[] = []
   for (const t of taskArr) {
     if (t.status_code === 'TK_Complete') continue
     const hasPred = predMap[t.task_id]?.length > 0
     const hasSucc = succMap[t.task_id]?.length > 0
-    if (!hasPred || !hasSucc) noTies.push(t)
+    const unauthorizedMissingPred = !hasPred && !isRecognizedStartEndpoint(t)
+    const unauthorizedMissingSucc = !hasSucc && !isRecognizedFinishEndpoint(t)
+    if (unauthorizedMissingPred || unauthorizedMissingSucc) noTies.push(t)
   }
 
-  // Long lead & short lead — unchanged
+  // Long lead & short lead. Detection requires explicit procurement-lifecycle
+  // language (or a separated PROC code token) plus calendar-aware duration.
   const longLeadItems: LongLeadItem[] = []
   const shortLeadItems: LongLeadItem[] = []
   for (const t of taskArr) {
-    const upper = (t.task_name || '').toUpperCase() + ' ' + (t.task_code || '').toUpperCase()
-    if (!LONG_LEAD_KEYWORDS.some(k => upper.includes(k))) continue
+    if (!isProcurementLifecycleActivity(t)) continue
     const cal = getCalendar(t)
     const durationDays = hoursToDays(t.target_drtn_hr_cnt || '0', cal)
     if (durationDays < 20) continue
