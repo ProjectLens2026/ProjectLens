@@ -388,7 +388,7 @@ function DiscoveryItem({ expanded, title, children }: { expanded: boolean; title
 }
 
 function ProjectDiscoveryPanel({ discovery, expanded = false }: { discovery: USProjectDiscoveryResult | null; expanded?: boolean }) {
-  if (!discovery) return <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 mb-4 text-sm">Project discovery unavailable. Re-upload the XER to provide activity and WBS evidence.</div>
+  if (!discovery) return <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 mb-4 text-sm">Project discovery unavailable. Re-upload the schedule to provide activity and WBS evidence.</div>
   const signals = [discovery.archetype, discovery.ownerOverlay, discovery.projectCondition]
   const sections = [
     { title: 'Buildings, levels and areas', items: discovery.locations },
@@ -399,7 +399,7 @@ function ProjectDiscoveryPanel({ discovery, expanded = false }: { discovery: USP
   ]
   return <section className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
     <h2 className="font-bold text-slate-800">Project Discovery</h2>
-    <p className="text-xs text-slate-600 mt-1 mb-3">Detected from this version’s XER. {expanded ? 'Available supporting evidence is listed below; evidence lists may be sampled by the discovery engine.' : 'Expand an item to inspect its evidence.'} Discovery describes the submitted work; it does not prescribe a jurisdiction, establish compliance, or change the score.</p>
+    <p className="text-xs text-slate-600 mt-1 mb-3">Detected from this schedule version. {expanded ? 'Available supporting evidence is listed below; evidence lists may be sampled by the discovery engine.' : 'Expand an item to inspect its evidence.'} Discovery describes the submitted work; it does not prescribe a jurisdiction, establish compliance, or change the score.</p>
     <div className={expanded ? 'space-y-3' : 'grid md:grid-cols-3 gap-3'}>
       {signals.map((s, i) => <DiscoveryItem key={i} expanded={expanded} title={<>{['Project type', 'Owner overlay', 'Construction condition'][i]}: {s.label}</>}>
         <div className="text-xs mt-1">{s.status} · {s.confidence} confidence</div>
@@ -718,21 +718,21 @@ export default function ApprovalReadinessPage() {
     const clarificationCount = result ? buildActionGroups(result).clarifications.length : 0
 
     const generatedDrafts: Record<string, string> = {
-      EXECUTIVE_SUMMARY: `The selected schedule dated ${shortDate(version.dataDate || analysis?.dataDate)} was reviewed. The current automated disposition is ${result?.readinessLabel || result?.recommendation || 'review pending'} with ${summary.open} open formal review comment${summary.open === 1 ? '' : 's'}. The current forecast is ${shortDate(currentForecast)}. This draft is generated from the XER, project basis and comment register and should be confirmed by the scheduler or authorized reviewer before issue.`,
-      CONTRACT_MILESTONES: `The authorized completion currently recorded in the Project Control Basis is ${shortDate(project?.contractDates?.originalContractCompletion)}. The selected XER forecasts completion on ${shortDate(currentForecast)}${priorVersion ? `, compared with ${shortDate(priorForecast)} in the prior version` : ''}. These dates are reported without determining entitlement; approved time modifications remain the contractual source of truth.`,
-      PROGRESS_THIS_PERIOD: `The selected XER reports ${complete} completed, ${inProgress} in-progress and ${notStarted} not-started activities as of ${shortDate(version.dataDate || analysis?.dataDate)}. The scheduler should confirm the physical-progress basis and add any material accomplishments that are not represented by these schedule statuses.`,
-      NEXT_PERIOD_WORK: `The current schedule status and available near-term activity evidence were identified from the selected XER. The scheduler should confirm the work planned for the next reporting period, responsible trades, access needs and prerequisite approvals before this narrative is issued.`,
+      EXECUTIVE_SUMMARY: `The selected schedule dated ${shortDate(version.dataDate || analysis?.dataDate)} was reviewed. The current automated disposition is ${result?.readinessLabel || result?.recommendation || 'review pending'} with ${summary.open} open formal review comment${summary.open === 1 ? '' : 's'}. The current forecast is ${shortDate(currentForecast)}. This draft is generated from the submitted schedule, project basis and comment register and should be confirmed by the scheduler or authorized reviewer before issue.`,
+      CONTRACT_MILESTONES: `The authorized completion currently recorded in the Project Control Basis is ${shortDate(project?.contractDates?.originalContractCompletion)}. The selected schedule forecasts completion on ${shortDate(currentForecast)}${priorVersion ? `, compared with ${shortDate(priorForecast)} in the prior version` : ''}. These dates are reported without determining entitlement; approved time modifications remain the contractual source of truth.`,
+      PROGRESS_THIS_PERIOD: `The selected schedule reports ${complete} completed, ${inProgress} in-progress and ${notStarted} not-started activities as of ${shortDate(version.dataDate || analysis?.dataDate)}. The scheduler should confirm the physical-progress basis and add any material accomplishments that are not represented by these schedule statuses.`,
+      NEXT_PERIOD_WORK: `The current schedule status and available near-term activity evidence were identified from the selected schedule. The scheduler should confirm the work planned for the next reporting period, responsible trades, access needs and prerequisite approvals before this narrative is issued.`,
       CHANGES_FROM_PRIOR_VERSION: priorVersion
         ? `This version contains ${analysis?.totalActivities ?? taskValues.length} activities and advances the data date to ${shortDate(version.dataDate || analysis?.dataDate)}. The prior version contained ${priorVersion.analysis?.totalActivities ?? Object.keys(priorVersion.analysis?.traceTasks || {}).length} activities with a data date of ${shortDate(priorVersion.dataDate || priorVersion.analysis?.dataDate)}. Forecast completion changed from ${shortDate(priorForecast)} to ${shortDate(currentForecast)}. Review the Changes Since Prior Version tab for the detailed comparison.`
-        : `This is the first available schedule version for comparison. Changes from a prior XER cannot be stated until an earlier version is available.`,
+        : `This is the first available schedule version for comparison. Changes cannot be stated until an earlier version is available.`,
       LONGEST_AND_CRITICAL_PATHS: `The submitted critical and longest-path evidence was reviewed. ${neutralReportText(result?.pathReview?.criticalPath?.note) || 'Critical-path credibility requires reviewer confirmation.'} ${neutralReportText(result?.pathReview?.longestPath?.note) || 'Longest-path credibility requires reviewer confirmation.'} Detailed activity traces remain in Full CPM Analysis.`,
-      DELAYS_AND_CONSTRAINTS: `The selected XER shows ${Number(analysis?.delayDays || 0)} calendar days of forecast variance, ${technicalSignal('NEGATIVE_FLOAT')} activities with negative float, ${technicalSignal('OUT_OF_SEQUENCE')} out-of-sequence conditions and ${technicalSignal('OPEN_ENDS')} unauthorized open ends. These are schedule signals; causation, responsibility and entitlement require scheduler/reviewer confirmation.`,
+      DELAYS_AND_CONSTRAINTS: `The selected schedule shows ${Number(analysis?.delayDays || 0)} calendar days of forecast variance, ${technicalSignal('NEGATIVE_FLOAT')} activities with negative float, ${technicalSignal('OUT_OF_SEQUENCE')} out-of-sequence conditions and ${technicalSignal('OPEN_ENDS')} unauthorized open ends. These are schedule signals; causation, responsibility and entitlement require scheduler/reviewer confirmation.`,
       PROCUREMENT_AND_LONG_LEAD: `The review identified ${technicalSignal('LONG_LEAD_AT_RISK')} incomplete long-lead item${technicalSignal('LONG_LEAD_AT_RISK') === 1 ? '' : 's'} at risk under the current float threshold. Confirm required-on-site dates, submittal/approval status, fabrication, delivery and downstream installation interfaces before issue.`,
-      SUBMITTALS_RFIS_APPROVALS: `The XER contains ${submittalCount} activities whose names indicate submittal, shop-drawing, RFI, review or approval work. The schedule evidence is reported without inferring document status. The scheduler should confirm current status, responsible party and any effect on field work.`,
-      TESTING_COMMISSIONING_TURNOVER: `The XER contains ${commissioningCount} activities whose names indicate startup, testing, commissioning, training, acceptance or turnover work. Confirm that the submitted logic connects system readiness through final completion and that the stated sequence matches the project requirements.`,
+      SUBMITTALS_RFIS_APPROVALS: `The submitted schedule contains ${submittalCount} activities whose names indicate submittal, shop-drawing, RFI, review or approval work. The schedule evidence is reported without inferring document status. The scheduler should confirm current status, responsible party and any effect on field work.`,
+      TESTING_COMMISSIONING_TURNOVER: `The submitted schedule contains ${commissioningCount} activities whose names indicate startup, testing, commissioning, training, acceptance or turnover work. Confirm that the submitted logic connects system readiness through final completion and that the stated sequence matches the project requirements.`,
       CORRECTIVE_ACTIONS: `The automated review currently groups the findings into ${correctionCount} correction group${correctionCount === 1 ? '' : 's'} and ${clarificationCount} clarification group${clarificationCount === 1 ? '' : 's'}. The contractor/scheduler should describe the corrective action, responsible party and planned completion date for each issued item.`,
-      OWNER_COMMENT_RESPONSES: `${summary.issued} formal comment${summary.issued === 1 ? ' has' : 's have'} been issued; ${summary.closed} ${summary.closed === 1 ? 'is' : 'are'} closed and ${summary.open} remain open. Responses and claimed corrections should be recorded in the Comment Register so the next XER can verify whether each item was corrected, remains open or was reopened.`,
-      ASSUMPTIONS_AND_SUPPORT: `This automated draft is based on the selected XER, the current Project Control Basis and the formal Comment Register. It does not infer contractual entitlement, causation or responsibility. The scheduler or authorized reviewer should confirm the statements and identify any supporting documents before approving or issuing the narrative.`,
+      OWNER_COMMENT_RESPONSES: `${summary.issued} formal comment${summary.issued === 1 ? ' has' : 's have'} been issued; ${summary.closed} ${summary.closed === 1 ? 'is' : 'are'} closed and ${summary.open} remain open. Responses and claimed corrections should be recorded in the Comment Register so the next schedule version can verify whether each item was corrected, remains open or was reopened.`,
+      ASSUMPTIONS_AND_SUPPORT: `This automated draft is based on the selected schedule, the current Project Control Basis and the formal Comment Register. It does not infer contractual entitlement, causation or responsibility. The scheduler or authorized reviewer should confirm the statements and identify any supporting documents before approving or issuing the narrative.`,
     }
 
     narrative.sections = narrative.sections.map(section => {
@@ -783,7 +783,7 @@ export default function ApprovalReadinessPage() {
           <div className="text-[14px] font-bold" style={{ color: COLORS.ink }}>Re-upload needed to run Approval Readiness</div>
           <div className="text-[12px] text-slate-500 mt-1 leading-relaxed">
             This check reads the schedule's relationship network, which is saved on upload.
-            Re-upload this version's XER, then run the check.
+            Re-upload this schedule version, then run the check.
           </div>
         </div>
       </Shell>
@@ -1023,14 +1023,14 @@ export default function ApprovalReadinessPage() {
       {result && (
         <>
           {activeTab === 'evidence' && <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 mb-4 text-[11px] text-slate-600 leading-relaxed">
-            <b className="text-slate-800">Technical evidence index.</b> Discovery describes the submitted XER and helps organize review; it does not establish a jurisdiction, compliance or approval. Formal actions remain in the Comment Register and detailed schedule evidence remains in Full CPM Analysis.
+            <b className="text-slate-800">Technical evidence index.</b> Discovery describes the submitted schedule and helps organize review; it does not establish a jurisdiction, compliance or approval. Formal actions remain in the Comment Register and detailed schedule evidence remains in Full CPM Analysis.
           </div>}
 
           {/* Path credibility is now a first-class approval question. */}
           {activeTab === 'evidence' && result.pathReview && (
             <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
               <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-700 mb-1">Control Path Credibility</div>
-              <div className="text-[11px] text-slate-500 mb-3">Control Lens evaluates whether the submitted XER represents the work that should actually control completion. This is engineering schedule review — not a silent P6 CPM recalculation.</div>
+              <div className="text-[11px] text-slate-500 mb-3">Control Lens evaluates whether the submitted schedule represents the work that should actually control completion. This is engineering schedule review—not a silent CPM recalculation.</div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {[result.pathReview.criticalPath, result.pathReview.longestPath].filter(Boolean).map((p: any) => {
                   const c = p.status === 'CREDIBLE' ? COLORS.green : p.status === 'REVIEW_REQUIRED' ? COLORS.red : COLORS.amber
@@ -1055,7 +1055,7 @@ export default function ApprovalReadinessPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <Link href="/dashboard/lens" className="rounded-xl border border-blue-200 bg-blue-50 p-3 hover:border-blue-400"><div className="text-[12px] font-extrabold text-blue-800">Full CPM Analysis</div><div className="text-[10px] text-slate-600 mt-1">Critical paths, logic, float, constraints and activity evidence.</div></Link>
               <Link href="/dashboard/trace" className="rounded-xl border border-slate-200 bg-slate-50 p-3 hover:border-blue-400"><div className="text-[12px] font-extrabold text-slate-800">Logic Trace</div><div className="text-[10px] text-slate-600 mt-1">Trace predecessors and successors for a selected activity.</div></Link>
-              <button type="button" onClick={() => setActiveTab('changes')} className="text-left rounded-xl border border-slate-200 bg-slate-50 p-3 hover:border-blue-400"><div className="text-[12px] font-extrabold text-slate-800">Version Changes</div><div className="text-[10px] text-slate-600 mt-1">Compare the selected XER with its prior project version.</div></button>
+              <button type="button" onClick={() => setActiveTab('changes')} className="text-left rounded-xl border border-slate-200 bg-slate-50 p-3 hover:border-blue-400"><div className="text-[12px] font-extrabold text-slate-800">Version Changes</div><div className="text-[10px] text-slate-600 mt-1">Compare the selected schedule with its prior project version.</div></button>
             </div>
           </div>}
 
@@ -1322,7 +1322,7 @@ function ScheduleNarrativePanel({ narrative, projectName, versionLabel, disabled
 
   return <section className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
     <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-      <div><div className="flex items-center gap-2"><h2 className="text-[15px] font-extrabold text-slate-900">Schedule Update Narrative</h2>{narrative.issuedAt && <span className="rounded-full bg-green-50 px-2 py-1 text-[9px] font-bold text-green-700">Approved / Issued</span>}</div><p className="text-[11px] text-slate-500 mt-1">An automated draft is prepared from the XER, project basis and comment register. The scheduler or reviewer confirms, edits and approves each section.</p></div>
+      <div><div className="flex items-center gap-2"><h2 className="text-[15px] font-extrabold text-slate-900">Schedule Update Narrative</h2>{narrative.issuedAt && <span className="rounded-full bg-green-50 px-2 py-1 text-[9px] font-bold text-green-700">Approved / Issued</span>}</div><p className="text-[11px] text-slate-500 mt-1">An automated draft is prepared from the submitted schedule, project basis and comment register. The scheduler or reviewer confirms, edits and approves each section.</p></div>
       <div className="flex flex-wrap gap-2"><button onClick={() => printReport('schedule-narrative-print-area', { title: `${projectName} — Schedule Narrative`, footerLabel: versionLabel })} className="rounded-lg border border-slate-300 px-3 py-2 text-[11px] font-bold text-slate-700">Print / Save PDF</button><button disabled={disabled} onClick={() => onSave(draft, false)} className="rounded-lg border border-blue-300 px-3 py-2 text-[11px] font-bold text-blue-700 disabled:opacity-50">Save draft</button><button disabled={disabled} onClick={() => onSave(draft, true)} className="rounded-lg bg-blue-600 px-3 py-2 text-[11px] font-bold text-white disabled:opacity-50">Approve / Issue</button></div>
     </div>
     <div className="grid lg:grid-cols-[250px_1fr] gap-4">
@@ -1344,7 +1344,7 @@ function ScheduleNarrativePanel({ narrative, projectName, versionLabel, disabled
         {item.automatedFacts.length > 0 && <div className="mt-2 space-y-1">{item.automatedFacts.map(fact => <div key={fact.id} className="text-[10px] text-slate-700"><b>{fact.label}:</b> {fact.currentValue}{fact.priorValue && fact.priorValue !== '—' ? ` · Prior: ${fact.priorValue}` : ''}</div>)}</div>}
         <div className="mt-2 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-800">{item.schedulerText || 'No scheduler narrative entered for this section.'}</div>
       </section>)}
-      <div className="mt-6 border-t border-slate-300 pt-2 text-[9px] text-slate-500">Prepared from the selected XER, Project Control Basis and Comment Register. Confirmed edits and issue approval remain the responsibility of the scheduler or authorized reviewer.</div>
+      <div className="mt-6 border-t border-slate-300 pt-2 text-[9px] text-slate-500">Prepared from the selected schedule, Project Control Basis and Comment Register. Confirmed edits and issue approval remain the responsibility of the scheduler or authorized reviewer.</div>
     </div>
   </section>
 }

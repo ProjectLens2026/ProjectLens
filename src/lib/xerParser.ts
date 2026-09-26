@@ -98,6 +98,8 @@ export interface WbsNode {
   full_path: string[]   // names, project root → this node
 }
 export interface ParsedXER {
+  sourceFormat?: 'PRIMAVERA_XER' | 'MS_PROJECT_XML'
+  sourceLabel?: string
   projectName: string
   dataDate: string
   contractEnd: string
@@ -114,6 +116,8 @@ export interface ParsedXER {
   taskActivityCodes: TaskActivityCode[]
 }
 export interface XERAnalysis {
+  sourceFormat?: 'PRIMAVERA_XER' | 'MS_PROJECT_XML'
+  sourceLabel?: string
   totalActivities: number
   complete: number
   inProgress: number
@@ -327,6 +331,7 @@ export function parseXER(content: string): ParsedXER {
     succMap[r.pred_task_id].push(r.task_id)
   }
   return {
+    sourceFormat: 'PRIMAVERA_XER', sourceLabel: 'Primavera P6 XER',
     projectName, dataDate, contractEnd, projectedEnd,
     tasks, relationships, predMap, succMap, calendars, wbsNodes,
     projectSettings, scheduleOptions, activityCodeTypes, taskActivityCodes,
@@ -917,6 +922,8 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   })
 
   return {
+    sourceFormat: parsed.sourceFormat || 'PRIMAVERA_XER',
+    sourceLabel: parsed.sourceLabel || 'Primavera P6 XER',
     totalActivities: taskArr.length,
     complete, inProgress, notStarted, negativeFloat,
     outOfSequence, noTies,

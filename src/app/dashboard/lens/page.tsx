@@ -308,7 +308,7 @@ export default function ControlLensAnalysisPage() {
                       <div className="flex items-center justify-between gap-3">
                         <div>
                           <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700">P6 Critical Activities</div>
-                          <p className="text-xs text-slate-500 mt-1">Activities identified as critical by the uploaded P6/XER schedule. This is the submitted critical-activity set — not a Control Lens reconstructed path. Activities are ordered by current Finish date, earliest first.</p>
+                          <p className="text-xs text-slate-500 mt-1">Activities identified as critical by the uploaded source schedule. This is the submitted critical-activity set—not a reconstructed path. Activities are ordered by current finish date, earliest first.</p>
                         </div>
                         <div className="text-[11px] font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 whitespace-nowrap">
                           {criticalPathActivities.length} activities
@@ -331,7 +331,7 @@ export default function ControlLensAnalysisPage() {
                 {scheduleFilter === 'cl-summary' && (
                   <div>
                     {!approval?.projectUnderstanding ? (
-                      <div className="text-center py-8 text-slate-400 text-sm">The canonical project understanding is not available for this version. Re-upload the XER if relationship/task evidence is missing.</div>
+                      <div className="text-center py-8 text-slate-400 text-sm">The canonical project understanding is not available for this version. Re-upload the schedule if relationship/task evidence is missing.</div>
                     ) : (
                       <>
                         <div className="rounded-xl border-2 border-slate-300 bg-white p-5 mb-4">
@@ -480,7 +480,7 @@ export default function ControlLensAnalysisPage() {
                           </div>
                           <PathActivityTable activities={clPathIntelligence.longestPath.activities} showRemaining />
                         </>
-                      ) : <div className="text-sm text-slate-400 py-6">Control Lens could not establish a credible longest work-state chain from the available XER evidence.</div>}
+                      ) : <div className="text-sm text-slate-400 py-6">A credible longest work-state chain could not be established from the available schedule evidence.</div>}
                     </div>
                   </div>
                 )}
@@ -680,7 +680,7 @@ export default function ControlLensAnalysisPage() {
                   <MetricCard label="In progress" value={longLeadRows.filter((item: any) => item.status_code === 'TK_Active').length} tone="amber" />
                   <MetricCard label="Not started" value={longLeadRows.filter((item: any) => item.status_code === 'TK_NotStart').length} tone="blue" />
                 </div>
-                <div className="grid grid-cols-12 gap-2 pb-2 border-b border-slate-200 text-[10px] font-bold uppercase text-slate-500"><div className="col-span-2">Activity ID</div><div className="col-span-5">Activity name</div><div className="col-span-1 text-right">Original</div><div className="col-span-1 text-right">Remaining</div><div className="col-span-1 text-right">Float</div><div className="col-span-2 text-right">XER status</div></div>
+                <div className="grid grid-cols-12 gap-2 pb-2 border-b border-slate-200 text-[10px] font-bold uppercase text-slate-500"><div className="col-span-2">Activity ID</div><div className="col-span-5">Activity name</div><div className="col-span-1 text-right">Original</div><div className="col-span-1 text-right">Remaining</div><div className="col-span-1 text-right">Float</div><div className="col-span-2 text-right">Schedule status</div></div>
                 <div className="space-y-2">
                   {longLeadRows.slice(0, 100).map((ll: any, i: number) => (
                     <div key={i} className="grid grid-cols-12 gap-2 py-2 border-b border-slate-100 text-xs">
@@ -699,8 +699,8 @@ export default function ControlLensAnalysisPage() {
 
             {activeTab === 'field' && (
               <div>
-                <h3 className="text-sm font-bold">XER-reported field status</h3>
-                <p className="text-xs text-slate-500 mt-1 mb-4">This checks the internal consistency of activities reported “in progress.” It does not claim that the XER matches observed field conditions; the superintendent or inspector must confirm actual work.</p>
+                <h3 className="text-sm font-bold">Schedule-reported field status</h3>
+                <p className="text-xs text-slate-500 mt-1 mb-4">This checks the internal consistency of activities reported “in progress.” It does not claim that the schedule matches observed field conditions; the superintendent or inspector must confirm actual work.</p>
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-4">
                   <MetricCard label="Reported in progress" value={fieldStatusRows.length} tone="blue" />
                   <MetricCard label="Needs verification" value={fieldIssueCount} tone="red" />
@@ -717,7 +717,7 @@ export default function ControlLensAnalysisPage() {
                       </div>
                     )
                   })}
-                  {fieldStatusRows.length === 0 && <div className="text-sm text-slate-500 text-center py-8">No activities are reported in progress in this XER.</div>}
+                  {fieldStatusRows.length === 0 && <div className="text-sm text-slate-500 text-center py-8">No activities are reported in progress in this schedule.</div>}
                 </div>
               </div>
             )}
