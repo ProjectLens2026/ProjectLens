@@ -257,6 +257,7 @@ function rowToProject(row: any): Project {
 
 function rowToVersion(row: any): ScheduleVersion {
   const context = row.context || {}
+  const isMicrosoftProjectXml = String(row.file_name || '').toLowerCase().endsWith('.xml')
   // v15 — full analysis lives in Storage (loaded async by loadProjectsFromSupabase).
   // For the initial row mapping, build a stub from the flat columns so the
   // listing renders immediately, then the storage load swaps in the full data.
@@ -272,7 +273,9 @@ function rowToVersion(row: any): ScheduleVersion {
     contractEnd: row.contract_end || undefined,
     projectedEnd: row.projected_end || undefined,
     dataDate: row.data_date || undefined,
-    fileType: 'Primavera P6 XER',
+    sourceFormat: isMicrosoftProjectXml ? 'MS_PROJECT_XML' : 'PRIMAVERA_XER',
+    sourceLabel: isMicrosoftProjectXml ? 'Microsoft Project XML' : 'Primavera P6 XER',
+    fileType: isMicrosoftProjectXml ? 'Microsoft Project XML' : 'Primavera P6 XER',
   }
   return {
     id: getLocalIdForUuid(row.id, 'ver'),
@@ -518,14 +521,17 @@ async function insertVersionToSupabase(
   const supabase = createClient()
   const cloudVersionId = toUuid(version.id)
 
-  // 1. Upload raw XER to storage if present
+  // 1. Upload the raw schedule source to storage if present. The database
+  // column keeps its legacy raw_xer_path name, but may point to XER or XML.
   let rawXerPath: string | null = null
   if (version.rawXER && version.rawXER.length > 0) {
-    rawXerPath = `${orgId}/${projectId}/${cloudVersionId}.xer`
-    const blob = new Blob([version.rawXER], { type: 'text/plain' })
+    const sourceExtension = String(version.fileName || '').toLowerCase().endsWith('.xml') ? 'xml' : 'xer'
+    const sourceContentType = sourceExtension === 'xml' ? 'application/xml' : 'text/plain'
+    rawXerPath = `${orgId}/${projectId}/${cloudVersionId}.${sourceExtension}`
+    const blob = new Blob([version.rawXER], { type: sourceContentType })
     const { error: upErr } = await supabase.storage
       .from(BUCKET)
-      .upload(rawXerPath, blob, { upsert: true, contentType: 'text/plain' })
+      .upload(rawXerPath, blob, { upsert: true, contentType: sourceContentType })
     if (upErr) {
       console.error('[db.addVersion] raw XER upload failed:', upErr.message)
       rawXerPath = null
@@ -715,6 +721,7 @@ export async function deleteVersionFromSupabase(
   try {
     const paths = [
       `${orgId}/${cloudProjectId}/${cloudVersionId}.xer`,
+      `${orgId}/${cloudProjectId}/${cloudVersionId}.xml`,
       `${orgId}/${cloudProjectId}/${cloudVersionId}.analysis.json`,
     ]
     await supabase.storage.from(BUCKET).remove(paths)

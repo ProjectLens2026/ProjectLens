@@ -140,6 +140,7 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
   const findings: QualityFinding[] = []
   const tasks = Object.values(analysis.traceTasks || {})
   const relationships = Array.isArray(analysis.traceRelationships) ? analysis.traceRelationships : []
+  const isPrimavera = analysis.sourceFormat !== 'MS_PROJECT_XML'
 
   // P6 calculation method is a gate, not a cosmetic preference. Only evaluate
   // fields that are explicitly present in the submitted SCHEDOPTIONS table.
@@ -167,7 +168,7 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
 
   const projectSettings = analysis.projectSettings || {}
   const criticalPathType = String(projectSettings.critical_path_type || '')
-  const criticalDefinitionIsNotLongest = Boolean(criticalPathType && !/LONG/i.test(criticalPathType))
+  const criticalDefinitionIsNotLongest = isPrimavera && Boolean(criticalPathType && !/LONG/i.test(criticalPathType))
   if (criticalDefinitionIsNotLongest) findings.push(finding({
     primaryDomain: 'AR-02',
     crossReferencedDomains: ['AR-07'],
@@ -184,7 +185,7 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
 
   const incompleteDetailed = tasks.filter(task => task?.status_code !== 'TK_Complete' && isDetailedWorkActivity(task))
   const p6LongestPathFlags = tasks.filter(task => isEnabled(task?.driving_path_flag))
-  if (!criticalDefinitionIsNotLongest && incompleteDetailed.length && !p6LongestPathFlags.length) findings.push(finding({
+  if (isPrimavera && !criticalDefinitionIsNotLongest && incompleteDetailed.length && !p6LongestPathFlags.length) findings.push(finding({
     primaryDomain: 'AR-02',
     crossReferencedDomains: ['AR-07'],
     ruleStrength: 'REQUIRED',
@@ -318,13 +319,13 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     affectedActivities: affected(otherConstraints, 'Constraint requires basis'),
   }))
 
-  const wrongDurationType = tasks.filter(task => {
+  const wrongDurationType = isPrimavera ? tasks.filter(task => {
     const value = String(task?.duration_type || '').toUpperCase()
     if (!value) return false
     const compact = value.replace(/[^A-Z0-9]/g, '')
     const named = value.replace(/_/g, ' ').replace(/\s+/g, ' ').trim()
     return !['DTFIXEDDUR2', 'DTFIXEDDRTN2'].includes(compact) && !/^FIXED DURATION\s*(?:&|AND)\s*UNITS$/.test(named)
-  })
+  }) : []
   if (wrongDurationType.length) findings.push(finding({
     primaryDomain: 'AR-07',
     ruleStrength: 'REQUIRED',

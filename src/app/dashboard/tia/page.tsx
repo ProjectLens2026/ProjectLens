@@ -52,13 +52,13 @@ export default function TIAPage() {
     if (p) {
       // Default un-impacted = latest non-FRAG version
       const nonFragVersions = p.versions
-        .filter(v => !v.deletedAt && v.scheduleType !== 'fragnet')
+        .filter(v => !v.deletedAt && v.scheduleType !== 'fragnet' && v.analysis?.sourceFormat !== 'MS_PROJECT_XML')
         .sort((a, b) => new Date(b.dataDate || b.uploadedAt).getTime() - new Date(a.dataDate || a.uploadedAt).getTime())
       if (nonFragVersions[0]) setUnimpactedId(nonFragVersions[0].id)
 
       // Default fragnet = latest FRAG version
       const fragVersions = p.versions
-        .filter(v => !v.deletedAt && v.scheduleType === 'fragnet')
+        .filter(v => !v.deletedAt && v.scheduleType === 'fragnet' && v.analysis?.sourceFormat !== 'MS_PROJECT_XML')
         .sort((a, b) => new Date(b.dataDate || b.uploadedAt).getTime() - new Date(a.dataDate || a.uploadedAt).getTime())
       if (fragVersions[0]) setFragnetId(fragVersions[0].id)
 
@@ -235,7 +235,10 @@ export default function TIAPage() {
   }
 
   // Active project versions (filter out soft-deleted)
-  const activeVersions = activeProject.versions.filter(v => !v.deletedAt)
+  // The existing TIA comparison API consumes raw XER files. Microsoft Project
+  // XML versions remain fully reviewable but are withheld here until the TIA
+  // comparator is migrated to the normalized schedule model.
+  const activeVersions = activeProject.versions.filter(v => !v.deletedAt && v.analysis?.sourceFormat !== 'MS_PROJECT_XML')
   const fragnetVersions = activeVersions.filter(v => v.scheduleType === 'fragnet')
   const unimpactedVersions = activeVersions.filter(v => v.scheduleType !== 'fragnet')
 
@@ -244,6 +247,8 @@ export default function TIAPage() {
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center">
+          <Link href="/dashboard" className="mr-4 text-xs font-bold text-blue-600 hover:text-blue-800 whitespace-nowrap">← Overview</Link>
+          <div className="mr-4 h-6 border-l border-slate-200" />
           <span className="font-bold text-slate-900 text-base">TIA Comparison <span className="text-slate-400 text-xs font-normal">— Time Impact Analysis</span></span>
           <span className="text-slate-400 text-sm ml-2">· {activeProject.name}</span>
         </div>
@@ -253,7 +258,7 @@ export default function TIAPage() {
             <div className="text-xl font-extrabold text-slate-900 mb-3">No fragnet schedule uploaded yet</div>
             <div className="text-sm text-slate-600 leading-relaxed mb-6">
               TIA compares an un-impacted schedule against an impacted (<strong>Fragnet</strong>) schedule.
-              You need to upload at least one Fragnet version to this project first.
+              You need to upload at least one Primavera XER Fragnet version to this project first. Microsoft Project XML is supported for schedule review, but the current TIA comparison engine remains XER-only.
             </div>
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-left text-xs text-blue-900 mb-6 leading-relaxed">
               <div className="font-bold mb-2">How to add a fragnet:</div>
@@ -279,6 +284,8 @@ export default function TIAPage() {
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center">
+          <Link href="/dashboard" className="mr-4 text-xs font-bold text-blue-600 hover:text-blue-800 whitespace-nowrap">← Overview</Link>
+          <div className="mr-4 h-6 border-l border-slate-200" />
           <span className="font-bold text-slate-900 text-base">TIA Comparison</span>
           <span className="text-slate-400 text-sm ml-2">· {activeProject.name}</span>
         </div>
@@ -286,7 +293,7 @@ export default function TIAPage() {
           <div className="max-w-3xl mx-auto">
             <h2 className="text-xl font-extrabold text-slate-900 mb-1">Pick the schedules to compare</h2>
             <p className="text-slate-500 text-sm mb-6">
-              TIA shows the time impact between an un-impacted schedule and a fragnet (impacted) schedule. Both must already be uploaded to this project.
+              TIA shows the time impact between an un-impacted schedule and a fragnet (impacted) schedule. Both must already be uploaded Primavera XER versions; Microsoft Project XML TIA comparison is not enabled yet.
             </p>
 
             {/* Un-impacted */}
@@ -388,6 +395,8 @@ export default function TIAPage() {
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4">
+          <Link href="/dashboard" className="text-xs font-bold text-blue-600 hover:text-blue-800 whitespace-nowrap">← Overview</Link>
+          <div className="h-6 border-l border-slate-200" />
           <span className="font-bold text-slate-900 text-base">Comparison Results</span>
           <div className="ml-auto flex gap-2">
             <button onClick={() => { setStep('pick'); setComparison(null); signedUrlsRef.current = {} }}
@@ -595,6 +604,8 @@ export default function TIAPage() {
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center">
+          <Link href="/dashboard" className="mr-4 text-xs font-bold text-blue-600 hover:text-blue-800 whitespace-nowrap">← Overview</Link>
+          <div className="mr-4 h-6 border-l border-slate-200" />
           <span className="font-bold text-slate-900 text-base">Categorize Fragnets</span>
           <span className="text-slate-400 text-sm ml-2">· Assign cause and description to each delay event</span>
           <div className="ml-auto flex gap-2">

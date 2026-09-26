@@ -24,6 +24,7 @@ import { buildScheduleQualityFindings } from './qualityRules'
 const ENGINE_VERSION = '2.1.0'
 
 interface AnalysisInput {
+  sourceFormat?: 'PRIMAVERA_XER' | 'MS_PROJECT_XML'
   traceTasks?: any
   traceRelationships?: any
   wbsNodes?: any
@@ -187,7 +188,7 @@ function pathProfile(title: string, severity: CLSeverity): {
     findingSeverity: severity === 'HIGH' ? 4 : severity === 'MEDIUM' ? 3 : 2,
     kind: severity === 'REVIEW' ? 'RECOMMENDATION' : 'FINDING',
     why: 'The condition affects confidence that the submitted schedule represents the work that actually controls completion.',
-    reviewer: 'Verify the identified condition against the project requirements and submitted XER logic, then revise or clarify the schedule as appropriate.',
+    reviewer: 'Verify the identified condition against the project requirements and submitted schedule logic, then revise or clarify the schedule as appropriate.',
     preSubmission: 'Verify the identified condition before submission and revise or clarify the schedule as appropriate.',
     reference: 'Control Lens nature-of-work and path-credibility review.',
   }
@@ -321,7 +322,7 @@ export function evaluateApprovalReadiness(
         return {
           id: String(t?.task_id || code),
           code,
-          name: String(t?.task_name || 'Submitted XER evidence'),
+          name: String(t?.task_name || 'Submitted schedule evidence'),
           note: 'CL path evidence',
         }
       })
@@ -356,7 +357,7 @@ export function evaluateApprovalReadiness(
         .filter(Boolean)
       const cpAffected = Array.from(new Set(cpCodes)).slice(-12).map(code => {
         const t = byCode.get(code)
-        return { id: String(t?.task_id || code), code, name: String(t?.task_name || 'Submitted XER activity'), note: 'CL critical-path review' }
+        return { id: String(t?.task_id || code), code, name: String(t?.task_name || 'Submitted schedule activity'), note: 'Critical-path review' }
       })
       findings.push({
         id: `CL-${String(++n).padStart(3, '0')}`,

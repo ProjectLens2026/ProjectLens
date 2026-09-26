@@ -43,6 +43,7 @@ import {
 // body limit (which was truncating large XER files like the 620 KB DCDGS
 // file from 1,048 activities down to 557). See runAnalysis() below.
 import { parseXER, analyzeXER } from '@/lib/xerParser'
+import { parseMSProjectXML } from '@/lib/msProjectXmlParser'
 import { getOrgPlanInfo, OrgPlanInfo } from '@/lib/supabase/db'
 
 type Step = 'upload' | 'context' | 'analyzing' | 'done'
@@ -71,7 +72,7 @@ const EMPTY_CONTRACT_DATES: ContractDatesFormState = {
   substantialCompletion: '',
 }
 
-async function readXERFileAsText(file: File): Promise<string> {
+async function readScheduleFileAsText(file: File): Promise<string> {
   const buffer = await file.arrayBuffer()
   const bytes = new Uint8Array(buffer)
   if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
@@ -96,6 +97,7 @@ export default function UploadPage() {
   const perms = usePermissions()
   const [step, setStep] = useState<Step>('upload')
   const [file, setFile] = useState<File | null>(null)
+  const [uploadError, setUploadError] = useState('')
   const [dragging, setDragging] = useState(false)
   const [progress, setProgress] = useState(0)
   const [result, setResult] = useState<any>(null)
@@ -223,24 +225,36 @@ export default function UploadPage() {
   }
 
   const fileRef = useRef<HTMLInputElement>(null)
-  const accept = '.xer,.xml,.mpp,.pdf,.xlsx,.xls,.csv'
+  const accept = '.xer,.xml,.mpp'
+
+  function selectScheduleFile(selected: File) {
+    const ext = selected.name.split('.').pop()?.toLowerCase()
+    if (ext === 'mpp') {
+      setFile(null)
+      setUploadError('Native .mpp files are proprietary and cannot be safely parsed in the browser. In Microsoft Project, use File → Save As → XML Format, then upload the XML file for full analysis.')
+      setStep('upload')
+      return
+    }
+    if (ext !== 'xer' && ext !== 'xml') {
+      setFile(null)
+      setUploadError('Upload a Primavera P6 .xer file or a Microsoft Project .xml file.')
+      setStep('upload')
+      return
+    }
+    setUploadError('')
+    setFile(selected)
+    refreshProjectsList()
+    setStep('context')
+  }
 
   function onDrop(e: React.DragEvent) {
     e.preventDefault(); setDragging(false)
     const f = e.dataTransfer.files[0]
-    if (f) {
-      setFile(f)
-      refreshProjectsList()
-      setStep('context')
-    }
+    if (f) selectScheduleFile(f)
   }
   function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
-    if (f) {
-      setFile(f)
-      refreshProjectsList()
-      setStep('context')
-    }
+    if (f) selectScheduleFile(f)
   }
 
   // v14 — derive the dropdown state machine from current project mode +
@@ -379,12 +393,12 @@ export default function UploadPage() {
       let analysis: any
       let rawXER: string | undefined
 
-      if (ext === 'xer') {
+      if (ext === 'xer' || ext === 'xml') {
         setProgress(15)
-        const text = await readXERFileAsText(file)
+        const text = await readScheduleFileAsText(file)
         rawXER = text
         setProgress(45)
-        const parsed = parseXER(text)
+        const parsed = ext === 'xer' ? parseXER(text) : parseMSProjectXML(text)
         const result = analyzeXER(parsed)
         analysis = {
           ...result,
@@ -392,28 +406,11 @@ export default function UploadPage() {
           dataDate: parsed.dataDate,
           contractEnd: parsed.contractEnd,
           projectedEnd: parsed.projectedEnd,
-          fileType: 'Primavera P6 XER',
+          fileType: parsed.sourceLabel || (ext === 'xer' ? 'Primavera P6 XER' : 'Microsoft Project XML'),
         }
         setProgress(70)
       } else {
-        analysis = {
-          fileType: ext?.toUpperCase() || 'UNKNOWN',
-          projectName: ctx.projectName || file.name,
-          message: 'File received. Detailed parsing is currently optimized for Primavera P6 XER files.',
-          healthScore: 65,
-          condition: 'Monitor Closely',
-          totalActivities: 0,
-          complete: 0,
-          inProgress: 0,
-          notStarted: 0,
-          negativeFloat: 0,
-          outOfSequence: [],
-          noTies: [],
-          longLeadItems: [],
-          criticalDrivers: [],
-          inProgressActivities: [],
-          delayDays: 0,
-        }
+        throw new Error('Unsupported schedule format. Upload a Primavera P6 XER or Microsoft Project XML file.')
       }
 
       // v15 — Skip the /api/analyze server round-trip.
@@ -662,7 +659,8 @@ export default function UploadPage() {
         {step === 'upload' && (
           <div className="max-w-2xl mx-auto">
             <h2 className="text-xl font-extrabold text-slate-900 mb-1">Upload your project schedule</h2>
-            <p className="text-slate-500 text-sm mb-6">ControlLens reads Primavera P6 XER files and interprets them like an experienced project controls advisor — including logic checks, long lead detection, and TIA evidence.</p>
+            <p className="text-slate-500 text-sm mb-6">Upload a Primavera P6 XER or Microsoft Project XML schedule. Both formats feed the same CPM, logic, long-lead, construction-sequence and review workflow.</p>
+            {uploadError && <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm leading-relaxed text-amber-900"><div className="font-bold mb-1">Microsoft Project file conversion required</div>{uploadError}</div>}
             <div
               className={`upload-zone ${dragging ? 'dragging' : ''}`}
               onDragOver={e => { e.preventDefault(); setDragging(true) }}
@@ -676,7 +674,8 @@ export default function UploadPage() {
               <div className="text-sm text-slate-400 mb-4">or click to browse your computer</div>
               <div className="inline-flex flex-wrap justify-center gap-2">
                 <span className="bg-blue-50 text-blue-700 text-xs font-semibold px-3 py-1 rounded-full border border-blue-100">.xer (P6 — full analysis)</span>
-                <span className="bg-slate-50 text-slate-500 text-xs font-semibold px-3 py-1 rounded-full border border-slate-100">.xml / .mpp / .pdf (limited)</span>
+                <span className="bg-green-50 text-green-700 text-xs font-semibold px-3 py-1 rounded-full border border-green-100">.xml (Microsoft Project — full analysis)</span>
+                <span className="bg-amber-50 text-amber-700 text-xs font-semibold px-3 py-1 rounded-full border border-amber-100">.mpp (save as XML first)</span>
               </div>
             </div>
             <div className="mt-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
@@ -687,8 +686,8 @@ export default function UploadPage() {
                 <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Long lead items and procurement risk</div>
                 <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Activities with no logic ties (schedule quality)</div>
                 <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Field reality check on in-progress activities</div>
-                <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Plain language summary and TIA evidence</div>
-                <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Operational Analysis available on demand</div>
+                <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Critical and longest-path evidence available from the source schedule</div>
+                <div className="flex gap-2"><span className="text-green-500 font-bold">✓</span>Formal review comments and schedule narrative</div>
               </div>
             </div>
           </div>
@@ -703,6 +702,7 @@ export default function UploadPage() {
                 <div className="text-green-600 text-xs mt-0.5">{file ? (file.size / 1024).toFixed(0) + ' KB' : ''} · Pick schedule type and project info before analysis</div>
               </div>
             </div>
+            {file?.name.toLowerCase().endsWith('.xml') && <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4 text-xs leading-relaxed text-blue-900"><b>Microsoft Project XML:</b> tasks, WBS/summary structure, calendars, status date, progress, constraints, total slack and predecessor relationships will use the same CPM and formal review workflow. P6-only settings checks and the current XER-only TIA comparator are not applied.</div>}
             <h2 className="text-xl font-extrabold text-slate-900 mb-1">Tell us about your project</h2>
             <p className="text-slate-500 text-sm mb-5">Project ID and Name lock once set. Contract dates feed into the dashboard. On future uploads, fields auto-fill — edit only what changed.</p>
 
@@ -1024,7 +1024,7 @@ export default function UploadPage() {
                     value={cd.substantialCompletion}
                     onChange={e => setCd(c => ({...c, substantialCompletion: e.target.value}))}
                     className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
-                  <div className="text-[10px] text-slate-500 mt-1">Per contract. Dashboard shows this next to the XER-detected one.</div>
+                  <div className="text-[10px] text-slate-500 mt-1">Per contract. Dashboard shows this next to the schedule-detected one.</div>
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">
@@ -1034,7 +1034,7 @@ export default function UploadPage() {
                     value={cd.manualDataDate}
                     onChange={e => setCd(c => ({...c, manualDataDate: e.target.value}))}
                     className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
-                  <div className="text-[10px] text-slate-500 mt-1">Leave blank — the XER's data date will be used.</div>
+                  <div className="text-[10px] text-slate-500 mt-1">Leave blank to use the source schedule’s data/status date.</div>
                 </div>
               </div>
               {dateError && (
@@ -1069,7 +1069,7 @@ export default function UploadPage() {
             </div>
             <div className="space-y-2 text-left max-w-md mx-auto">
               {[
-                { label: 'Parsing XER structure...', done: progress > 20 },
+                { label: 'Parsing schedule structure...', done: progress > 20 },
                 { label: 'Building relationship maps...', done: progress > 40 },
                 { label: 'Identifying critical path...', done: progress > 55 },
                 { label: 'Detecting logic violations...', done: progress > 70 },
