@@ -977,7 +977,6 @@ export default function ApprovalReadinessPage() {
       {activeTab === 'evidence' && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 mb-4">
         <div className="text-xs text-slate-600">A concise index to project discovery and detailed CPM trace evidence. Actions and decisions remain in the Comment Register.</div>
         <div className="flex gap-2">
-          <Link href="/dashboard/trace" className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200">Logic Trace</Link>
           <button disabled={!result} onClick={() => setReportKind('complete')} className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200 disabled:opacity-40">Evidence Summary PDF</button>
         </div>
       </div>}
@@ -1052,9 +1051,8 @@ export default function ApprovalReadinessPage() {
           {activeTab === 'evidence' && <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
             <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-700">Evidence locations</div>
             <p className="text-[11px] text-slate-500 mt-1 mb-3">Supporting Evidence is an index only. Formal actions remain in the Comment Register; detailed CPM activity and relationship evidence remains in Full CPM Analysis.</p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Link href="/dashboard/lens" className="rounded-xl border border-blue-200 bg-blue-50 p-3 hover:border-blue-400"><div className="text-[12px] font-extrabold text-blue-800">Full CPM Analysis</div><div className="text-[10px] text-slate-600 mt-1">Critical paths, logic, float, constraints and activity evidence.</div></Link>
-              <Link href="/dashboard/trace" className="rounded-xl border border-slate-200 bg-slate-50 p-3 hover:border-blue-400"><div className="text-[12px] font-extrabold text-slate-800">Logic Trace</div><div className="text-[10px] text-slate-600 mt-1">Trace predecessors and successors for a selected activity.</div></Link>
               <button type="button" onClick={() => setActiveTab('changes')} className="text-left rounded-xl border border-slate-200 bg-slate-50 p-3 hover:border-blue-400"><div className="text-[12px] font-extrabold text-slate-800">Version Changes</div><div className="text-[10px] text-slate-600 mt-1">Compare the selected schedule with its prior project version.</div></button>
             </div>
           </div>}

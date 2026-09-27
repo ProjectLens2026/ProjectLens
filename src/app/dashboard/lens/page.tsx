@@ -15,6 +15,7 @@ import { evaluatePathCredibility, pathActivityStart, pathActivityFinish, sortPat
 import { analyzeCLPathIntelligence } from '@/lib/construction/clPathIntelligence'
 import { buildScheduleReviewSnapshot } from '@/lib/scheduleReviewSnapshot'
 import { reviewOpenEndedLogic } from '@/lib/approval-readiness/qualityRules'
+import TraceLogicPanel from '@/components/TraceLogicPanel'
 
 export default function ControlLensAnalysisPage() {
   const [analysis, setAnalysis] = useState<any>(null)
@@ -34,7 +35,7 @@ export default function ControlLensAnalysisPage() {
 
   useEffect(() => {
     const requestedTab = new URLSearchParams(window.location.search).get('tab')
-    if (requestedTab && ['schedule-filter', 'logic', 'noties', 'longlead', 'field'].includes(requestedTab)) {
+    if (requestedTab && ['schedule-filter', 'trace', 'logic', 'noties', 'longlead', 'field'].includes(requestedTab)) {
       setActiveTab(requestedTab)
     }
   }, [])
@@ -266,6 +267,7 @@ export default function ControlLensAnalysisPage() {
           <div className="tab-bar flex gap-0 border-b border-slate-100 overflow-x-auto no-print">
             {[
               { id: 'schedule-filter', label: 'Schedule Filters (Primavera)', icon: '🔎' },
+              { id: 'trace', label: 'Logic Trace', icon: '🧭' },
               { id: 'logic', label: 'Sequence Problems', icon: '🔧' },
               { id: 'noties', label: 'No Logic Ties', icon: '⛓️' },
               { id: 'longlead', label: 'Long Lead Items', icon: '📦' },
@@ -279,6 +281,8 @@ export default function ControlLensAnalysisPage() {
           </div>
 
           <div className="p-5">
+            {activeTab === 'trace' && <TraceLogicPanel analysis={analysis} />}
+
             {activeTab === 'schedule-filter' && (
               <div className="tab-pane">
                 <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3 mb-6">
