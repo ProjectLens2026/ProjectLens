@@ -10,6 +10,8 @@ import {
   ProjectControlBasis,
   ProjectPhaseBasis,
   ScheduleRequirementsBasis,
+  TimeModificationBasis,
+  addCalendarDays,
   getActiveProject,
   subscribeToProjects,
   updateProjectContractDates,
@@ -30,7 +32,7 @@ const BASIS_SECTIONS: Array<{ id: BasisSection; label: string; implemented: bool
   { id: 'milestones', label: 'Milestones & phases', implemented: true },
   { id: 'requirements', label: 'Schedule requirements', implemented: true },
   { id: 'p6-settings', label: 'P6 settings', implemented: true },
-  { id: 'modifications', label: 'Time modifications', implemented: false },
+  { id: 'modifications', label: 'Time modifications', implemented: true },
   { id: 'documents', label: 'Source documents', implemented: false },
 ]
 
@@ -141,6 +143,56 @@ function newBasisId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 }
 
+function calculateAuthorizedPosition(
+  dates: ContractDates,
+  modifications: TimeModificationBasis[],
+) {
+  let substantialDays = 0
+  let finalDays = 0
+  let currentSubstantialCompletion = dates.substantialCompletion
+  let currentFinalCompletion = dates.originalContractCompletion
+  const interimDates = new Map<string, string>()
+
+  const chronological = [...modifications].sort((a, b) =>
+    String(a.approvalDate || a.submittedDate || '').localeCompare(String(b.approvalDate || b.submittedDate || ''))
+  )
+  for (const modification of chronological) {
+    if (modification.status !== 'APPROVED') continue
+    const approvedDays = modification.approvedDays || 0
+    if (modification.target === 'SUBSTANTIAL_COMPLETION' || modification.target === 'BOTH') {
+      substantialDays += approvedDays
+      currentSubstantialCompletion = modification.target === 'SUBSTANTIAL_COMPLETION' && modification.approvedRevisedDate
+        ? modification.approvedRevisedDate
+        : addCalendarDays(currentSubstantialCompletion, approvedDays) || currentSubstantialCompletion
+    }
+    if (modification.target === 'FINAL_COMPLETION' || modification.target === 'BOTH') {
+      finalDays += approvedDays
+      currentFinalCompletion = modification.target === 'FINAL_COMPLETION' && modification.approvedRevisedDate
+        ? modification.approvedRevisedDate
+        : addCalendarDays(currentFinalCompletion, approvedDays) || currentFinalCompletion
+    }
+    if (modification.target === 'INTERIM_MILESTONE' && modification.milestoneId) {
+      const original = dates.contractMilestones?.find(item => item.id === modification.milestoneId)?.date
+      const current = interimDates.get(modification.milestoneId) || original
+      const revised = modification.approvedRevisedDate || addCalendarDays(current, approvedDays)
+      if (revised) interimDates.set(modification.milestoneId, revised)
+    }
+  }
+
+  const contractMilestones = (dates.contractMilestones || []).map(milestone => ({
+    ...milestone,
+    currentDate: interimDates.get(milestone.id) || milestone.date,
+  }))
+
+  return {
+    substantialDays,
+    finalDays,
+    currentSubstantialCompletion,
+    currentFinalCompletion,
+    contractMilestones,
+  }
+}
+
 export default function ProjectControlBasisPage() {
   const [project, setProject] = useState<Project | null>(null)
   const [section, setSection] = useState<BasisSection>('contract-dates')
@@ -149,6 +201,7 @@ export default function ProjectControlBasisPage() {
   const [milestones, setMilestones] = useState<ContractMilestone[]>([])
   const [phasingStrategy, setPhasingStrategy] = useState<ProjectControlBasis['phasingStrategy']>('NOT_SET')
   const [phases, setPhases] = useState<ProjectPhaseBasis[]>([])
+  const [timeModifications, setTimeModifications] = useState<TimeModificationBasis[]>([])
   const [requirements, setRequirements] = useState<ScheduleRequirementsBasis>({ ...EMPTY_REQUIREMENTS })
   const [p6Settings, setP6Settings] = useState<P6SettingsBasis>({ ...EMPTY_P6_SETTINGS })
   const [error, setError] = useState('')
@@ -165,11 +218,15 @@ export default function ProjectControlBasisPage() {
         substantialCompletion: active?.contractDates?.substantialCompletion || '',
         originalContractCompletion: active?.contractDates?.originalContractCompletion || '',
         contractMilestones: active?.contractDates?.contractMilestones || [],
+        approvedTimeExtensionDays: active?.contractDates?.approvedTimeExtensionDays,
+        currentSubstantialCompletion: active?.contractDates?.currentSubstantialCompletion,
+        currentFinalCompletion: active?.contractDates?.currentFinalCompletion,
       })
       setBasis(active?.controlBasis || {})
       setMilestones(active?.contractDates?.contractMilestones || [])
       setPhasingStrategy(active?.controlBasis?.phasingStrategy || 'NOT_SET')
       setPhases(active?.controlBasis?.projectPhases || [])
+      setTimeModifications(active?.controlBasis?.timeModifications || [])
       setRequirements({ ...EMPTY_REQUIREMENTS, ...(active?.controlBasis?.scheduleRequirements || {}) })
       setP6Settings({ ...EMPTY_P6_SETTINGS, ...(active?.controlBasis?.p6Settings || {}) })
     }
@@ -181,11 +238,20 @@ export default function ProjectControlBasisPage() {
   const datesComplete = Boolean(dates.ntp && dates.originalContractCompletion)
   const requirementsAreComplete = requirementsComplete(requirements)
   const milestonesAreComplete = Boolean(basis.milestonesConfigured)
+  const timeModificationsAreComplete = Boolean(basis.timeModificationsConfigured)
   const p6IsApplicable = requirements.schedulingSoftware === 'PRIMAVERA_P6' || requirements.schedulingSoftware === 'EITHER'
   const p6IsComplete = !p6IsApplicable || p6SettingsComplete(p6Settings)
+  const authorizedPreview = useMemo(
+    () => calculateAuthorizedPosition(dates, timeModifications),
+    [dates, timeModifications],
+  )
+  const pendingModificationCount = timeModifications.filter(item => item.status === 'PENDING' || item.status === 'UNDER_REVIEW').length
+  const pendingRequestedDays = timeModifications
+    .filter(item => item.status === 'PENDING' || item.status === 'UNDER_REVIEW')
+    .reduce((total, item) => total + (item.requestedDays || 0), 0)
   const completeSections = useMemo(() => (
-    [datesComplete, milestonesAreComplete, requirementsAreComplete, p6IsComplete && requirementsAreComplete].filter(Boolean).length
-  ), [datesComplete, milestonesAreComplete, requirementsAreComplete, p6IsComplete])
+    [datesComplete, milestonesAreComplete, requirementsAreComplete, p6IsComplete && requirementsAreComplete, timeModificationsAreComplete].filter(Boolean).length
+  ), [datesComplete, milestonesAreComplete, requirementsAreComplete, p6IsComplete, timeModificationsAreComplete])
   const completionPercent = Math.round((completeSections / 6) * 100)
 
   function clearMessages() {
@@ -197,10 +263,15 @@ export default function ProjectControlBasisPage() {
     if (!project) return
     const validationError = validateDates(dates)
     if (validationError) { setError(validationError); return }
+    const authorized = calculateAuthorizedPosition(dates, timeModifications)
     updateProjectContractDates(project.id, {
       ntp: dates.ntp || '',
       substantialCompletion: dates.substantialCompletion || '',
       originalContractCompletion: dates.originalContractCompletion || '',
+      approvedTimeExtensionDays: authorized.finalDays,
+      currentSubstantialCompletion: authorized.currentSubstantialCompletion,
+      currentFinalCompletion: authorized.currentFinalCompletion,
+      contractMilestones: authorized.contractMilestones,
     })
     setSavedSection('contract-dates')
     setError('')
@@ -229,8 +300,26 @@ export default function ProjectControlBasisPage() {
       phaseOrArea: milestone.phaseOrArea?.trim(),
       sourceReference: milestone.sourceReference?.trim(),
     }))
+    const missingTarget = timeModifications.find(item =>
+      item.target === 'INTERIM_MILESTONE'
+      && item.milestoneId
+      && !normalizedMilestones.some(milestone => milestone.id === item.milestoneId)
+    )
+    if (missingTarget) {
+      setError(`Cannot remove the milestone referenced by ${missingTarget.referenceNumber || 'a time modification'}. Update the Time Modifications register first.`)
+      return
+    }
+    const authorized = calculateAuthorizedPosition(
+      { ...dates, contractMilestones: normalizedMilestones },
+      timeModifications,
+    )
 
-    updateProjectContractDates(project.id, { contractMilestones: normalizedMilestones })
+    updateProjectContractDates(project.id, {
+      contractMilestones: authorized.contractMilestones,
+      approvedTimeExtensionDays: authorized.finalDays,
+      currentSubstantialCompletion: authorized.currentSubstantialCompletion,
+      currentFinalCompletion: authorized.currentFinalCompletion,
+    })
     updateProjectControlBasis(project.id, {
       phasingStrategy,
       projectPhases: phasingStrategy === 'MULTI_PHASE' ? normalizedPhases : [],
@@ -279,11 +368,55 @@ export default function ProjectControlBasisPage() {
     setError('')
   }
 
+  function saveTimeModifications() {
+    if (!project) return
+    if (timeModifications.some(item => !item.referenceNumber.trim() || !item.title.trim())) {
+      setError('Every time modification must have a reference number and title.')
+      return
+    }
+    const approvedItems = timeModifications.filter(item => item.status === 'APPROVED')
+    if (approvedItems.some(item => !item.approvalDate || !item.sourceReference?.trim())) {
+      setError('Every approved modification must have an approval date and authorized source reference.')
+      return
+    }
+    if (approvedItems.some(item => item.target === 'INTERIM_MILESTONE' && !item.milestoneId)) {
+      setError('Select the affected interim milestone for each approved interim-milestone modification.')
+      return
+    }
+    const normalized = timeModifications.map(item => ({
+      ...item,
+      referenceNumber: item.referenceNumber.trim(),
+      title: item.title.trim(),
+      sourceReference: item.sourceReference?.trim(),
+      notes: item.notes?.trim(),
+    }))
+    const authorized = calculateAuthorizedPosition(dates, normalized)
+    if (authorized.currentSubstantialCompletion && authorized.currentFinalCompletion
+      && authorized.currentSubstantialCompletion > authorized.currentFinalCompletion) {
+      setError('The resulting authorized Final Completion cannot be before authorized Substantial Completion.')
+      return
+    }
+
+    updateProjectContractDates(project.id, {
+      approvedTimeExtensionDays: authorized.finalDays,
+      currentSubstantialCompletion: authorized.currentSubstantialCompletion,
+      currentFinalCompletion: authorized.currentFinalCompletion,
+      contractMilestones: authorized.contractMilestones,
+    })
+    updateProjectControlBasis(project.id, {
+      timeModifications: normalized,
+      timeModificationsConfigured: true,
+    })
+    setSavedSection('modifications')
+    setError('')
+  }
+
   function sectionIsComplete(id: BasisSection) {
     if (id === 'contract-dates') return datesComplete
     if (id === 'milestones') return milestonesAreComplete
     if (id === 'requirements') return requirementsAreComplete
     if (id === 'p6-settings') return requirementsAreComplete && p6IsComplete
+    if (id === 'modifications') return timeModificationsAreComplete
     return false
   }
 
@@ -373,7 +506,12 @@ export default function ProjectControlBasisPage() {
               <div className="mt-4 grid items-stretch gap-3 sm:grid-cols-[1fr_auto_1fr]">
                 <PositionCard label="Original substantial completion" value={formatDate(dates.substantialCompletion)} note="Original contract" />
                 <div className="flex items-center justify-center px-2 text-lg text-slate-400">→</div>
-                <PositionCard label="Current contractual substantial completion" value={formatDate(dates.substantialCompletion)} note="No approved modification recorded" current />
+                <PositionCard
+                  label="Current contractual substantial completion"
+                  value={formatDate(dates.currentSubstantialCompletion || dates.substantialCompletion)}
+                  note={dates.currentSubstantialCompletion && dates.currentSubstantialCompletion !== dates.substantialCompletion ? 'Approved modification incorporated' : 'No approved modification recorded'}
+                  current
+                />
               </div>
             </BasisCard>
           )}
@@ -622,7 +760,198 @@ export default function ProjectControlBasisPage() {
             </BasisCard>
           )}
 
-          {!['contract-dates', 'milestones', 'requirements', 'p6-settings'].includes(section) && (
+          {section === 'modifications' && (
+            <BasisCard
+              title="Time modifications"
+              description="Track requested time separately from approved contractual time and maintain one defensible authorized completion position."
+              action="Save time modifications"
+              onAction={saveTimeModifications}
+            >
+              <Notice>
+                Pending requests, contractor forecasts, and submitted TIAs do not change the contract. Only records marked Approved—with an approval date and authorized source—change the dates shown as authorized.
+              </Notice>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <MetricCard label="Original final completion" value={formatDate(dates.originalContractCompletion)} />
+                <MetricCard label="Net approved extension" value={`${authorizedPreview.finalDays >= 0 ? '+' : ''}${authorizedPreview.finalDays} days`} tone={authorizedPreview.finalDays === 0 ? 'slate' : 'green'} />
+                <MetricCard label="Authorized final completion" value={formatDate(authorizedPreview.currentFinalCompletion)} tone="green" />
+                <MetricCard label="Pending requests" value={`${pendingModificationCount} · ${pendingRequestedDays >= 0 ? '+' : ''}${pendingRequestedDays} requested days`} tone={pendingModificationCount > 0 ? 'amber' : 'slate'} />
+              </div>
+
+              <div className="mt-6 flex flex-wrap items-start justify-between gap-4 border-t border-slate-200 pt-6">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-950">Modification register</h3>
+                  <p className="mt-1 text-xs text-slate-500">Record the full history; do not delete rejected or withdrawn requests merely because they do not affect the authorized date.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setTimeModifications(current => [...current, {
+                    id: newBasisId('time_mod'),
+                    referenceNumber: '',
+                    title: '',
+                    type: 'TIME_IMPACT_ANALYSIS',
+                    status: 'PENDING',
+                    target: 'FINAL_COMPLETION',
+                  }])}
+                  className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                >+ Add time modification</button>
+              </div>
+
+              {timeModifications.length === 0 ? (
+                <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                  <div className="text-sm font-bold text-slate-700">No time modifications recorded</div>
+                  <div className="mt-1 text-xs text-slate-500">The original contract dates remain the authorized position.</div>
+                </div>
+              ) : (
+                <div className="mt-4 space-y-4">
+                  {timeModifications.map((modification, index) => {
+                    const approved = modification.status === 'APPROVED'
+                    return (
+                      <div key={modification.id} className={`rounded-xl border p-4 ${approved ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-200 bg-slate-50'}`}>
+                        <div className="mb-4 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold text-white">{index + 1}</span>
+                            <span className={`rounded-full px-2 py-1 text-[9px] font-bold uppercase tracking-wide ${approved ? 'bg-emerald-100 text-emerald-700' : modification.status === 'REJECTED' || modification.status === 'WITHDRAWN' ? 'bg-slate-200 text-slate-600' : 'bg-amber-100 text-amber-700'}`}>
+                              {modification.status.replaceAll('_', ' ')}
+                            </span>
+                          </div>
+                          <button type="button" onClick={() => setTimeModifications(current => current.filter(item => item.id !== modification.id))} className="text-xs font-bold text-red-600 hover:text-red-800">Remove</button>
+                        </div>
+
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                          <TextField
+                            label="Reference number"
+                            value={modification.referenceNumber}
+                            placeholder="MOD-0001 / CO-001 / TIA-01"
+                            onChange={value => setTimeModifications(current => current.map(item => item.id === modification.id ? { ...item, referenceNumber: value } : item))}
+                          />
+                          <div className="lg:col-span-2">
+                            <TextField
+                              label="Title / cause"
+                              value={modification.title}
+                              placeholder="Describe the event or authorized change"
+                              onChange={value => setTimeModifications(current => current.map(item => item.id === modification.id ? { ...item, title: value } : item))}
+                            />
+                          </div>
+                          <SelectField
+                            label="Status"
+                            value={modification.status}
+                            onChange={value => setTimeModifications(current => current.map(item => item.id === modification.id ? { ...item, status: value as TimeModificationBasis['status'] } : item))}
+                            options={[
+                              ['PENDING', 'Pending'],
+                              ['UNDER_REVIEW', 'Under review'],
+                              ['APPROVED', 'Approved'],
+                              ['REJECTED', 'Rejected'],
+                              ['WITHDRAWN', 'Withdrawn'],
+                            ]}
+                          />
+                          <SelectField
+                            label="Record type"
+                            value={modification.type}
+                            onChange={value => setTimeModifications(current => current.map(item => item.id === modification.id ? { ...item, type: value as TimeModificationBasis['type'] } : item))}
+                            options={[
+                              ['CONTRACT_MODIFICATION', 'Contract modification'],
+                              ['CHANGE_ORDER', 'Change order'],
+                              ['TIME_IMPACT_ANALYSIS', 'Time impact analysis'],
+                              ['ADMINISTRATIVE', 'Administrative change'],
+                              ['OTHER', 'Other'],
+                            ]}
+                          />
+                          <SelectField
+                            label="Affected contract target"
+                            value={modification.target}
+                            onChange={value => setTimeModifications(current => current.map(item => item.id === modification.id ? {
+                              ...item,
+                              target: value as TimeModificationBasis['target'],
+                              milestoneId: value === 'INTERIM_MILESTONE' ? item.milestoneId : undefined,
+                              approvedRevisedDate: value === 'BOTH' ? undefined : item.approvedRevisedDate,
+                            } : item))}
+                            options={[
+                              ['FINAL_COMPLETION', 'Final Completion'],
+                              ['SUBSTANTIAL_COMPLETION', 'Substantial Completion'],
+                              ['BOTH', 'Substantial and Final'],
+                              ['INTERIM_MILESTONE', 'Interim contractual milestone'],
+                            ]}
+                          />
+                          {modification.target === 'INTERIM_MILESTONE' ? (
+                            <SelectField
+                              label="Affected milestone"
+                              value={modification.milestoneId || ''}
+                              onChange={value => setTimeModifications(current => current.map(item => item.id === modification.id ? { ...item, milestoneId: value } : item))}
+                              options={[
+                                ['', 'Select contractual milestone'],
+                                ...milestones.map(item => [item.id, item.name] as [string, string]),
+                              ]}
+                            />
+                          ) : <div />}
+                          <DateField
+                            label="Submitted / requested date"
+                            value={modification.submittedDate || ''}
+                            source="Request record"
+                            onChange={value => setTimeModifications(current => current.map(item => item.id === modification.id ? { ...item, submittedDate: value } : item))}
+                          />
+                          <SignedNumberField
+                            label="Requested days"
+                            value={modification.requestedDays}
+                            onChange={value => setTimeModifications(current => current.map(item => item.id === modification.id ? { ...item, requestedDays: value } : item))}
+                          />
+                          <DateField
+                            label="Approval date"
+                            value={modification.approvalDate || ''}
+                            source={approved ? 'Required for approved record' : 'If approved'}
+                            onChange={value => setTimeModifications(current => current.map(item => item.id === modification.id ? { ...item, approvalDate: value } : item))}
+                          />
+                          <SignedNumberField
+                            label="Approved days"
+                            value={modification.approvedDays}
+                            onChange={value => setTimeModifications(current => current.map(item => item.id === modification.id ? { ...item, approvedDays: value } : item))}
+                          />
+                          {modification.target === 'BOTH' ? (
+                            <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-[10px] leading-4 text-slate-500">
+                              For both completion dates, approved days are applied to each original date. Create separate records if the modification establishes two explicit dates.
+                            </div>
+                          ) : (
+                            <DateField
+                              label="Approved revised date"
+                              value={modification.approvedRevisedDate || ''}
+                              source="Optional explicit override"
+                              onChange={value => setTimeModifications(current => current.map(item => item.id === modification.id ? { ...item, approvedRevisedDate: value } : item))}
+                            />
+                          )}
+                          <div className="lg:col-span-2">
+                            <TextField
+                              label="Authorized source reference"
+                              value={modification.sourceReference || ''}
+                              placeholder="Executed modification, directive, or approval letter"
+                              onChange={value => setTimeModifications(current => current.map(item => item.id === modification.id ? { ...item, sourceReference: value } : item))}
+                            />
+                          </div>
+                        </div>
+                        <TextArea
+                          label="Notes / entitlement position"
+                          value={modification.notes || ''}
+                          onChange={value => setTimeModifications(current => current.map(item => item.id === modification.id ? { ...item, notes: value } : item))}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <div className="text-xs font-bold text-emerald-900">Resulting authorized position</div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <PositionCard label="Current contractual substantial completion" value={formatDate(authorizedPreview.currentSubstantialCompletion)} note="Approved modifications only" current />
+                  <PositionCard label="Current contractual final completion" value={formatDate(authorizedPreview.currentFinalCompletion)} note="Approved modifications only" current />
+                </div>
+                <p className="mt-3 text-[10px] leading-4 text-emerald-700">If an approved revised date is entered, it controls over the calculated original date plus approved days.</p>
+              </div>
+
+              <SaveMessage error={error} saved={savedSection === 'modifications'} label="Time modification register and authorized completion position saved." />
+            </BasisCard>
+          )}
+
+          {!['contract-dates', 'milestones', 'requirements', 'p6-settings', 'modifications'].includes(section) && (
             <section className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
               <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-lg text-blue-700">⌁</div>
               <h2 className="mt-4 text-lg font-bold text-slate-950">{BASIS_SECTIONS.find(item => item.id === section)?.label}</h2>
@@ -671,6 +1000,20 @@ function AnchorCard({ label, value }: { label: string; value: string }) {
   )
 }
 
+function MetricCard({ label, value, tone = 'slate' }: { label: string; value: string; tone?: 'slate' | 'green' | 'amber' }) {
+  const toneClass = tone === 'green'
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+    : tone === 'amber'
+      ? 'border-amber-200 bg-amber-50 text-amber-800'
+      : 'border-slate-200 bg-slate-50 text-slate-800'
+  return (
+    <div className={`rounded-xl border p-4 ${toneClass}`}>
+      <div className="text-[10px] font-bold uppercase tracking-wide opacity-70">{label}</div>
+      <div className="mt-1.5 text-sm font-black">{value}</div>
+    </div>
+  )
+}
+
 function DateField({ label, value, source, onChange }: { label: string; value: string; source: string; onChange: (value: string) => void }) {
   return <label className="block"><FieldLabel label={label} source={source} /><input type="date" value={value} onChange={event => onChange(event.target.value)} className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-900 outline-none focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100" /></label>
 }
@@ -685,6 +1028,23 @@ function SelectField({ label, value, options, onChange }: { label: string; value
 
 function NumberField({ label, value, suffix, onChange }: { label: string; value?: number; suffix?: string; onChange: (value: number | undefined) => void }) {
   return <label className="block"><FieldLabel label={label} /><div className="relative"><input type="number" min="0" value={value ?? ''} onChange={event => onChange(event.target.value === '' ? undefined : Number(event.target.value))} className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2.5 pr-16 text-sm font-semibold text-slate-900 outline-none focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100" />{suffix && <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[10px] text-slate-400">{suffix}</span>}</div></label>
+}
+
+function SignedNumberField({ label, value, onChange }: { label: string; value?: number; onChange: (value: number | undefined) => void }) {
+  return (
+    <label className="block">
+      <FieldLabel label={label} />
+      <div className="relative">
+        <input
+          type="number"
+          value={value ?? ''}
+          onChange={event => onChange(event.target.value === '' ? undefined : Number(event.target.value))}
+          className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2.5 pr-14 text-sm font-semibold text-slate-900 outline-none focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100"
+        />
+        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[10px] text-slate-400">days</span>
+      </div>
+    </label>
+  )
 }
 
 function TextArea({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {

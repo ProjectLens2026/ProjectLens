@@ -80,6 +80,7 @@ export interface ContractMilestone {
   phaseOrArea?: string
   sourceReference?: string
   isApprovalGate?: boolean
+  currentDate?: string                  // Authorized date after approved modifications
 }
 
 export interface ContractDates {
@@ -96,6 +97,9 @@ export interface ContractDates {
   // Stored with the project basis so later schedule reviews can compare the
   // submitted XER against the dates the contract actually requires.
   contractMilestones?: ContractMilestone[]
+  approvedTimeExtensionDays?: number    // Net approved days affecting Final Completion
+  currentSubstantialCompletion?: string // Authorized current date after approved modifications
+  currentFinalCompletion?: string       // Authorized current date after approved modifications
 }
 
 export interface VersionDates {
@@ -159,12 +163,31 @@ export interface ProjectPhaseBasis {
   turnoverMilestoneId?: string
 }
 
+export interface TimeModificationBasis {
+  id: string
+  referenceNumber: string
+  title: string
+  type: 'CONTRACT_MODIFICATION' | 'CHANGE_ORDER' | 'TIME_IMPACT_ANALYSIS' | 'ADMINISTRATIVE' | 'OTHER'
+  status: 'PENDING' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN'
+  target: 'SUBSTANTIAL_COMPLETION' | 'FINAL_COMPLETION' | 'BOTH' | 'INTERIM_MILESTONE'
+  milestoneId?: string
+  submittedDate?: string
+  approvalDate?: string
+  requestedDays?: number
+  approvedDays?: number
+  approvedRevisedDate?: string
+  sourceReference?: string
+  notes?: string
+}
+
 export interface ProjectControlBasis {
   contractor?: string
   governingStandard?: string
   phasingStrategy?: 'NOT_SET' | 'SINGLE_PHASE' | 'MULTI_PHASE'
   projectPhases?: ProjectPhaseBasis[]
   milestonesConfigured?: boolean
+  timeModifications?: TimeModificationBasis[]
+  timeModificationsConfigured?: boolean
   scheduleRequirements?: ScheduleRequirementsBasis
   p6Settings?: P6SettingsBasis
   updatedAt?: string

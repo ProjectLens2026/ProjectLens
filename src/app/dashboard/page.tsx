@@ -128,6 +128,8 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   const manualNtp = project.contractDates?.ntp || undefined
   const manualOriginalCompletion = project.contractDates?.originalContractCompletion || undefined
   const manualSubstantialCompletion = project.contractDates?.substantialCompletion || undefined
+  const projectAuthorizedCompletion = project.contractDates?.currentFinalCompletion || undefined
+  const approvedTimeExtensionDays = project.contractDates?.approvedTimeExtensionDays ?? 0
   const timeExtensionDays = version.versionDates?.timeExtensionDays ?? 0
   const manualRevisedCompletion = version.versionDates?.revisedContractCompletion || undefined
   const manualDataDate = version.versionDates?.manualDataDate || undefined
@@ -136,7 +138,10 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   const revisedCompletionComputed = manualOriginalCompletion
     ? addCalendarDays(manualOriginalCompletion, timeExtensionDays)
     : undefined
-  const revisedContractCompletion = manualRevisedCompletion || revisedCompletionComputed
+  // Project-level approved modifications govern. Legacy version-level values
+  // remain only as a fallback for projects that have not configured the
+  // project Time Modifications register yet.
+  const revisedContractCompletion = projectAuthorizedCompletion || manualRevisedCompletion || revisedCompletionComputed
 
   // --------- safe field reads (manual first, XER fallback) ----------
   const xerFile = version.fileName || 'schedule.xer'
@@ -506,7 +511,18 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <DateCell label="Contract Start / NTP" value={fmtDate(projectStart)} sub={manualNtp ? 'Project basis' : 'Schedule fallback — confirm basis'} />
-            <DateCell label="Authorized Completion" value={fmtDate(authorizedCompletion)} sub={manualRevisedCompletion ? 'Approved/current basis' : timeExtensionDays > 0 ? `Original + ${timeExtensionDays} days` : 'Original contract basis'} highlightColor={daysBehindNum > 0 ? 'red' : undefined} />
+            <DateCell
+              label="Authorized Completion"
+              value={fmtDate(authorizedCompletion)}
+              sub={projectAuthorizedCompletion
+                ? (approvedTimeExtensionDays !== 0 ? `Approved project basis · ${approvedTimeExtensionDays > 0 ? '+' : ''}${approvedTimeExtensionDays} days` : 'Approved project basis')
+                : manualRevisedCompletion
+                  ? 'Legacy version-level basis'
+                  : timeExtensionDays > 0
+                    ? `Legacy original + ${timeExtensionDays} days`
+                    : 'Original contract basis'}
+              highlightColor={daysBehindNum > 0 ? 'red' : undefined}
+            />
             <DateCell label="Current Forecast" value={fmtDate(projectedEnd)} sub="Selected schedule version" highlightColor={daysBehindNum > 0 ? 'amber' : undefined} />
             <DateCell label="Data Date" value={fmtDate(dataDate)} sub={manualDataDate ? 'Manual confirmation' : 'Selected schedule version'} />
           </div>
