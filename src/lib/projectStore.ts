@@ -321,6 +321,8 @@ let _hydrated = false
 let _hydrationPromise: Promise<void> | null = null
 let _dbPromise: Promise<IDBDatabase> | null = null
 const _analysisLoads = new Map<string, Promise<ScheduleVersion | null>>()
+const MAX_DETAILED_ANALYSES = 2
+const _detailedAnalysisOrder: string[] = []
 
 type Listener = () => void
 const _listeners: Set<Listener> = new Set()
@@ -413,6 +415,54 @@ function summarizeAnalysisForCache(analysis: any): any {
   }
 }
 
+function touchDetailedAnalysis(versionId: string): void {
+  const existingIndex = _detailedAnalysisOrder.indexOf(versionId)
+  if (existingIndex !== -1) _detailedAnalysisOrder.splice(existingIndex, 1)
+  _detailedAnalysisOrder.push(versionId)
+}
+
+/**
+ * Keep detailed schedule evidence bounded in memory. The selected version and
+ * one comparison version are enough for normal review/navigation. Older
+ * versions retain their scalar summary and can be reloaded from Storage.
+ *
+ * A newly uploaded version without an analysisPath is never evicted because
+ * Storage persistence may still be in flight; discarding that object would
+ * make it impossible to reload during the same session.
+ */
+function compactDetailedAnalysisCache(retainIds: string[] = []): void {
+  const retained = new Set(retainIds.filter(Boolean))
+  for (let index = _detailedAnalysisOrder.length - 1; index >= 0 && retained.size < MAX_DETAILED_ANALYSES; index -= 1) {
+    retained.add(_detailedAnalysisOrder[index])
+  }
+
+  let changed = false
+  _projects = _projects.map(project => {
+    let projectChanged = false
+    const versions = project.versions.map(version => {
+      if (version.analysisState !== 'loaded' || retained.has(version.id) || !version.analysisPath) return version
+      projectChanged = true
+      changed = true
+      return {
+        ...version,
+        analysis: summarizeAnalysisForCache(version.analysis),
+        analysisState: 'summary' as const,
+        analysisError: undefined,
+      }
+    })
+    return projectChanged ? { ...project, versions } : project
+  })
+
+  if (changed) {
+    const loadedIds = new Set(
+      _projects.flatMap(project => project.versions.filter(version => version.analysisState === 'loaded').map(version => version.id))
+    )
+    for (let index = _detailedAnalysisOrder.length - 1; index >= 0; index -= 1) {
+      if (!loadedIds.has(_detailedAnalysisOrder[index])) _detailedAnalysisOrder.splice(index, 1)
+    }
+  }
+}
+
 function withoutHeavySchedulePayloads(project: Project): Project {
   return {
     ...project,
@@ -441,15 +491,21 @@ async function idbPutProject(project: Project): Promise<void> {
   })
 }
 
-function releaseRawScheduleSource(projectId: string, versionId: string): void {
+function releaseRawScheduleSource(projectId: string, versionId: string, analysisPath?: string): void {
   const projectIndex = _projects.findIndex(project => project.id === projectId)
   if (projectIndex === -1) return
   const project = _projects[projectIndex]
   const versionIndex = project.versions.findIndex(version => version.id === versionId)
-  if (versionIndex === -1 || !project.versions[versionIndex].rawXER) return
+  if (versionIndex === -1) return
+  const currentVersion = project.versions[versionIndex]
+  if (!currentVersion.rawXER && (!analysisPath || currentVersion.analysisPath === analysisPath)) return
 
   const versions = [...project.versions]
-  versions[versionIndex] = { ...versions[versionIndex], rawXER: undefined }
+  versions[versionIndex] = {
+    ...currentVersion,
+    rawXER: undefined,
+    analysisPath: analysisPath || currentVersion.analysisPath,
+  }
   const updated = { ...project, versions }
   _projects = [
     ..._projects.slice(0, projectIndex),
@@ -912,7 +968,10 @@ export function loadProjects(): Project[] {
   return _projects
 }
 
-export function loadVersionAnalysis(versionId: string): Promise<ScheduleVersion | null> {
+export function loadVersionAnalysis(
+  versionId: string,
+  options: { retainWith?: string[] } = {},
+): Promise<ScheduleVersion | null> {
   const existingLoad = _analysisLoads.get(versionId)
   if (existingLoad) return existingLoad
 
@@ -920,7 +979,11 @@ export function loadVersionAnalysis(versionId: string): Promise<ScheduleVersion 
   if (projectIndex === -1) return Promise.resolve(null)
   const versionIndex = _projects[projectIndex].versions.findIndex(version => version.id === versionId)
   const currentVersion = _projects[projectIndex].versions[versionIndex]
-  if (currentVersion.analysisState === 'loaded') return Promise.resolve(currentVersion)
+  if (currentVersion.analysisState === 'loaded') {
+    touchDetailedAnalysis(versionId)
+    compactDetailedAnalysisCache([versionId, ...(options.retainWith || [])])
+    return Promise.resolve(currentVersion)
+  }
 
   const versions = [..._projects[projectIndex].versions]
   versions[versionIndex] = { ...currentVersion, analysisState: 'loading', analysisError: undefined }
@@ -932,7 +995,15 @@ export function loadVersionAnalysis(versionId: string): Promise<ScheduleVersion 
   notifyListeners()
 
   const promise = (async (): Promise<ScheduleVersion | null> => {
-    const result = await loadVersionAnalysisFromSupabase(versionId, currentVersion.analysisPath)
+    const result = await loadVersionAnalysisFromSupabase(
+      versionId,
+      currentVersion.analysisPath,
+      {
+        projectId: _projects[projectIndex].id,
+        fileName: currentVersion.fileName,
+        dataDate: currentVersion.dataDate,
+      },
+    )
     const latestProjectIndex = _projects.findIndex(project => project.versions.some(version => version.id === versionId))
     if (latestProjectIndex === -1) return null
     const latestVersionIndex = _projects[latestProjectIndex].versions.findIndex(version => version.id === versionId)
@@ -957,6 +1028,10 @@ export function loadVersionAnalysis(versionId: string): Promise<ScheduleVersion 
       updatedProject,
       ..._projects.slice(latestProjectIndex + 1),
     ]
+    if (result.ok && result.analysis) {
+      touchDetailedAnalysis(versionId)
+      compactDetailedAnalysisCache([versionId, ...(options.retainWith || [])])
+    }
     // idbPutProject intentionally retains only the summary; detailed analysis
     // remains an on-demand in-memory object backed by Supabase Storage.
     idbPutProject(updatedProject).catch(err => {
@@ -1006,12 +1081,13 @@ export function getActiveVersionId(): string | null {
 export function setActiveVersionId(id: string | null) {
   if (typeof window === 'undefined') return
   try {
+    const previousId = getActiveVersionId()
     if (id) localStorage.setItem(ACTIVE_VERSION_KEY, id)
     else localStorage.removeItem(ACTIVE_VERSION_KEY)
     // Let mounted pages refresh immediately when a different schedule version
     // is selected from the sidebar.
     notifyListeners()
-    if (id) void loadVersionAnalysis(id)
+    if (id) void loadVersionAnalysis(id, { retainWith: previousId && previousId !== id ? [previousId] : [] })
   } catch (err) {
     console.error('[ControlLens] setActiveVersionId failed:', err)
   }
@@ -1216,7 +1292,7 @@ export function addVersionToProject(projectId: string, version: ScheduleVersion)
       console.warn('[ControlLens] addVersion: Supabase persist failed')
       return
     }
-    releaseRawScheduleSource(projectId, version.id)
+    releaseRawScheduleSource(projectId, version.id, version.analysisPath)
   }).catch(err => {
     console.error('[ControlLens] addVersion: Supabase persist error:', err)
   })

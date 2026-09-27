@@ -23,9 +23,8 @@
 //
 // File storage:
 //   Raw XER text →  schedule-artifacts/{orgId}/{projectId}/{versionId}.xer
-//   Analysis JSON  → stored INLINE in context.fullAnalysis (jsonb).
-//                    Skips a network round-trip for typical-size analyses.
-//                    If row sizes become a problem we'll move to storage too.
+//   Analysis JSON  → schedule-artifacts/{orgId}/{projectId}/{versionId}.analysis.json.gz
+//                    New files are gzip-compressed; legacy plain JSON remains readable.
 // =============================================================================
 
 import { createClient } from './client'
@@ -34,6 +33,23 @@ import type { EvmData } from '../evm'
 import type { ScheduleType } from '../versionLabeler'
 
 const BUCKET = 'schedule-artifacts'
+
+async function gzipText(text: string): Promise<Blob | null> {
+  if (typeof CompressionStream === 'undefined') return null
+  const stream = new Blob([text], { type: 'application/json' })
+    .stream()
+    .pipeThrough(new CompressionStream('gzip'))
+  return new Blob([await new Response(stream).arrayBuffer()], { type: 'application/gzip' })
+}
+
+async function readStoredAnalysis(blob: Blob, path: string): Promise<any> {
+  if (!path.endsWith('.gz')) return JSON.parse(await blob.text())
+  if (typeof DecompressionStream === 'undefined') {
+    throw new Error('This browser cannot decompress the stored schedule analysis. Update the browser and try again.')
+  }
+  const stream = blob.stream().pipeThrough(new DecompressionStream('gzip'))
+  return JSON.parse(await new Response(stream).text())
+}
 
 // Translate ControlLens status values ('Active', 'On Hold', etc.) to the
 // lowercase/snake_case format the Supabase CHECK constraint accepts.
@@ -199,6 +215,7 @@ export async function loadProjectsFromSupabase(): Promise<Project[] | null> {
 export async function loadVersionAnalysisFromSupabase(
   versionIdLocal: string,
   knownPath?: string,
+  identity?: { projectId?: string; fileName?: string; dataDate?: string },
 ): Promise<{ ok: boolean; analysis?: any; path?: string; error?: string }> {
   const supabase = createClient()
   let path = knownPath
@@ -208,16 +225,68 @@ export async function loadVersionAnalysisFromSupabase(
       .from('schedule_versions')
       .select('analysis_path')
       .eq('id', toUuid(versionIdLocal))
-      .single()
-    if (error) return { ok: false, error: error.message }
+      .maybeSingle()
+    if (error) console.warn('[db.loadVersionAnalysis] direct version lookup failed:', error.message)
     path = data?.analysis_path || undefined
   }
 
-  if (!path) return { ok: false, error: 'This schedule version has no stored analysis.' }
+  // Older browser caches can retain a local version ID after the local→cloud
+  // UUID map has been cleared or replaced. Recover deterministically from the
+  // version identity instead of exposing PostgREST's "cannot coerce" error.
+  if (!path && identity?.projectId && identity.fileName) {
+    const orgId = await ensureUserHasOrg()
+    if (orgId) {
+      let query = supabase
+        .from('schedule_versions')
+        .select('id, analysis_path, data_date, uploaded_at')
+        .eq('org_id', orgId)
+        .eq('project_id', toUuid(identity.projectId))
+        .eq('file_name', identity.fileName)
+      if (identity.dataDate) query = query.eq('data_date', identity.dataDate)
+      const { data: projectMatches, error } = await query
+        .not('analysis_path', 'is', null)
+        .order('uploaded_at', { ascending: false })
+        .limit(2)
+      let matches = projectMatches
+      if (error) {
+        console.warn('[db.loadVersionAnalysis] identity recovery failed:', error.message)
+      }
+      // If the project UUID mapping was also stale, make one organization-
+      // scoped recovery attempt. Only accept an unambiguous match so a common
+      // filename can never attach another project's analysis.
+      if (!matches?.length) {
+        let orgQuery = supabase
+          .from('schedule_versions')
+          .select('id, analysis_path, data_date, uploaded_at')
+          .eq('org_id', orgId)
+          .eq('file_name', identity.fileName)
+        if (identity.dataDate) orgQuery = orgQuery.eq('data_date', identity.dataDate)
+        const { data: orgMatches, error: orgError } = await orgQuery
+          .not('analysis_path', 'is', null)
+          .order('uploaded_at', { ascending: false })
+          .limit(2)
+        if (orgError) console.warn('[db.loadVersionAnalysis] organization recovery failed:', orgError.message)
+        matches = orgMatches?.length === 1 ? orgMatches : []
+        if (orgMatches && orgMatches.length > 1) {
+          console.warn('[db.loadVersionAnalysis] organization recovery was ambiguous; no mapping was changed')
+        }
+      }
+      if (matches?.length) {
+        const recovered = matches[0]
+        path = recovered.analysis_path || undefined
+        const map = getLocalIdMap()
+        map[versionIdLocal] = recovered.id
+        setLocalIdMap(map)
+        console.log('[db.loadVersionAnalysis] repaired local version mapping', versionIdLocal, '→', recovered.id)
+      }
+    }
+  }
+
+  if (!path) return { ok: false, error: 'The stored analysis could not be matched to this schedule version. Re-upload this version if the problem continues.' }
   try {
     const { data: blob, error } = await supabase.storage.from(BUCKET).download(path)
     if (error || !blob) return { ok: false, error: error?.message || 'The analysis file could not be downloaded.' }
-    const analysis = JSON.parse(await blob.text())
+    const analysis = await readStoredAnalysis(blob, path)
     return { ok: true, analysis, path }
   } catch (error: any) {
     return { ok: false, error: error?.message || 'The analysis file could not be read.' }
@@ -552,23 +621,36 @@ async function insertVersionToSupabase(
     }
   }
 
-  // 2. Upload the FULL analysis JSON to storage (was inline jsonb — caused
-  //    silent failures on large analyses). Now stored as a file just like
-  //    the raw XER, with a path reference in analysis_path.
+  // 2. Upload the FULL analysis JSON to storage. New analyses are compressed
+  //    in the browser before upload, substantially reducing Storage and
+  //    network transfer for large schedules. The reader remains compatible
+  //    with every legacy uncompressed .analysis.json object.
   let analysisPath: string | null = null
   if (version.analysis) {
-    analysisPath = `${orgId}/${projectId}/${cloudVersionId}.analysis.json`
     try {
       const json = JSON.stringify(version.analysis)
-      const blob = new Blob([json], { type: 'application/json' })
+      const compressed = await gzipText(json)
+      analysisPath = compressed
+        ? `${orgId}/${projectId}/${cloudVersionId}.analysis.json.gz`
+        : `${orgId}/${projectId}/${cloudVersionId}.analysis.json`
+      const blob = compressed || new Blob([json], { type: 'application/json' })
       const { error: upErr } = await supabase.storage
         .from(BUCKET)
-        .upload(analysisPath, blob, { upsert: true, contentType: 'application/json' })
+        .upload(analysisPath, blob, {
+          upsert: true,
+          contentType: compressed ? 'application/gzip' : 'application/json',
+        })
       if (upErr) {
         console.error('[db.addVersion] analysis upload failed:', upErr.message)
         analysisPath = null
       } else {
-        console.log('[db] uploaded analysis JSON to storage', analysisPath, `(${(json.length / 1024).toFixed(0)} KB)`)
+        const originalKb = json.length / 1024
+        const storedKb = blob.size / 1024
+        console.log(
+          '[db] uploaded analysis to storage',
+          analysisPath,
+          `(${storedKb.toFixed(0)} KB stored; ${originalKb.toFixed(0)} KB original)`,
+        )
       }
     } catch (e) {
       console.error('[db.addVersion] analysis stringify/upload failed:', e)
@@ -619,6 +701,10 @@ async function insertVersionToSupabase(
     console.error('[db.addVersion] row insert failed:', rowErr.message)
     return false
   }
+  // Return the durable Storage reference through the version object supplied
+  // by projectStore. This lets the current session evict and later reload a
+  // newly uploaded analysis without requiring a browser refresh first.
+  version.analysisPath = analysisPath || undefined
   console.log('[db] inserted version', version.versionLabel || cloudVersionId)
   return true
 }
@@ -751,6 +837,7 @@ export async function deleteVersionFromSupabase(
       `${orgId}/${cloudProjectId}/${cloudVersionId}.xer`,
       `${orgId}/${cloudProjectId}/${cloudVersionId}.xml`,
       `${orgId}/${cloudProjectId}/${cloudVersionId}.analysis.json`,
+      `${orgId}/${cloudProjectId}/${cloudVersionId}.analysis.json.gz`,
     ]
     await supabase.storage.from(BUCKET).remove(paths)
   } catch (e) {
