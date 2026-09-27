@@ -19,7 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { discoverUSProject, type USProjectDiscoveryResult, type DiscoveryEvidence } from '@/lib/construction/projectDiscovery'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { getActiveProject, getActiveVersion, subscribeToProjects, updateVersionApprovalResult } from '@/lib/projectStore'
+import { getActiveProject, getActiveVersion, loadVersionAnalysis, subscribeToProjects, updateVersionApprovalResult } from '@/lib/projectStore'
 import {
   buildScheduleReviewSnapshot,
   reviewFindingSourceKey,
@@ -464,7 +464,9 @@ export default function ApprovalReadinessPage() {
 
       setProject(p)
       setVersion(v)
-      setAnalysis(v?.analysis || null)
+      const waitingForDetail = v?.analysisState === 'summary' || v?.analysisState === 'loading'
+      setAnalysis(waitingForDetail ? null : v?.analysis || null)
+      if (v && v.analysisState === 'summary') void loadVersionAnalysis(v.id)
       setReviewPurpose(defaultReviewPurpose(v))
 
       // Full CPM Analysis and Review Schedule must consume the same current
@@ -473,7 +475,7 @@ export default function ApprovalReadinessPage() {
       const selectedMode = (v?.approvalResult?.mode as ApprovalMode) || 'PRE_SUBMISSION'
       setMode(selectedMode)
       try {
-        const snapshot = buildScheduleReviewSnapshot(v?.analysis || null, {
+        const snapshot = buildScheduleReviewSnapshot(waitingForDetail ? null : v?.analysis || null, {
           versionId: v?.id,
           mode: selectedMode,
           projectType: 'ALL',
@@ -759,6 +761,14 @@ export default function ApprovalReadinessPage() {
   }
 
   if (!ready) return <Shell><div className="p-6 text-sm text-slate-500">Loading…</div></Shell>
+
+  if (project && version && (version.analysisState === 'summary' || version.analysisState === 'loading')) {
+    return <Shell project={project}><div className="mx-auto mt-10 max-w-lg rounded-2xl border border-blue-200 bg-white p-10 text-center"><div className="text-lg font-bold text-slate-800">Loading selected schedule…</div><div className="mt-2 text-sm text-slate-500">Retrieving this version’s CPM evidence. Other project versions remain lightweight.</div></div></Shell>
+  }
+
+  if (project && version?.analysisState === 'error') {
+    return <Shell project={project}><div className="mx-auto mt-10 max-w-lg rounded-2xl border border-red-200 bg-white p-10 text-center"><div className="text-lg font-bold text-red-800">Analysis could not be loaded</div><div className="mt-2 text-sm text-slate-500">{version.analysisError || 'The stored analysis is unavailable.'}</div><button type="button" onClick={() => void loadVersionAnalysis(version.id)} className="mt-5 rounded-lg bg-blue-600 px-5 py-2 text-sm font-bold text-white">Retry analysis</button></div></Shell>
+  }
 
   if (!project || !analysis) {
     return (

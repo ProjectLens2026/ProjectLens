@@ -189,36 +189,39 @@ export async function loadProjectsFromSupabase(): Promise<Project[] | null> {
   }
   if (!rows) return []
 
-  // For each project, hydrate the full analysis for each version from
-  // storage (analyses are stored as files, not inline in jsonb, since
-  // they can be multi-megabyte). Done in parallel for speed.
-  const projects: Project[] = []
-  for (const row of rows) {
-    const project = rowToProject(row)
-    if (project.versions.length > 0) {
-      await Promise.all(project.versions.map(async v => {
-        // rowToProject sorts versions chronologically. Never match the sorted
-        // array back to the unsorted database rows by index; doing so can put
-        // one version's CPM analysis on another version. Identity must govern.
-        const cloudVersionId = toUuid(v.id)
-        const versionRow = row.schedule_versions?.find((candidate: any) => candidate.id === cloudVersionId)
-        const path = versionRow?.analysis_path
-        if (!path) return
-        try {
-          const { data: blob, error: dlErr } = await supabase.storage
-            .from(BUCKET)
-            .download(path)
-          if (dlErr || !blob) return
-          const text = await blob.text()
-          v.analysis = JSON.parse(text)
-        } catch (e) {
-          console.warn('[db] could not load analysis for', v.versionLabel, e)
-        }
-      }))
-    }
-    projects.push(project)
+  // Return lightweight projects/version summaries only. Detailed CPM
+  // analyses are multi-megabyte Storage objects and are loaded separately for
+  // the selected version. This keeps portfolio/sidebar hydration bounded as
+  // the organization accumulates projects and monthly updates.
+  return rows.map(rowToProject)
+}
+
+export async function loadVersionAnalysisFromSupabase(
+  versionIdLocal: string,
+  knownPath?: string,
+): Promise<{ ok: boolean; analysis?: any; path?: string; error?: string }> {
+  const supabase = createClient()
+  let path = knownPath
+
+  if (!path) {
+    const { data, error } = await supabase
+      .from('schedule_versions')
+      .select('analysis_path')
+      .eq('id', toUuid(versionIdLocal))
+      .single()
+    if (error) return { ok: false, error: error.message }
+    path = data?.analysis_path || undefined
   }
-  return projects
+
+  if (!path) return { ok: false, error: 'This schedule version has no stored analysis.' }
+  try {
+    const { data: blob, error } = await supabase.storage.from(BUCKET).download(path)
+    if (error || !blob) return { ok: false, error: error?.message || 'The analysis file could not be downloaded.' }
+    const analysis = JSON.parse(await blob.text())
+    return { ok: true, analysis, path }
+  } catch (error: any) {
+    return { ok: false, error: error?.message || 'The analysis file could not be read.' }
+  }
 }
 
 function getLocalIdForUuid(cloudUuid: string, prefix: 'proj' | 'ver'): string {
@@ -296,6 +299,8 @@ function rowToVersion(row: any): ScheduleVersion {
     context: context.projectContext || {},
     versionDates: context.versionDates || undefined,
     analysis,
+    analysisPath: row.analysis_path || undefined,
+    analysisState: row.analysis_path ? 'summary' : 'unavailable',
     // rawXER lives in storage now; we don't pull it eagerly.
     // analysis_path and raw_xer_path retained as references.
     rawXER: undefined,

@@ -8,7 +8,7 @@
 // =============================================================================
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
-import { getActiveProject, getActiveVersion } from '@/lib/projectStore'
+import { getActiveProject, getActiveVersion, loadVersionAnalysis, subscribeToProjects } from '@/lib/projectStore'
 import { activityToGanttRange, type FloatPath } from '@/lib/multipleFloatPaths'
 import { hoursToDays, type Task } from '@/lib/xerParser'
 import { evaluatePathCredibility, pathActivityStart, pathActivityFinish, sortPathActivitiesByFinish, type PathCredibilityResult } from '@/lib/construction/pathCredibility'
@@ -29,8 +29,7 @@ export default function ControlLensAnalysisPage() {
 
   useEffect(() => {
     refresh()
-    const interval = setInterval(refresh, 1000)
-    return () => clearInterval(interval)
+    return subscribeToProjects(refresh)
   }, [])
 
   useEffect(() => {
@@ -45,7 +44,9 @@ export default function ControlLensAnalysisPage() {
     setProject(p)
     const v = getActiveVersion(p)
     setVersion(v)
-    setAnalysis(v?.analysis || null)
+    const waitingForDetail = v?.analysisState === 'summary' || v?.analysisState === 'loading'
+    setAnalysis(waitingForDetail ? null : v?.analysis || null)
+    if (v && v.analysisState === 'summary') void loadVersionAnalysis(v.id)
   }
 
   // P6 truth is displayed first and sorted chronologically by current finish.
@@ -149,6 +150,8 @@ export default function ControlLensAnalysisPage() {
   }
 
   if (!analysis || !project) {
+    const analysisLoading = Boolean(project && version && (version.analysisState === 'summary' || version.analysisState === 'loading'))
+    const analysisFailed = version?.analysisState === 'error'
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0">
@@ -166,12 +169,13 @@ export default function ControlLensAnalysisPage() {
             <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 rounded-2xl flex items-center justify-center">
               <span className="text-3xl">🔍</span>
             </div>
-            <div className="text-lg font-bold text-slate-700 mb-2">No analysis available</div>
-            <div className="text-sm text-slate-500 mb-6">Upload a schedule to see the full analysis here.</div>
-            <Link href="/dashboard/upload"
-              className="inline-block bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-blue-700">
-              Upload Schedule →
-            </Link>
+            <div className="text-lg font-bold text-slate-700 mb-2">{analysisLoading ? 'Loading selected schedule…' : analysisFailed ? 'Analysis could not be loaded' : 'No analysis available'}</div>
+            <div className="text-sm text-slate-500 mb-6">{analysisLoading ? 'Only this version’s detailed CPM evidence is being retrieved.' : analysisFailed ? (version?.analysisError || 'Retry the stored analysis or re-upload this version.') : 'Upload a schedule to see the full analysis here.'}</div>
+            {analysisFailed && version ? (
+              <button type="button" onClick={() => void loadVersionAnalysis(version.id)} className="inline-block bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-blue-700">Retry analysis</button>
+            ) : !analysisLoading ? (
+              <Link href="/dashboard/upload" className="inline-block bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-blue-700">Upload Schedule →</Link>
+            ) : null}
           </div>
         </div>
       </div>

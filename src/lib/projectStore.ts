@@ -18,6 +18,7 @@ import {
 // and as a safety net if Supabase is unreachable.
 import {
   loadProjectsFromSupabase,
+  loadVersionAnalysisFromSupabase,
   insertProjectToSupabase,
   addVersionToSupabase,
   updateProjectContractDatesInSupabase,
@@ -237,6 +238,9 @@ export interface ScheduleVersion {
   context?: any
   versionLabel?: string
   rawXER?: string
+  analysisPath?: string
+  analysisState?: 'summary' | 'loading' | 'loaded' | 'error' | 'unavailable'
+  analysisError?: string
   versionDates?: VersionDates           // NEW — per-version manual entries
 
   // NEW (Day 6, v14) — structured version labeling.
@@ -316,6 +320,7 @@ let _projects: Project[] = []
 let _hydrated = false
 let _hydrationPromise: Promise<void> | null = null
 let _dbPromise: Promise<IDBDatabase> | null = null
+const _analysisLoads = new Map<string, Promise<ScheduleVersion | null>>()
 
 type Listener = () => void
 const _listeners: Set<Listener> = new Set()
@@ -383,12 +388,39 @@ async function idbGetAllProjects(): Promise<Project[]> {
   })
 }
 
-function withoutRawScheduleSources(project: Project): Project {
+function summarizeAnalysisForCache(analysis: any): any {
+  if (!analysis) return null
+  return {
+    totalActivities: analysis.totalActivities ?? 0,
+    complete: analysis.complete ?? 0,
+    inProgress: analysis.inProgress ?? 0,
+    notStarted: analysis.notStarted ?? 0,
+    healthScore: analysis.healthScore ?? 0,
+    condition: analysis.condition,
+    delayDays: analysis.delayDays ?? 0,
+    negativeFloat: analysis.negativeFloat ?? 0,
+    outOfSequenceCount: Array.isArray(analysis.outOfSequence)
+      ? analysis.outOfSequence.length
+      : analysis.outOfSequenceCount ?? 0,
+    longLeadTotal: analysis.longLeadTotal ?? (Array.isArray(analysis.longLeadItems) ? analysis.longLeadItems.length : 0),
+    longLeadAtRisk: analysis.longLeadAtRisk ?? 0,
+    contractEnd: analysis.contractEnd,
+    projectedEnd: analysis.projectedEnd,
+    dataDate: analysis.dataDate,
+    sourceFormat: analysis.sourceFormat,
+    sourceLabel: analysis.sourceLabel,
+    fileType: analysis.fileType,
+  }
+}
+
+function withoutHeavySchedulePayloads(project: Project): Project {
   return {
     ...project,
     versions: project.versions.map(version => ({
       ...version,
       rawXER: undefined,
+      analysis: summarizeAnalysisForCache(version.analysis),
+      analysisState: version.analysisPath ? 'summary' : 'unavailable',
     })),
   }
 }
@@ -399,7 +431,7 @@ async function idbPutProject(project: Project): Promise<void> {
   // project cache. A large schedule can be tens of megabytes; retaining it
   // inside every IndexedDB project record duplicates the source file and
   // makes hydration progressively slower as versions accumulate.
-  const cacheProject = withoutRawScheduleSources(project)
+  const cacheProject = withoutHeavySchedulePayloads(project)
   return new Promise<void>((resolve, reject) => {
     const tx = db.transaction(PROJECTS_STORE, 'readwrite')
     const store = tx.objectStore(PROJECTS_STORE)
@@ -756,13 +788,18 @@ async function hydrate(): Promise<void> {
     try {
       localProjects = await idbGetAllProjects()
       console.log('[ControlLens] Local:', localProjects.length, 'project(s)')
-      const legacyRawSourceCount = localProjects.reduce(
-        (count, project) => count + project.versions.filter(version => Boolean(version.rawXER)).length,
+      const legacyHeavyPayloadCount = localProjects.reduce(
+        (count, project) => count + project.versions.filter(version =>
+          Boolean(version.rawXER)
+          || Boolean(version.analysis?.traceTasks)
+          || Boolean(version.analysis?.allTasksForPaths)
+          || Array.isArray(version.analysis?.outOfSequence)
+        ).length,
         0,
       )
-      if (legacyRawSourceCount > 0) {
-        console.log('[ControlLens] Removing', legacyRawSourceCount, 'legacy raw schedule source(s) from IndexedDB')
-        localProjects = localProjects.map(withoutRawScheduleSources)
+      if (legacyHeavyPayloadCount > 0) {
+        console.log('[ControlLens] Compacting', legacyHeavyPayloadCount, 'legacy detailed schedule payload(s) in IndexedDB')
+        localProjects = localProjects.map(withoutHeavySchedulePayloads)
         await Promise.all(localProjects.map(project => idbPutProject(project)))
       }
     } catch (err) {
@@ -822,6 +859,18 @@ async function hydrate(): Promise<void> {
     }
 
     _projects = projects
+
+    // Load exactly one detailed analysis: the selected version, or the latest
+    // version of the selected/first project. All other versions remain small
+    // summaries until the user selects them.
+    const selectedProjectId = getActiveProjectId()
+    const selectedProject = projects.find(project => project.id === selectedProjectId) || projects[0]
+    if (selectedProject) {
+      const selectedVersionId = getActiveVersionId()
+      const selectedVersion = selectedProject.versions.find(version => version.id === selectedVersionId)
+        || getLatestVersion(selectedProject)
+      if (selectedVersion) await loadVersionAnalysis(selectedVersion.id)
+    }
     _hydrated = true
 
     // Day 12 — Record which user this cache belongs to. Next hydration will
@@ -861,6 +910,65 @@ export function isHydrated(): boolean {
 
 export function loadProjects(): Project[] {
   return _projects
+}
+
+export function loadVersionAnalysis(versionId: string): Promise<ScheduleVersion | null> {
+  const existingLoad = _analysisLoads.get(versionId)
+  if (existingLoad) return existingLoad
+
+  const projectIndex = _projects.findIndex(project => project.versions.some(version => version.id === versionId))
+  if (projectIndex === -1) return Promise.resolve(null)
+  const versionIndex = _projects[projectIndex].versions.findIndex(version => version.id === versionId)
+  const currentVersion = _projects[projectIndex].versions[versionIndex]
+  if (currentVersion.analysisState === 'loaded') return Promise.resolve(currentVersion)
+
+  const versions = [..._projects[projectIndex].versions]
+  versions[versionIndex] = { ...currentVersion, analysisState: 'loading', analysisError: undefined }
+  _projects = [
+    ..._projects.slice(0, projectIndex),
+    { ..._projects[projectIndex], versions },
+    ..._projects.slice(projectIndex + 1),
+  ]
+  notifyListeners()
+
+  const promise = (async (): Promise<ScheduleVersion | null> => {
+    const result = await loadVersionAnalysisFromSupabase(versionId, currentVersion.analysisPath)
+    const latestProjectIndex = _projects.findIndex(project => project.versions.some(version => version.id === versionId))
+    if (latestProjectIndex === -1) return null
+    const latestVersionIndex = _projects[latestProjectIndex].versions.findIndex(version => version.id === versionId)
+    const latestVersions = [..._projects[latestProjectIndex].versions]
+    const latestVersion = latestVersions[latestVersionIndex]
+    latestVersions[latestVersionIndex] = result.ok && result.analysis
+      ? {
+          ...latestVersion,
+          analysis: result.analysis,
+          analysisPath: result.path || latestVersion.analysisPath,
+          analysisState: 'loaded',
+          analysisError: undefined,
+        }
+      : {
+          ...latestVersion,
+          analysisState: 'error',
+          analysisError: result.error || 'The detailed analysis could not be loaded.',
+        }
+    const updatedProject = { ..._projects[latestProjectIndex], versions: latestVersions }
+    _projects = [
+      ..._projects.slice(0, latestProjectIndex),
+      updatedProject,
+      ..._projects.slice(latestProjectIndex + 1),
+    ]
+    // idbPutProject intentionally retains only the summary; detailed analysis
+    // remains an on-demand in-memory object backed by Supabase Storage.
+    idbPutProject(updatedProject).catch(err => {
+      console.error('[ControlLens] loadVersionAnalysis: summary cache update failed:', err)
+    })
+    notifyListeners()
+    return latestVersions[latestVersionIndex]
+  })().finally(() => {
+    _analysisLoads.delete(versionId)
+  })
+  _analysisLoads.set(versionId, promise)
+  return promise
 }
 
 export function getVersionEffectiveDate(v: ScheduleVersion): string {
@@ -903,6 +1011,7 @@ export function setActiveVersionId(id: string | null) {
     // Let mounted pages refresh immediately when a different schedule version
     // is selected from the sidebar.
     notifyListeners()
+    if (id) void loadVersionAnalysis(id)
   } catch (err) {
     console.error('[ControlLens] setActiveVersionId failed:', err)
   }
@@ -1001,7 +1110,7 @@ export function createProject(opts: {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     status: 'Active',
-    versions: [opts.version],
+    versions: [{ ...opts.version, analysisState: 'loaded' }],
     rfis: [],
     changeOrders: [],
   }
@@ -1090,9 +1199,10 @@ export async function createEmptyProject(opts: {
 export function addVersionToProject(projectId: string, version: ScheduleVersion): Project | null {
   const idx = _projects.findIndex(p => p.id === projectId)
   if (idx === -1) return null
+  const loadedVersion: ScheduleVersion = { ...version, analysisState: 'loaded' }
   const updated: Project = {
     ..._projects[idx],
-    versions: [version, ..._projects[idx].versions],
+    versions: [loadedVersion, ..._projects[idx].versions],
     updatedAt: new Date().toISOString(),
   }
   _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
