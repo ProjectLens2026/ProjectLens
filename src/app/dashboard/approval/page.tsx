@@ -1427,6 +1427,31 @@ function Chip({ label, color }: { label: string; color: string }) {
   return <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: `${color}18`, color }}>{label}</span>
 }
 
+function RequirementBadge({ strength, gate = false }: { strength?: string; gate?: boolean }) {
+  const normalized = String(strength || 'OBSERVATION').toUpperCase()
+  const required = normalized === 'REQUIRED'
+  const advisory = normalized === 'ADVISORY'
+  const label = required && gate ? 'REQUIRED GATE' : normalized.replaceAll('_', ' ')
+  const palette = required && gate
+    ? { background: '#dc2626', color: '#ffffff', borderColor: '#b91c1c' }
+    : required
+      ? { background: '#fef2f2', color: '#b91c1c', borderColor: '#fca5a5' }
+      : advisory
+        ? { background: '#fff7ed', color: '#c2410c', borderColor: '#fdba74' }
+        : normalized === 'EXPECTED'
+          ? { background: '#fffbeb', color: '#a16207', borderColor: '#fde047' }
+          : { background: '#f8fafc', color: '#475569', borderColor: '#cbd5e1' }
+
+  return (
+    <span
+      className="inline-flex whitespace-nowrap rounded border px-2 py-0.5 text-[8px] font-extrabold uppercase tracking-wide"
+      style={{ ...palette, WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}
+    >
+      {label}
+    </span>
+  )
+}
+
 // =============================================================================
 // ApprovalReport — print-optimized document (Executive or Complete)
 // Built from the structured ApprovalReadinessResult, not scraped from the DOM.
@@ -1549,7 +1574,13 @@ function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis,
               {[...reviewComments].sort((a, b) => a.sequence - b.sequence).map(comment => <div key={comment.id} className="rounded-lg border border-slate-200 p-3 print:break-inside-avoid">
                 <div className="flex items-start gap-2">
                   <span className="rounded bg-slate-900 px-2 py-1 font-mono text-[9px] font-bold text-white">{comment.commentNumber}</span>
-                  <div className="flex-1"><div className="text-[11px] font-extrabold" style={{ color: COLORS.ink }}>{comment.title}</div><div className="mt-0.5 text-[9px] text-slate-500">{comment.classification} · {comment.approvalImpact.replaceAll('_', ' ')} · {reviewStatusLabel(comment.status)}</div></div>
+                  <div className="flex-1">
+                    <div className="text-[11px] font-extrabold" style={{ color: COLORS.ink }}>{comment.title}</div>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[9px] text-slate-500">
+                      <RequirementBadge strength={comment.classification} gate={comment.classification === 'REQUIRED' && comment.approvalImpact === 'BLOCKING_APPROVAL'} />
+                      <span>{comment.approvalImpact.replaceAll('_', ' ')} · {reviewStatusLabel(comment.status)}</span>
+                    </div>
+                  </div>
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-3 text-[9.5px]"><div><b>Concern:</b> {comment.concern}</div><div><b>Required correction:</b> {comment.requiredCorrection || 'Reviewer clarification requested.'}</div></div>
                 {(comment.responses || []).length > 0 && <div className="mt-2 rounded bg-slate-50 p-2 text-[9.5px]"><b>Latest contractor response:</b> {comment.responses[comment.responses.length - 1].response}</div>}
@@ -1557,22 +1588,16 @@ function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis,
             </div>
           </>}
 
-          {reportSignals.length > 0 && <>
+          {kind === 'executive' && reportSignals.length > 0 && <>
             <SectionBar>Selected CPM Technical Evidence</SectionBar>
             <div className="mb-5 space-y-2">
-              {reportSignals.map(signal => {
-                const rows = technicalEvidenceRows(signal, analysis)
-                return <div key={signal.id} className="rounded-lg border border-slate-200 p-3 print:break-inside-avoid">
-                  <div className="flex items-start gap-3">
-                    <div className="min-w-[48px] text-center rounded bg-blue-50 border border-blue-100 px-2 py-1 font-mono text-[16px] font-black text-blue-700">{signal.count}</div>
-                    <div className="flex-1"><div className="text-[11px] font-extrabold" style={{ color: COLORS.ink }}>{neutralReportText(signal.label)}</div><div className="text-[9.5px] text-slate-600 mt-0.5">{neutralReportText(signal.summary)}</div></div>
-                    <div className="text-[8px] font-bold uppercase text-slate-400">{signal.treatment.replaceAll('_', ' ')}</div>
-                  </div>
-                  {kind === 'complete' && rows.length > 0 && <table className="w-full text-[9.5px] mt-2">
-                    <tbody>{rows.map(row => <tr key={row.id} className="border-t border-slate-100"><td className="py-1 pr-2 w-[24%] font-mono font-bold">{row.code}</td><td className="py-1 text-slate-700">{row.name}</td></tr>)}</tbody>
-                  </table>}
+              {reportSignals.map(signal => <div key={signal.id} className="rounded-lg border border-slate-200 p-3 print:break-inside-avoid">
+                <div className="flex items-start gap-3">
+                  <div className="min-w-[48px] text-center rounded bg-blue-50 border border-blue-100 px-2 py-1 font-mono text-[16px] font-black text-blue-700">{signal.count}</div>
+                  <div className="flex-1"><div className="text-[11px] font-extrabold" style={{ color: COLORS.ink }}>{neutralReportText(signal.label)}</div><div className="text-[9.5px] text-slate-600 mt-0.5">{neutralReportText(signal.summary)}</div></div>
+                  <div className="text-[8px] font-bold uppercase text-slate-400">{signal.treatment.replaceAll('_', ' ')}</div>
                 </div>
-              })}
+              </div>)}
             </div>
           </>}
 
@@ -1642,8 +1667,30 @@ function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis,
             <div className="text-[12px] text-slate-500 italic py-3">No material findings.</div>
           ) : <table className="w-full text-[10px] mb-5">
             <thead><tr className="border-b-2 border-slate-200 text-left text-[8.5px] uppercase tracking-wide text-slate-500"><th className="py-1.5 pr-2">ID</th><th className="py-1.5 pr-2">Domain</th><th className="py-1.5 pr-2">Consolidated condition</th><th className="py-1.5 pr-2">Requirement</th><th className="py-1.5 text-right">Activities</th></tr></thead>
-            <tbody>{reportFindings.map(f => <tr key={f.id} className="border-b border-slate-100 align-top"><td className="py-1.5 pr-2 font-mono font-bold">{f.id}</td><td className="py-1.5 pr-2 font-mono">{f.primaryDomain}</td><td className="py-1.5 pr-2 font-semibold text-slate-800">{findingTitle(f)}</td><td className="py-1.5 pr-2 text-slate-500">{f.ruleStrength}{f.criticalGate ? ' · GATE' : ''}</td><td className="py-1.5 text-right font-mono">{f.affectedActivities.length}</td></tr>)}</tbody>
+            <tbody>{reportFindings.map(f => <tr key={f.id} className="border-b border-slate-100 align-top"><td className="py-1.5 pr-2 font-mono font-bold">{f.id}</td><td className="py-1.5 pr-2 font-mono">{f.primaryDomain}</td><td className="py-1.5 pr-2 font-semibold text-slate-800">{findingTitle(f)}</td><td className="py-1.5 pr-2"><RequirementBadge strength={f.ruleStrength} gate={f.criticalGate} /></td><td className="py-1.5 text-right font-mono">{f.affectedActivities.length}</td></tr>)}</tbody>
           </table>}
+          </>}
+
+          {/* Detailed CPM occurrences belong at the end of the Complete
+              Review. The reader sees the engineering snapshot and required
+              findings first, then drills into activity-level evidence. */}
+          {kind === 'complete' && reportSignals.length > 0 && <>
+            <SectionBar>Selected CPM Technical Evidence</SectionBar>
+            <div className="mb-5 space-y-2">
+              {reportSignals.map(signal => {
+                const rows = technicalEvidenceRows(signal, analysis)
+                return <div key={signal.id} className="rounded-lg border border-slate-200 p-3 print:break-inside-avoid">
+                  <div className="flex items-start gap-3">
+                    <div className="min-w-[48px] text-center rounded bg-blue-50 border border-blue-100 px-2 py-1 font-mono text-[16px] font-black text-blue-700">{signal.count}</div>
+                    <div className="flex-1"><div className="text-[11px] font-extrabold" style={{ color: COLORS.ink }}>{neutralReportText(signal.label)}</div><div className="text-[9.5px] text-slate-600 mt-0.5">{neutralReportText(signal.summary)}</div></div>
+                    <div className="text-[8px] font-bold uppercase text-slate-400">{signal.treatment.replaceAll('_', ' ')}</div>
+                  </div>
+                  {rows.length > 0 && <table className="w-full text-[9.5px] mt-2">
+                    <tbody>{rows.map(row => <tr key={row.id} className="border-t border-slate-100"><td className="py-1 pr-2 w-[24%] font-mono font-bold">{row.code}</td><td className="py-1 text-slate-700">{row.name}</td></tr>)}</tbody>
+                  </table>}
+                </div>
+              })}
+            </div>
           </>}
 
           {/* footer */}

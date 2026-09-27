@@ -114,7 +114,7 @@ function FindingCard({ finding: f, displayId }: { finding: ApprovalFinding; disp
         <span className="font-mono text-[9px] font-extrabold text-slate-700">{displayId}</span>
         <span className="font-mono text-[8.5px] font-bold text-slate-400">{f.primaryDomain}</span>
         <span className="text-[11px] font-extrabold text-slate-900 flex-1">{f.title}</span>
-        <span className="text-[8px] font-bold uppercase tracking-wide text-slate-500">{f.ruleStrength}</span>
+        <RequirementBadge strength={f.ruleStrength} gate={f.criticalGate} />
       </div>
       <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
         <TextBlock label="Reviewer Observation" text={f.whatFound} />
@@ -146,6 +146,24 @@ function RecommendationCard({ finding: f, displayId }: { finding: ApprovalFindin
 
 function TextBlock({ label, text }: { label: string; text?: string }) {
   return <div><div className="text-[8px] font-extrabold uppercase tracking-wide text-slate-400">{label}</div><div className="mt-0.5 text-[10.5px] leading-relaxed text-slate-700">{text || '—'}</div></div>
+}
+
+function RequirementBadge({ strength, gate = false }: { strength?: string; gate?: boolean }) {
+  const normalized = String(strength || 'OBSERVATION').toUpperCase()
+  const required = normalized === 'REQUIRED'
+  const advisory = normalized === 'ADVISORY'
+  const label = required && gate ? 'REQUIRED GATE' : normalized.replaceAll('_', ' ')
+  const palette = required && gate
+    ? { background: '#dc2626', color: '#ffffff', borderColor: '#b91c1c' }
+    : required
+      ? { background: '#fef2f2', color: '#b91c1c', borderColor: '#fca5a5' }
+      : advisory
+        ? { background: '#fff7ed', color: '#c2410c', borderColor: '#fdba74' }
+        : normalized === 'EXPECTED'
+          ? { background: '#fffbeb', color: '#a16207', borderColor: '#fde047' }
+          : { background: '#f8fafc', color: '#475569', borderColor: '#cbd5e1' }
+
+  return <span className="inline-flex whitespace-nowrap rounded border px-2 py-0.5 text-[8px] font-extrabold uppercase tracking-wide" style={{ ...palette, WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>{label}</span>
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
