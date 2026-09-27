@@ -1577,7 +1577,7 @@ function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis,
                   <div className="flex-1">
                     <div className="text-[11px] font-extrabold" style={{ color: COLORS.ink }}>{comment.title}</div>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[9px] text-slate-500">
-                      <RequirementBadge strength={comment.classification} gate={comment.classification === 'REQUIRED' && comment.approvalImpact === 'BLOCKING_APPROVAL'} />
+                      <RequirementBadge strength={comment.classification} gate={comment.classification === 'REQUIRED' && comment.approvalImpact === 'BLOCKS_APPROVAL'} />
                       <span>{comment.approvalImpact.replaceAll('_', ' ')} · {reviewStatusLabel(comment.status)}</span>
                     </div>
                   </div>
