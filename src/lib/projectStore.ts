@@ -21,6 +21,7 @@ import {
   insertProjectToSupabase,
   addVersionToSupabase,
   updateProjectContractDatesInSupabase,
+  updateProjectControlBasisInSupabase,
   updateProjectEvmInSupabase,
   updateProjectStatusInSupabase,
   deleteProjectFromSupabase,
@@ -92,6 +93,61 @@ export interface VersionDates {
   manualDataDate?: string               // optional, XER data date used if blank
 }
 
+export type ScheduleRequirementsProfile =
+  | 'NOT_SET'
+  | 'UFGS_01_32_01_00_10'
+  | 'OWNER_DATA_CENTER'
+  | 'CUSTOM'
+
+export interface ScheduleRequirementsBasis {
+  profile: ScheduleRequirementsProfile
+  specificationSection?: string
+  specificationEdition?: string
+  deliveryMethod?: 'NOT_SET' | 'DESIGN_BID_BUILD' | 'DESIGN_BUILD' | 'CM_AT_RISK' | 'OTHER'
+  schedulingSoftware?: 'NOT_SET' | 'PRIMAVERA_P6' | 'MICROSOFT_PROJECT' | 'EITHER' | 'OTHER'
+  updateFrequency?: 'NOT_SET' | 'MONTHLY' | 'BIWEEKLY' | 'WEEKLY' | 'CUSTOM'
+  preliminaryScheduleRequired: boolean
+  initialScheduleRequired: boolean
+  periodicUpdatesRequired: boolean
+  recoveryScheduleRequired: boolean
+  timeImpactAnalysisRequired: boolean
+  costLoadedRequired: boolean
+  resourceLoadedRequired: boolean
+  sdefRequired: boolean
+  narrativeRequired: boolean
+  maxActivityDurationDays?: number
+  longLeadThresholdDays?: number
+  notes?: string
+}
+
+export interface P6SettingsBasis {
+  profile: 'NOT_SET' | 'UFGS_2026' | 'PROJECT_SPECIFIC'
+  activityCodesProjectLevel: boolean
+  calendarsProjectLevel: boolean
+  durationType: 'NOT_SET' | 'FIXED_DURATION_AND_UNITS' | 'PROJECT_SPECIFIC'
+  percentCompleteType: 'NOT_SET' | 'PHYSICAL' | 'PROJECT_SPECIFIC'
+  hoursPerDay?: number
+  hoursPerWeek?: number
+  hoursPerMonth?: number
+  hoursPerYear?: number
+  criticalActivities: 'NOT_SET' | 'LONGEST_PATH' | 'TOTAL_FLOAT' | 'PROJECT_SPECIFIC'
+  progressedActivities: 'NOT_SET' | 'RETAINED_LOGIC' | 'PROGRESS_OVERRIDE' | 'ACTUAL_DATES' | 'PROJECT_SPECIFIC'
+  negativeLagsAllowed: boolean
+  startToFinishAllowed: boolean
+  maxActivityIdLength?: number
+  verbNounActivityNames: boolean
+  commonCalendarEndTime: boolean
+  notes?: string
+}
+
+export interface ProjectControlBasis {
+  contractor?: string
+  governingStandard?: string
+  scheduleRequirements?: ScheduleRequirementsBasis
+  p6Settings?: P6SettingsBasis
+  updatedAt?: string
+}
+
 export interface ScheduleVersion {
   id: string
   uploadedAt: string
@@ -143,6 +199,7 @@ export interface Project {
   rfis: any[]
   changeOrders: any[]
   contractDates?: ContractDates         // Manual contract dates (NTP, Original Comp, Substantial)
+  controlBasis?: ProjectControlBasis    // Project-level contractual schedule requirements and settings
   // EVM data — Day 5, v10. Project-level (sticky across versions). PM enters
   // total budget once; monthly grid auto-spreads using chosen distribution.
   // Per-month earned and actual dollars are PM-entered as work progresses.
@@ -955,6 +1012,45 @@ export function updateProjectContractDates(
   // v15 — sync to Supabase
   updateProjectContractDatesInSupabase(projectId, mergedDates).catch(err => {
     console.error('[ControlLens] updateProjectContractDates: Supabase failed:', err)
+  })
+  return updated
+}
+
+// =============================================================================
+// updateProjectControlBasis — merge project-level schedule requirements and
+// required P6 settings. This basis belongs to the project, never to a single
+// schedule version. Uploaded schedules are evaluated against it.
+// =============================================================================
+export function updateProjectControlBasis(
+  projectId: string,
+  basis: ProjectControlBasis,
+): Project | null {
+  const idx = _projects.findIndex(p => p.id === projectId)
+  if (idx === -1) return null
+
+  const mergedBasis: ProjectControlBasis = {
+    ..._projects[idx].controlBasis,
+    ...basis,
+    scheduleRequirements: basis.scheduleRequirements
+      ? { ..._projects[idx].controlBasis?.scheduleRequirements, ...basis.scheduleRequirements }
+      : _projects[idx].controlBasis?.scheduleRequirements,
+    p6Settings: basis.p6Settings
+      ? { ..._projects[idx].controlBasis?.p6Settings, ...basis.p6Settings }
+      : _projects[idx].controlBasis?.p6Settings,
+    updatedAt: new Date().toISOString(),
+  }
+  const updated: Project = {
+    ..._projects[idx],
+    controlBasis: mergedBasis,
+    updatedAt: new Date().toISOString(),
+  }
+  _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
+  notifyListeners()
+  idbPutProject(updated).catch(err => {
+    console.error('[ControlLens] updateProjectControlBasis: IndexedDB persist failed:', err)
+  })
+  updateProjectControlBasisInSupabase(projectId, mergedBasis).catch(err => {
+    console.error('[ControlLens] updateProjectControlBasis: Supabase failed:', err)
   })
   return updated
 }

@@ -420,13 +420,14 @@ export default function Sidebar({ user }: SidebarProps) {
   function fmtSnap(d?: string): string {
     return formatDisplayDate(d)
   }
-  // Per-project navigation intentionally exposes only the six workspaces that
+  // Per-project navigation intentionally exposes only the core workspaces that
   // answer the user's real questions. Detailed tools remain available inside
   // Full CPM Analysis, Review Schedule, Project Controls, Reports, and
   // Schedules & Versions.
   // Workspace-level navigation (Enterprise, Archive, Deleted, Settings,
   // Portfolio) remains separate and unchanged below.
   const allViews = activeProject ? [
+    { href: '/dashboard/project-setup', icon: '▣', label: 'Project Setup', group: 'PROJECT WORKSPACE', requires: 'view' as const },
     { href: '/dashboard', icon: '⊞', label: 'Overview', group: 'PROJECT WORKSPACE', requires: 'view' as const },
     { href: '/dashboard/approval', icon: '✅', label: 'Review Schedule', group: 'PROJECT WORKSPACE', requires: 'view' as const },
     { href: '/dashboard/lens', icon: '⌕', label: 'Full CPM Analysis', group: 'PROJECT WORKSPACE', requires: 'view' as const },
@@ -434,7 +435,7 @@ export default function Sidebar({ user }: SidebarProps) {
     { href: '/dashboard/reports', icon: '📄', label: 'Reports', group: 'PROJECT WORKSPACE', requires: 'view' as const },
     { href: '/dashboard/projects', icon: '▤', label: 'Schedules & Versions', group: 'PROJECT WORKSPACE', requires: 'view' as const },
   ] : []
-  // All six destinations are available to anyone who can view the active
+  // All destinations are available to anyone who can view the active
   // project. Permission checks remain inside the destination pages/actions.
   const views = allViews
   const isEnterpriseActive = pathname.startsWith('/dashboard/enterprise')

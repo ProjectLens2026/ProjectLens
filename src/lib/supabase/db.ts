@@ -10,6 +10,7 @@
 //   projects.owner_party          ←→ Project.owner
 //   projects.contractor           ←→ Project.gc
 //   projects.contract_dates jsonb ←→ Project.contractDates
+//   projects.control_basis jsonb  ←→ Project.controlBasis
 //   projects.evm jsonb            ←→ Project.evm
 //
 //   schedule_versions.schedule_type  ←→ ScheduleVersion.scheduleType
@@ -28,7 +29,7 @@
 // =============================================================================
 
 import { createClient } from './client'
-import type { Project, ScheduleVersion, ContractDates, ProjectStatus } from '../projectStore'
+import type { Project, ScheduleVersion, ContractDates, ProjectControlBasis, ProjectStatus } from '../projectStore'
 import type { EvmData } from '../evm'
 import type { ScheduleType } from '../versionLabeler'
 
@@ -246,6 +247,7 @@ function rowToProject(row: any): Project {
     phase: row.phase || undefined,
     status: fromDbStatus(row.status),
     contractDates: row.contract_dates || undefined,
+    controlBasis: row.control_basis || undefined,
     evm: row.evm || undefined,
     versions,
     rfis: [],  // Session B will fetch from rfis table
@@ -462,6 +464,7 @@ export async function insertProjectToSupabase(project: Project): Promise<boolean
       phase: project.phase || null,
       status: toDbStatus(project.status),
       contract_dates: project.contractDates || null,
+      control_basis: project.controlBasis || {},
       evm: project.evm || null,
     })
 
@@ -626,6 +629,22 @@ export async function updateProjectContractDatesInSupabase(
     .eq('id', toUuid(projectId))
   if (error) {
     console.error('[db.updateContractDates] failed:', error.message)
+    return false
+  }
+  return true
+}
+
+export async function updateProjectControlBasisInSupabase(
+  projectId: string,
+  basis: ProjectControlBasis,
+): Promise<boolean> {
+  const supabase = createClient()
+  const { error } = await supabase
+    .from('projects')
+    .update({ control_basis: basis, updated_at: new Date().toISOString() })
+    .eq('id', toUuid(projectId))
+  if (error) {
+    console.error('[db.updateProjectControlBasis] failed:', error.message)
     return false
   }
   return true

@@ -106,7 +106,7 @@ function ExecutiveDashboardInner() {
           </div>
           <div className="text-lg font-bold text-slate-700 mb-2">No project loaded</div>
           <div className="text-sm text-slate-500 mb-4">
-            Upload a P6 XER file to see the Executive Dashboard with your project's health, dates, and schedule progress.
+            Upload a Primavera P6 XER or Microsoft Project XML file to see the project overview, dates, schedule progress, and review status.
           </div>
           <Link href="/dashboard/upload" className="inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2 rounded-lg">
             Upload Schedule
@@ -487,15 +487,10 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
               positionTone === 'red' ? 'text-red-700' : positionTone === 'green' ? 'text-emerald-700' : 'text-amber-700'
             )}>{positionLabel}</div>
             <div className="text-xs text-slate-600 mt-1">
-              Authorized completion: <b>{fmtDate(authorizedCompletion)}</b> · Current XER forecast: <b>{fmtDate(projectedEnd)}</b>
+              Authorized completion: <b>{fmtDate(authorizedCompletion)}</b> · Current schedule forecast: <b>{fmtDate(projectedEnd)}</b>
             </div>
           </div>
           <div className="flex gap-2 flex-shrink-0">
-            {!contractBasisComplete && (
-              <Link href="/dashboard/project-setup" className="bg-white border border-amber-300 text-amber-800 text-xs font-bold px-3 py-2 rounded-lg hover:bg-amber-100">
-                Complete Project Basis
-              </Link>
-            )}
             <Link href="/dashboard/approval" className="bg-slate-900 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-slate-800">
               Review This Version →
             </Link>
@@ -503,18 +498,17 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
         </div>
 
         <Card>
-          <div className="flex items-center justify-between mb-4">
+          <div className="mb-4">
             <div>
               <SectionTitle>Contract and Schedule Position</SectionTitle>
-              <div className="text-[11px] text-slate-500">Contract dates govern. XER dates show the contractor's current schedule position.</div>
+              <div className="text-[11px] text-slate-500">Contract dates govern. Submitted schedule dates show the contractor's current position.</div>
             </div>
-            <Link href="/dashboard/project-setup" className="text-xs font-semibold text-blue-600 hover:text-blue-800">Project Setup</Link>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <DateCell label="Contract Start / NTP" value={fmtDate(projectStart)} sub={manualNtp ? 'Project basis' : 'XER fallback — confirm basis'} />
+            <DateCell label="Contract Start / NTP" value={fmtDate(projectStart)} sub={manualNtp ? 'Project basis' : 'Schedule fallback — confirm basis'} />
             <DateCell label="Authorized Completion" value={fmtDate(authorizedCompletion)} sub={manualRevisedCompletion ? 'Approved/current basis' : timeExtensionDays > 0 ? `Original + ${timeExtensionDays} days` : 'Original contract basis'} highlightColor={daysBehindNum > 0 ? 'red' : undefined} />
-            <DateCell label="Current Forecast" value={fmtDate(projectedEnd)} sub="Selected XER version" highlightColor={daysBehindNum > 0 ? 'amber' : undefined} />
-            <DateCell label="Data Date" value={fmtDate(dataDate)} sub={manualDataDate ? 'Manual confirmation' : 'Selected XER version'} />
+            <DateCell label="Current Forecast" value={fmtDate(projectedEnd)} sub="Selected schedule version" highlightColor={daysBehindNum > 0 ? 'amber' : undefined} />
+            <DateCell label="Data Date" value={fmtDate(dataDate)} sub={manualDataDate ? 'Manual confirmation' : 'Selected schedule version'} />
           </div>
         </Card>
 
@@ -590,7 +584,7 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
             <Link href="/dashboard/controls" className="text-xs font-semibold text-blue-600 hover:text-blue-800">Open Project Controls</Link>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Work complete</div><div className="text-xl font-black text-slate-900 mt-1">{hasWorkComplete ? `${Math.round(workCompleteNum)}%` : '—'}</div><div className="text-[10px] text-slate-400 mt-1">Selected XER calculation</div></div>
+            <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Work complete</div><div className="text-xl font-black text-slate-900 mt-1">{hasWorkComplete ? `${Math.round(workCompleteNum)}%` : '—'}</div><div className="text-[10px] text-slate-400 mt-1">Selected schedule calculation</div></div>
             <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Risk categories</div><div className={clsx('text-xl font-black mt-1', risksCritical > 0 ? 'text-red-600' : 'text-slate-900')}>{risksAll}</div><div className="text-[10px] text-slate-400 mt-1">{risksCritical} critical · {risksHigh} high</div></div>
             <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Long-lead at risk</div><div className={clsx('text-xl font-black mt-1', longLeadAtRisk > 0 ? 'text-amber-600' : 'text-slate-900')}>{longLeadAtRisk}</div><div className="text-[10px] text-slate-400 mt-1">of {longLeadTotal} detected items</div></div>
             <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Remaining duration</div><div className="text-xl font-black text-slate-900 mt-1">{remainingDuration || '—'}</div><div className="text-[10px] text-slate-400 mt-1">calendar days to authorized completion</div></div>
