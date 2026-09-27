@@ -383,14 +383,51 @@ async function idbGetAllProjects(): Promise<Project[]> {
   })
 }
 
+function withoutRawScheduleSources(project: Project): Project {
+  return {
+    ...project,
+    versions: project.versions.map(version => ({
+      ...version,
+      rawXER: undefined,
+    })),
+  }
+}
+
 async function idbPutProject(project: Project): Promise<void> {
   const db = await openDB()
+  // Raw XER/XML text belongs in Supabase Storage, not in the browser's
+  // project cache. A large schedule can be tens of megabytes; retaining it
+  // inside every IndexedDB project record duplicates the source file and
+  // makes hydration progressively slower as versions accumulate.
+  const cacheProject = withoutRawScheduleSources(project)
   return new Promise<void>((resolve, reject) => {
     const tx = db.transaction(PROJECTS_STORE, 'readwrite')
     const store = tx.objectStore(PROJECTS_STORE)
-    const req = store.put(project)
+    const req = store.put(cacheProject)
     req.onsuccess = () => resolve()
     req.onerror = () => reject(req.error || new Error('idbPut failed'))
+  })
+}
+
+function releaseRawScheduleSource(projectId: string, versionId: string): void {
+  const projectIndex = _projects.findIndex(project => project.id === projectId)
+  if (projectIndex === -1) return
+  const project = _projects[projectIndex]
+  const versionIndex = project.versions.findIndex(version => version.id === versionId)
+  if (versionIndex === -1 || !project.versions[versionIndex].rawXER) return
+
+  const versions = [...project.versions]
+  versions[versionIndex] = { ...versions[versionIndex], rawXER: undefined }
+  const updated = { ...project, versions }
+  _projects = [
+    ..._projects.slice(0, projectIndex),
+    updated,
+    ..._projects.slice(projectIndex + 1),
+  ]
+  // This is storage housekeeping only; no visible project state changed, so
+  // avoid forcing every subscribed page to render again.
+  idbPutProject(updated).catch(err => {
+    console.error('[ControlLens] releaseRawScheduleSource: IndexedDB cleanup failed:', err)
   })
 }
 
@@ -719,6 +756,15 @@ async function hydrate(): Promise<void> {
     try {
       localProjects = await idbGetAllProjects()
       console.log('[ControlLens] Local:', localProjects.length, 'project(s)')
+      const legacyRawSourceCount = localProjects.reduce(
+        (count, project) => count + project.versions.filter(version => Boolean(version.rawXER)).length,
+        0,
+      )
+      if (legacyRawSourceCount > 0) {
+        console.log('[ControlLens] Removing', legacyRawSourceCount, 'legacy raw schedule source(s) from IndexedDB')
+        localProjects = localProjects.map(withoutRawScheduleSources)
+        await Promise.all(localProjects.map(project => idbPutProject(project)))
+      }
     } catch (err) {
       console.error('[ControlLens] IndexedDB read failed during hydration:', err)
     }
@@ -967,7 +1013,11 @@ export function createProject(opts: {
   // v15 — also push to Supabase in background. Fire-and-forget; if cloud
   // write fails we still have the local copy. User can retry via next push.
   insertProjectToSupabase(project).then(ok => {
-    if (!ok) console.warn('[ControlLens] createProject: Supabase persist failed (will retry on next session)')
+    if (!ok) {
+      console.warn('[ControlLens] createProject: Supabase persist failed (will retry on next session)')
+      return
+    }
+    releaseRawScheduleSource(project.id, opts.version.id)
   }).catch(err => {
     console.error('[ControlLens] createProject: Supabase persist error:', err)
   })
@@ -1052,7 +1102,11 @@ export function addVersionToProject(projectId: string, version: ScheduleVersion)
   })
   // v15 — push the new version (with raw XER upload) to Supabase. Background.
   addVersionToSupabase(projectId, version).then(ok => {
-    if (!ok) console.warn('[ControlLens] addVersion: Supabase persist failed')
+    if (!ok) {
+      console.warn('[ControlLens] addVersion: Supabase persist failed')
+      return
+    }
+    releaseRawScheduleSource(projectId, version.id)
   }).catch(err => {
     console.error('[ControlLens] addVersion: Supabase persist error:', err)
   })

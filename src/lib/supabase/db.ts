@@ -196,8 +196,12 @@ export async function loadProjectsFromSupabase(): Promise<Project[] | null> {
   for (const row of rows) {
     const project = rowToProject(row)
     if (project.versions.length > 0) {
-      await Promise.all(project.versions.map(async (v, idx) => {
-        const versionRow = row.schedule_versions?.[idx]
+      await Promise.all(project.versions.map(async v => {
+        // rowToProject sorts versions chronologically. Never match the sorted
+        // array back to the unsorted database rows by index; doing so can put
+        // one version's CPM analysis on another version. Identity must govern.
+        const cloudVersionId = toUuid(v.id)
+        const versionRow = row.schedule_versions?.find((candidate: any) => candidate.id === cloudVersionId)
         const path = versionRow?.analysis_path
         if (!path) return
         try {

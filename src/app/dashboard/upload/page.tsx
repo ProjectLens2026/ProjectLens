@@ -542,11 +542,9 @@ export default function UploadPage() {
           })
         }
 
-        try {
-          localStorage.setItem('pl_last_analysis', JSON.stringify(data.analysis))
-        } catch (legacyErr) {
-          console.warn('[ControlLens] Could not write legacy pl_last_analysis key (non-critical):', legacyErr)
-        }
+        // The active project/version is the source of truth. Do not duplicate
+        // a multi-megabyte analysis in localStorage; large schedules exceed its
+        // quota and JSON.stringify blocks the main browser thread.
       } catch (err: any) {
         console.error('[ControlLens] Failed to save project:', err)
         const userMessage = err?.message ||
