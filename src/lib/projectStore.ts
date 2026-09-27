@@ -180,6 +180,37 @@ export interface TimeModificationBasis {
   notes?: string
 }
 
+export interface ProjectSourceDocument {
+  id: string
+  title: string
+  category:
+    | 'EXECUTED_CONTRACT'
+    | 'SCHEDULE_SPECIFICATION'
+    | 'NOTICE_TO_PROCEED'
+    | 'CONTRACT_MODIFICATION'
+    | 'CHANGE_ORDER'
+    | 'APPROVAL_LETTER'
+    | 'OWNER_REQUIREMENT'
+    | 'BASIS_OF_DESIGN'
+    | 'COMMISSIONING_PLAN'
+    | 'UTILITY_AGREEMENT'
+    | 'OTHER'
+  authority: 'CONTRACTUAL' | 'GOVERNING_REQUIREMENT' | 'SUPPORTING_REFERENCE' | 'INFORMATIONAL'
+  status: 'CURRENT' | 'SUPERSEDED' | 'DRAFT' | 'ARCHIVED'
+  referenceNumber?: string
+  revision?: string
+  issueDate?: string
+  effectiveDate?: string
+  appliesTo: Array<'CONTRACT_DATES' | 'MILESTONES_PHASES' | 'SCHEDULE_REQUIREMENTS' | 'P6_SETTINGS' | 'TIME_MODIFICATIONS'>
+  fileName?: string
+  storagePath?: string
+  mimeType?: string
+  fileSize?: number
+  externalUrl?: string
+  notes?: string
+  uploadedAt?: string
+}
+
 export interface ProjectControlBasis {
   contractor?: string
   governingStandard?: string
@@ -188,6 +219,8 @@ export interface ProjectControlBasis {
   milestonesConfigured?: boolean
   timeModifications?: TimeModificationBasis[]
   timeModificationsConfigured?: boolean
+  sourceDocuments?: ProjectSourceDocument[]
+  sourceDocumentsConfigured?: boolean
   scheduleRequirements?: ScheduleRequirementsBasis
   p6Settings?: P6SettingsBasis
   updatedAt?: string

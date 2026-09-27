@@ -9,6 +9,7 @@ import {
   Project,
   ProjectControlBasis,
   ProjectPhaseBasis,
+  ProjectSourceDocument,
   ScheduleRequirementsBasis,
   TimeModificationBasis,
   addCalendarDays,
@@ -18,6 +19,11 @@ import {
   updateProjectControlBasis,
   whenHydrated,
 } from '@/lib/projectStore'
+import {
+  deleteProjectSourceDocumentFile,
+  getProjectSourceDocumentSignedUrl,
+  uploadProjectSourceDocument,
+} from '@/lib/supabase/db'
 
 type BasisSection =
   | 'contract-dates'
@@ -33,7 +39,7 @@ const BASIS_SECTIONS: Array<{ id: BasisSection; label: string; implemented: bool
   { id: 'requirements', label: 'Schedule requirements', implemented: true },
   { id: 'p6-settings', label: 'P6 settings', implemented: true },
   { id: 'modifications', label: 'Time modifications', implemented: true },
-  { id: 'documents', label: 'Source documents', implemented: false },
+  { id: 'documents', label: 'Source documents', implemented: true },
 ]
 
 const EMPTY_REQUIREMENTS: ScheduleRequirementsBasis = {
@@ -110,6 +116,12 @@ function formatDate(value?: string) {
   const date = new Date(`${value}T00:00:00`)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
+}
+
+function formatFileSize(bytes?: number) {
+  if (!bytes) return ''
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 function validateDates(dates: ContractDates): string | null {
@@ -202,6 +214,9 @@ export default function ProjectControlBasisPage() {
   const [phasingStrategy, setPhasingStrategy] = useState<ProjectControlBasis['phasingStrategy']>('NOT_SET')
   const [phases, setPhases] = useState<ProjectPhaseBasis[]>([])
   const [timeModifications, setTimeModifications] = useState<TimeModificationBasis[]>([])
+  const [sourceDocuments, setSourceDocuments] = useState<ProjectSourceDocument[]>([])
+  const [uploadingDocumentId, setUploadingDocumentId] = useState<string | null>(null)
+  const [openingDocumentId, setOpeningDocumentId] = useState<string | null>(null)
   const [requirements, setRequirements] = useState<ScheduleRequirementsBasis>({ ...EMPTY_REQUIREMENTS })
   const [p6Settings, setP6Settings] = useState<P6SettingsBasis>({ ...EMPTY_P6_SETTINGS })
   const [error, setError] = useState('')
@@ -227,6 +242,7 @@ export default function ProjectControlBasisPage() {
       setPhasingStrategy(active?.controlBasis?.phasingStrategy || 'NOT_SET')
       setPhases(active?.controlBasis?.projectPhases || [])
       setTimeModifications(active?.controlBasis?.timeModifications || [])
+      setSourceDocuments(active?.controlBasis?.sourceDocuments || [])
       setRequirements({ ...EMPTY_REQUIREMENTS, ...(active?.controlBasis?.scheduleRequirements || {}) })
       setP6Settings({ ...EMPTY_P6_SETTINGS, ...(active?.controlBasis?.p6Settings || {}) })
     }
@@ -239,6 +255,7 @@ export default function ProjectControlBasisPage() {
   const requirementsAreComplete = requirementsComplete(requirements)
   const milestonesAreComplete = Boolean(basis.milestonesConfigured)
   const timeModificationsAreComplete = Boolean(basis.timeModificationsConfigured)
+  const sourceDocumentsAreComplete = Boolean(basis.sourceDocumentsConfigured)
   const p6IsApplicable = requirements.schedulingSoftware === 'PRIMAVERA_P6' || requirements.schedulingSoftware === 'EITHER'
   const p6IsComplete = !p6IsApplicable || p6SettingsComplete(p6Settings)
   const authorizedPreview = useMemo(
@@ -249,9 +266,11 @@ export default function ProjectControlBasisPage() {
   const pendingRequestedDays = timeModifications
     .filter(item => item.status === 'PENDING' || item.status === 'UNDER_REVIEW')
     .reduce((total, item) => total + (item.requestedDays || 0), 0)
+  const currentSourceCount = sourceDocuments.filter(item => item.status === 'CURRENT').length
+  const authoritativeSourceCount = sourceDocuments.filter(item => item.authority === 'CONTRACTUAL' || item.authority === 'GOVERNING_REQUIREMENT').length
   const completeSections = useMemo(() => (
-    [datesComplete, milestonesAreComplete, requirementsAreComplete, p6IsComplete && requirementsAreComplete, timeModificationsAreComplete].filter(Boolean).length
-  ), [datesComplete, milestonesAreComplete, requirementsAreComplete, p6IsComplete, timeModificationsAreComplete])
+    [datesComplete, milestonesAreComplete, requirementsAreComplete, p6IsComplete && requirementsAreComplete, timeModificationsAreComplete, sourceDocumentsAreComplete].filter(Boolean).length
+  ), [datesComplete, milestonesAreComplete, requirementsAreComplete, p6IsComplete, timeModificationsAreComplete, sourceDocumentsAreComplete])
   const completionPercent = Math.round((completeSections / 6) * 100)
 
   function clearMessages() {
@@ -411,12 +430,123 @@ export default function ProjectControlBasisPage() {
     setError('')
   }
 
+  function saveSourceDocuments() {
+    if (!project) return
+    if (sourceDocuments.length === 0) {
+      setError('Add at least one authoritative or supporting source document before completing this section.')
+      return
+    }
+    if (sourceDocuments.some(item => !item.title.trim())) {
+      setError('Every source-document record must have a title.')
+      return
+    }
+    if (sourceDocuments.some(item => !item.storagePath && !item.externalUrl?.trim())) {
+      setError('Every source-document record must include an uploaded file or controlled external link.')
+      return
+    }
+    if (sourceDocuments.some(item => item.appliesTo.length === 0)) {
+      setError('Every source-document record must identify at least one project-basis section it supports.')
+      return
+    }
+    if (sourceDocuments.some(item =>
+      (item.authority === 'CONTRACTUAL' || item.authority === 'GOVERNING_REQUIREMENT') && !item.issueDate
+    )) {
+      setError('Contractual and governing documents must include an issue date.')
+      return
+    }
+    for (const item of sourceDocuments) {
+      if (!item.externalUrl?.trim()) continue
+      try {
+        const url = new URL(item.externalUrl)
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('Invalid protocol')
+      } catch {
+        setError(`Enter a valid http(s) link for “${item.title || 'source document'}”.`)
+        return
+      }
+    }
+    const normalized = sourceDocuments.map(item => ({
+      ...item,
+      title: item.title.trim(),
+      referenceNumber: item.referenceNumber?.trim(),
+      revision: item.revision?.trim(),
+      externalUrl: item.externalUrl?.trim(),
+      notes: item.notes?.trim(),
+    }))
+    updateProjectControlBasis(project.id, {
+      sourceDocuments: normalized,
+      sourceDocumentsConfigured: true,
+    })
+    setSavedSection('documents')
+    setError('')
+  }
+
+  async function handleSourceDocumentUpload(documentId: string, file: File) {
+    if (!project) return
+    const allowedExtensions = /\.(pdf|doc|docx|xls|xlsx|csv|txt|png|jpg|jpeg)$/i
+    if (!allowedExtensions.test(file.name)) {
+      setError('Use PDF, Word, Excel, CSV, text, PNG, or JPEG source documents.')
+      return
+    }
+    setUploadingDocumentId(documentId)
+    setError('')
+    const result = await uploadProjectSourceDocument(project.id, documentId, file)
+    setUploadingDocumentId(null)
+    if (!result.ok || !result.path) {
+      setError(result.error || 'The source document could not be uploaded.')
+      return
+    }
+    const previousPath = sourceDocuments.find(item => item.id === documentId)?.storagePath
+    setSourceDocuments(current => current.map(item => item.id === documentId ? {
+      ...item,
+      fileName: file.name,
+      storagePath: result.path,
+      mimeType: file.type || 'application/octet-stream',
+      fileSize: file.size,
+      uploadedAt: new Date().toISOString(),
+    } : item))
+    if (previousPath && previousPath !== result.path) {
+      await deleteProjectSourceDocumentFile(previousPath)
+    }
+    setSavedSection(null)
+  }
+
+  async function openSourceDocument(document: ProjectSourceDocument) {
+    if (document.externalUrl && !document.storagePath) {
+      window.open(document.externalUrl, '_blank', 'noopener,noreferrer')
+      return
+    }
+    if (!document.storagePath) return
+    setOpeningDocumentId(document.id)
+    const result = await getProjectSourceDocumentSignedUrl(document.storagePath)
+    setOpeningDocumentId(null)
+    if (!result.ok || !result.signedUrl) {
+      setError(result.error || 'The source document could not be opened.')
+      return
+    }
+    window.open(result.signedUrl, '_blank', 'noopener,noreferrer')
+  }
+
+  async function removeDraftSourceDocument(document: ProjectSourceDocument) {
+    if (document.status !== 'DRAFT') return
+    if (!window.confirm('Remove this draft source-document record?')) return
+    if (document.storagePath) {
+      const removed = await deleteProjectSourceDocumentFile(document.storagePath)
+      if (!removed) {
+        setError('The draft file could not be removed from storage.')
+        return
+      }
+    }
+    setSourceDocuments(current => current.filter(item => item.id !== document.id))
+    setSavedSection(null)
+  }
+
   function sectionIsComplete(id: BasisSection) {
     if (id === 'contract-dates') return datesComplete
     if (id === 'milestones') return milestonesAreComplete
     if (id === 'requirements') return requirementsAreComplete
     if (id === 'p6-settings') return requirementsAreComplete && p6IsComplete
     if (id === 'modifications') return timeModificationsAreComplete
+    if (id === 'documents') return sourceDocumentsAreComplete
     return false
   }
 
@@ -951,7 +1081,220 @@ export default function ProjectControlBasisPage() {
             </BasisCard>
           )}
 
-          {!['contract-dates', 'milestones', 'requirements', 'p6-settings', 'modifications'].includes(section) && (
+          {section === 'documents' && (
+            <BasisCard
+              title="Source documents"
+              description="Maintain the authoritative record supporting the project control basis and every formal schedule review."
+              action="Save source documents"
+              onAction={saveSourceDocuments}
+            >
+              <Notice>
+                A filename alone is not evidence. Identify the document’s authority, revision, issue date, status, and the project-basis sections it governs.
+              </Notice>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                <MetricCard label="Registered documents" value={String(sourceDocuments.length)} />
+                <MetricCard label="Current documents" value={String(currentSourceCount)} tone={currentSourceCount > 0 ? 'green' : 'slate'} />
+                <MetricCard label="Contractual / governing" value={String(authoritativeSourceCount)} tone={authoritativeSourceCount > 0 ? 'green' : 'amber'} />
+              </div>
+
+              <div className="mt-6 flex flex-wrap items-start justify-between gap-4 border-t border-slate-200 pt-6">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-950">Document register</h3>
+                  <p className="mt-1 text-xs text-slate-500">Supersede obsolete documents instead of deleting the historical record.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSourceDocuments(current => [...current, {
+                    id: newBasisId('source_doc'),
+                    title: '',
+                    category: 'SCHEDULE_SPECIFICATION',
+                    authority: 'GOVERNING_REQUIREMENT',
+                    status: 'DRAFT',
+                    appliesTo: ['SCHEDULE_REQUIREMENTS', 'P6_SETTINGS'],
+                  }])}
+                  className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                >+ Add source document</button>
+              </div>
+
+              {sourceDocuments.length === 0 ? (
+                <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-7 text-center">
+                  <div className="text-sm font-bold text-slate-700">No source documents registered</div>
+                  <div className="mt-1 text-xs text-slate-500">Start with the executed contract and governing schedule specification.</div>
+                </div>
+              ) : (
+                <div className="mt-4 space-y-4">
+                  {sourceDocuments.map((document, index) => (
+                    <div key={document.id} className={`rounded-xl border p-4 ${document.status === 'CURRENT' ? 'border-blue-200 bg-blue-50/20' : 'border-slate-200 bg-slate-50'}`}>
+                      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold text-white">{index + 1}</span>
+                          <span className={`rounded-full px-2 py-1 text-[9px] font-bold uppercase tracking-wide ${document.authority === 'CONTRACTUAL' ? 'bg-red-100 text-red-700' : document.authority === 'GOVERNING_REQUIREMENT' ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-600'}`}>
+                            {document.authority.replaceAll('_', ' ')}
+                          </span>
+                          <span className={`rounded-full px-2 py-1 text-[9px] font-bold uppercase tracking-wide ${document.status === 'CURRENT' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+                            {document.status}
+                          </span>
+                        </div>
+                        {document.status === 'DRAFT' ? (
+                          <button type="button" onClick={() => void removeDraftSourceDocument(document)} className="text-xs font-bold text-red-600 hover:text-red-800">Remove draft</button>
+                        ) : (
+                          <span className="text-[10px] text-slate-400">Change status to Superseded or Archived to retain history.</span>
+                        )}
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <div className="lg:col-span-2">
+                          <TextField
+                            label="Document title"
+                            value={document.title}
+                            placeholder="Official document title"
+                            onChange={value => setSourceDocuments(current => current.map(item => item.id === document.id ? { ...item, title: value } : item))}
+                          />
+                        </div>
+                        <SelectField
+                          label="Document category"
+                          value={document.category}
+                          onChange={value => setSourceDocuments(current => current.map(item => item.id === document.id ? { ...item, category: value as ProjectSourceDocument['category'] } : item))}
+                          options={[
+                            ['EXECUTED_CONTRACT', 'Executed contract'],
+                            ['SCHEDULE_SPECIFICATION', 'Schedule specification'],
+                            ['NOTICE_TO_PROCEED', 'Notice to Proceed'],
+                            ['CONTRACT_MODIFICATION', 'Contract modification'],
+                            ['CHANGE_ORDER', 'Change order'],
+                            ['APPROVAL_LETTER', 'Approval letter / directive'],
+                            ['OWNER_REQUIREMENT', 'Owner requirement / standard'],
+                            ['BASIS_OF_DESIGN', 'Basis of Design'],
+                            ['COMMISSIONING_PLAN', 'Commissioning plan'],
+                            ['UTILITY_AGREEMENT', 'Utility agreement'],
+                            ['OTHER', 'Other'],
+                          ]}
+                        />
+                        <SelectField
+                          label="Authority"
+                          value={document.authority}
+                          onChange={value => setSourceDocuments(current => current.map(item => item.id === document.id ? { ...item, authority: value as ProjectSourceDocument['authority'] } : item))}
+                          options={[
+                            ['CONTRACTUAL', 'Contractual'],
+                            ['GOVERNING_REQUIREMENT', 'Governing requirement'],
+                            ['SUPPORTING_REFERENCE', 'Supporting reference'],
+                            ['INFORMATIONAL', 'Informational'],
+                          ]}
+                        />
+                        <SelectField
+                          label="Document status"
+                          value={document.status}
+                          onChange={value => setSourceDocuments(current => current.map(item => item.id === document.id ? { ...item, status: value as ProjectSourceDocument['status'] } : item))}
+                          options={[
+                            ['DRAFT', 'Draft / not authoritative'],
+                            ['CURRENT', 'Current'],
+                            ['SUPERSEDED', 'Superseded'],
+                            ['ARCHIVED', 'Archived'],
+                          ]}
+                        />
+                        <TextField
+                          label="Reference number"
+                          value={document.referenceNumber || ''}
+                          placeholder="Contract / spec / modification number"
+                          onChange={value => setSourceDocuments(current => current.map(item => item.id === document.id ? { ...item, referenceNumber: value } : item))}
+                        />
+                        <TextField
+                          label="Revision"
+                          value={document.revision || ''}
+                          placeholder="Revision / amendment"
+                          onChange={value => setSourceDocuments(current => current.map(item => item.id === document.id ? { ...item, revision: value } : item))}
+                        />
+                        <DateField
+                          label="Issue date"
+                          value={document.issueDate || ''}
+                          source="Required for authoritative documents"
+                          onChange={value => setSourceDocuments(current => current.map(item => item.id === document.id ? { ...item, issueDate: value } : item))}
+                        />
+                        <DateField
+                          label="Effective date"
+                          value={document.effectiveDate || ''}
+                          source="If different"
+                          onChange={value => setSourceDocuments(current => current.map(item => item.id === document.id ? { ...item, effectiveDate: value } : item))}
+                        />
+                      </div>
+
+                      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                        <div className="rounded-xl border border-slate-200 bg-white p-4">
+                          <FieldLabel label="Stored file" />
+                          {document.storagePath ? (
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="truncate text-xs font-bold text-slate-800">{document.fileName || 'Stored source document'}</div>
+                                <div className="mt-1 text-[10px] text-slate-400">{formatFileSize(document.fileSize)}{document.uploadedAt ? ` · uploaded ${formatDate(document.uploadedAt.slice(0, 10))}` : ''}</div>
+                              </div>
+                              <div className="flex gap-2">
+                                <button type="button" onClick={() => void openSourceDocument(document)} disabled={openingDocumentId === document.id} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                                  {openingDocumentId === document.id ? 'Opening…' : 'Open file'}
+                                </button>
+                                <label className="cursor-pointer rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100">
+                                  {uploadingDocumentId === document.id ? 'Uploading…' : 'Replace'}
+                                  <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg" className="hidden" disabled={uploadingDocumentId === document.id} onChange={event => { const file = event.target.files?.[0]; if (file) void handleSourceDocumentUpload(document.id, file); event.currentTarget.value = '' }} />
+                                </label>
+                              </div>
+                            </div>
+                          ) : (
+                            <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center hover:border-blue-300 hover:bg-blue-50">
+                              <span className="text-xs font-bold text-blue-700">{uploadingDocumentId === document.id ? 'Uploading…' : 'Upload source file'}</span>
+                              <span className="mt-1 text-[10px] text-slate-400">PDF, Word, Excel, image, CSV, or text · maximum 25 MB</span>
+                              <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg" className="hidden" disabled={uploadingDocumentId === document.id} onChange={event => { const file = event.target.files?.[0]; if (file) void handleSourceDocumentUpload(document.id, file); event.currentTarget.value = '' }} />
+                            </label>
+                          )}
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200 bg-white p-4">
+                          <TextField
+                            label="Controlled external link"
+                            value={document.externalUrl || ''}
+                            placeholder="https://…"
+                            onChange={value => setSourceDocuments(current => current.map(item => item.id === document.id ? { ...item, externalUrl: value } : item))}
+                          />
+                          <p className="mt-2 text-[10px] leading-4 text-slate-400">Optional when a file is uploaded. Use only a stable owner-controlled document location.</p>
+                        </div>
+                      </div>
+
+                      <h4 className="mb-2 mt-4 text-[11px] font-bold text-slate-700">This document supports</h4>
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                        {([
+                          ['CONTRACT_DATES', 'Contract dates'],
+                          ['MILESTONES_PHASES', 'Milestones & phases'],
+                          ['SCHEDULE_REQUIREMENTS', 'Schedule requirements'],
+                          ['P6_SETTINGS', 'P6 settings'],
+                          ['TIME_MODIFICATIONS', 'Time modifications'],
+                        ] as Array<[ProjectSourceDocument['appliesTo'][number], string]>).map(([value, label]) => (
+                          <Toggle
+                            key={value}
+                            label={label}
+                            checked={document.appliesTo.includes(value)}
+                            onChange={checked => setSourceDocuments(current => current.map(item => item.id === document.id ? {
+                              ...item,
+                              appliesTo: checked
+                                ? Array.from(new Set([...item.appliesTo, value]))
+                                : item.appliesTo.filter(entry => entry !== value),
+                            } : item))}
+                          />
+                        ))}
+                      </div>
+
+                      <TextArea
+                        label="Document notes / controlling provisions"
+                        value={document.notes || ''}
+                        onChange={value => setSourceDocuments(current => current.map(item => item.id === document.id ? { ...item, notes: value } : item))}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <SaveMessage error={error} saved={savedSection === 'documents'} label="Source-document register saved. The project control basis is now complete." />
+            </BasisCard>
+          )}
+
+          {!['contract-dates', 'milestones', 'requirements', 'p6-settings', 'modifications', 'documents'].includes(section) && (
             <section className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
               <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-lg text-blue-700">⌁</div>
               <h2 className="mt-4 text-lg font-bold text-slate-950">{BASIS_SECTIONS.find(item => item.id === section)?.label}</h2>

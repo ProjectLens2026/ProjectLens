@@ -1873,6 +1873,62 @@ export async function deleteCompanyAsPlatformOwner(orgId: string): Promise<{
 
 const SIGNED_URL_TTL_SECONDS = 30 * 60  // 30 minutes — plenty for compare + report
 
+export async function uploadProjectSourceDocument(
+  projectIdLocal: string,
+  documentId: string,
+  file: File,
+): Promise<{ ok: boolean; path?: string; error?: string }> {
+  if (file.size > 25 * 1024 * 1024) {
+    return { ok: false, error: 'Source documents are limited to 25 MB per file.' }
+  }
+  const supabase = createClient()
+  const orgId = await ensureUserHasOrg()
+  if (!orgId) return { ok: false, error: 'No active organization.' }
+  const projectUuid = toUuid(projectIdLocal)
+  const safeName = file.name
+    .normalize('NFKD')
+    .replace(/[^a-zA-Z0-9._-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(-140) || 'source-document'
+  const path = `${orgId}/${projectUuid}/source-documents/${documentId}/${safeName}`
+  const { error } = await supabase.storage
+    .from(BUCKET)
+    .upload(path, file, {
+      upsert: true,
+      contentType: file.type || 'application/octet-stream',
+    })
+  if (error) {
+    console.error('[db.uploadProjectSourceDocument] upload failed:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true, path }
+}
+
+export async function getProjectSourceDocumentSignedUrl(
+  path: string,
+): Promise<{ ok: boolean; signedUrl?: string; error?: string }> {
+  if (!path) return { ok: false, error: 'No stored file path.' }
+  const supabase = createClient()
+  const { data, error } = await supabase.storage
+    .from(BUCKET)
+    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS)
+  if (error || !data?.signedUrl) {
+    return { ok: false, error: error?.message || 'Unable to open this document.' }
+  }
+  return { ok: true, signedUrl: data.signedUrl }
+}
+
+export async function deleteProjectSourceDocumentFile(path: string): Promise<boolean> {
+  if (!path) return true
+  const supabase = createClient()
+  const { error } = await supabase.storage.from(BUCKET).remove([path])
+  if (error) {
+    console.error('[db.deleteProjectSourceDocumentFile] delete failed:', error.message)
+    return false
+  }
+  return true
+}
+
 /**
  * uploadTiaCompareFile — uploads a fresh XER file to Storage under the
  * actual project folder so the bucket's RLS policy (which checks the second
