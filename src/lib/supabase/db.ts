@@ -219,35 +219,36 @@ export async function loadVersionAnalysisFromSupabase(
 ): Promise<{ ok: boolean; analysis?: any; path?: string; error?: string }> {
   const supabase = createClient()
   let path = knownPath
+  let inlineAnalysis: any = null
 
   if (!path) {
     const { data, error } = await supabase
       .from('schedule_versions')
-      .select('analysis_path')
+      .select('analysis_path, context')
       .eq('id', toUuid(versionIdLocal))
       .maybeSingle()
     if (error) console.warn('[db.loadVersionAnalysis] direct version lookup failed:', error.message)
     path = data?.analysis_path || undefined
+    inlineAnalysis = data?.context?.fullAnalysis || null
   }
 
   // Older browser caches can retain a local version ID after the local→cloud
   // UUID map has been cleared or replaced. Recover deterministically from the
   // version identity instead of exposing PostgREST's "cannot coerce" error.
-  if (!path && identity?.projectId && identity.fileName) {
+  if (!path && !inlineAnalysis && identity?.projectId && identity.fileName) {
     const orgId = await ensureUserHasOrg()
     if (orgId) {
       let query = supabase
         .from('schedule_versions')
-        .select('id, analysis_path, data_date, uploaded_at')
+        .select('id, analysis_path, context, data_date, uploaded_at')
         .eq('org_id', orgId)
         .eq('project_id', toUuid(identity.projectId))
         .eq('file_name', identity.fileName)
       if (identity.dataDate) query = query.eq('data_date', identity.dataDate)
       const { data: projectMatches, error } = await query
-        .not('analysis_path', 'is', null)
         .order('uploaded_at', { ascending: false })
         .limit(2)
-      let matches = projectMatches
+      let matches = projectMatches?.filter(row => row.analysis_path || row.context?.fullAnalysis) || []
       if (error) {
         console.warn('[db.loadVersionAnalysis] identity recovery failed:', error.message)
       }
@@ -257,23 +258,24 @@ export async function loadVersionAnalysisFromSupabase(
       if (!matches?.length) {
         let orgQuery = supabase
           .from('schedule_versions')
-          .select('id, analysis_path, data_date, uploaded_at')
+          .select('id, analysis_path, context, data_date, uploaded_at')
           .eq('org_id', orgId)
           .eq('file_name', identity.fileName)
         if (identity.dataDate) orgQuery = orgQuery.eq('data_date', identity.dataDate)
         const { data: orgMatches, error: orgError } = await orgQuery
-          .not('analysis_path', 'is', null)
           .order('uploaded_at', { ascending: false })
           .limit(2)
         if (orgError) console.warn('[db.loadVersionAnalysis] organization recovery failed:', orgError.message)
-        matches = orgMatches?.length === 1 ? orgMatches : []
-        if (orgMatches && orgMatches.length > 1) {
+        const usableOrgMatches = orgMatches?.filter(row => row.analysis_path || row.context?.fullAnalysis) || []
+        matches = usableOrgMatches.length === 1 ? usableOrgMatches : []
+        if (usableOrgMatches.length > 1) {
           console.warn('[db.loadVersionAnalysis] organization recovery was ambiguous; no mapping was changed')
         }
       }
       if (matches?.length) {
         const recovered = matches[0]
         path = recovered.analysis_path || undefined
+        inlineAnalysis = recovered.context?.fullAnalysis || null
         const map = getLocalIdMap()
         map[versionIdLocal] = recovered.id
         setLocalIdMap(map)
@@ -282,6 +284,10 @@ export async function loadVersionAnalysisFromSupabase(
     }
   }
 
+  if (inlineAnalysis) {
+    console.log('[db.loadVersionAnalysis] loaded legacy inline analysis for', versionIdLocal)
+    return { ok: true, analysis: inlineAnalysis }
+  }
   if (!path) return { ok: false, error: 'The stored analysis could not be matched to this schedule version. Re-upload this version if the problem continues.' }
   try {
     const { data: blob, error } = await supabase.storage.from(BUCKET).download(path)
