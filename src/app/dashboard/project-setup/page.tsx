@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
+  ContractMilestone,
   ContractDates,
   P6SettingsBasis,
   Project,
   ProjectControlBasis,
+  ProjectPhaseBasis,
   ScheduleRequirementsBasis,
   getActiveProject,
   subscribeToProjects,
@@ -25,7 +27,7 @@ type BasisSection =
 
 const BASIS_SECTIONS: Array<{ id: BasisSection; label: string; implemented: boolean }> = [
   { id: 'contract-dates', label: 'Contract dates', implemented: true },
-  { id: 'milestones', label: 'Milestones & phases', implemented: false },
+  { id: 'milestones', label: 'Milestones & phases', implemented: true },
   { id: 'requirements', label: 'Schedule requirements', implemented: true },
   { id: 'p6-settings', label: 'P6 settings', implemented: true },
   { id: 'modifications', label: 'Time modifications', implemented: false },
@@ -132,11 +134,21 @@ function p6SettingsComplete(value: P6SettingsBasis) {
     && value.progressedActivities !== 'NOT_SET'
 }
 
+function newBasisId(prefix: string) {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefix}_${crypto.randomUUID()}`
+  }
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
+
 export default function ProjectControlBasisPage() {
   const [project, setProject] = useState<Project | null>(null)
   const [section, setSection] = useState<BasisSection>('contract-dates')
   const [dates, setDates] = useState<ContractDates>({})
   const [basis, setBasis] = useState<ProjectControlBasis>({})
+  const [milestones, setMilestones] = useState<ContractMilestone[]>([])
+  const [phasingStrategy, setPhasingStrategy] = useState<ProjectControlBasis['phasingStrategy']>('NOT_SET')
+  const [phases, setPhases] = useState<ProjectPhaseBasis[]>([])
   const [requirements, setRequirements] = useState<ScheduleRequirementsBasis>({ ...EMPTY_REQUIREMENTS })
   const [p6Settings, setP6Settings] = useState<P6SettingsBasis>({ ...EMPTY_P6_SETTINGS })
   const [error, setError] = useState('')
@@ -155,6 +167,9 @@ export default function ProjectControlBasisPage() {
         contractMilestones: active?.contractDates?.contractMilestones || [],
       })
       setBasis(active?.controlBasis || {})
+      setMilestones(active?.contractDates?.contractMilestones || [])
+      setPhasingStrategy(active?.controlBasis?.phasingStrategy || 'NOT_SET')
+      setPhases(active?.controlBasis?.projectPhases || [])
       setRequirements({ ...EMPTY_REQUIREMENTS, ...(active?.controlBasis?.scheduleRequirements || {}) })
       setP6Settings({ ...EMPTY_P6_SETTINGS, ...(active?.controlBasis?.p6Settings || {}) })
     }
@@ -165,11 +180,12 @@ export default function ProjectControlBasisPage() {
 
   const datesComplete = Boolean(dates.ntp && dates.originalContractCompletion)
   const requirementsAreComplete = requirementsComplete(requirements)
+  const milestonesAreComplete = Boolean(basis.milestonesConfigured)
   const p6IsApplicable = requirements.schedulingSoftware === 'PRIMAVERA_P6' || requirements.schedulingSoftware === 'EITHER'
   const p6IsComplete = !p6IsApplicable || p6SettingsComplete(p6Settings)
   const completeSections = useMemo(() => (
-    [datesComplete, requirementsAreComplete, p6IsComplete && requirementsAreComplete].filter(Boolean).length
-  ), [datesComplete, requirementsAreComplete, p6IsComplete])
+    [datesComplete, milestonesAreComplete, requirementsAreComplete, p6IsComplete && requirementsAreComplete].filter(Boolean).length
+  ), [datesComplete, milestonesAreComplete, requirementsAreComplete, p6IsComplete])
   const completionPercent = Math.round((completeSections / 6) * 100)
 
   function clearMessages() {
@@ -187,6 +203,40 @@ export default function ProjectControlBasisPage() {
       originalContractCompletion: dates.originalContractCompletion || '',
     })
     setSavedSection('contract-dates')
+    setError('')
+  }
+
+  function saveMilestonesAndPhases() {
+    if (!project) return
+    if (!phasingStrategy || phasingStrategy === 'NOT_SET') {
+      setError('Select whether the project is single-phase or multi-phase before saving.')
+      return
+    }
+    if (phasingStrategy === 'MULTI_PHASE' && (phases.length === 0 || phases.some(phase => !phase.name.trim()))) {
+      setError('A multi-phase project must include at least one named phase.')
+      return
+    }
+    if (milestones.some(milestone => !milestone.name.trim() || !milestone.date || !milestone.sourceReference?.trim())) {
+      setError('Every additional contractual milestone must have a name, required date, and authorized source reference.')
+      return
+    }
+    const normalizedPhases = phases
+      .map((phase, index) => ({ ...phase, name: phase.name.trim(), sequence: index + 1 }))
+      .filter(phase => phase.name)
+    const normalizedMilestones = milestones.map(milestone => ({
+      ...milestone,
+      name: milestone.name.trim(),
+      phaseOrArea: milestone.phaseOrArea?.trim(),
+      sourceReference: milestone.sourceReference?.trim(),
+    }))
+
+    updateProjectContractDates(project.id, { contractMilestones: normalizedMilestones })
+    updateProjectControlBasis(project.id, {
+      phasingStrategy,
+      projectPhases: phasingStrategy === 'MULTI_PHASE' ? normalizedPhases : [],
+      milestonesConfigured: true,
+    })
+    setSavedSection('milestones')
     setError('')
   }
 
@@ -231,6 +281,7 @@ export default function ProjectControlBasisPage() {
 
   function sectionIsComplete(id: BasisSection) {
     if (id === 'contract-dates') return datesComplete
+    if (id === 'milestones') return milestonesAreComplete
     if (id === 'requirements') return requirementsAreComplete
     if (id === 'p6-settings') return requirementsAreComplete && p6IsComplete
     return false
@@ -327,6 +378,167 @@ export default function ProjectControlBasisPage() {
             </BasisCard>
           )}
 
+          {section === 'milestones' && (
+            <BasisCard
+              title="Milestones & phases"
+              description="Define contractual gates and turnover structure before comparing them with submitted schedule milestones."
+              action="Save milestones & phases"
+              onAction={saveMilestonesAndPhases}
+            >
+              <Notice>
+                Dates found in an XER or XML are schedule evidence. They do not become contractual milestones unless they are recorded here from an authorized source.
+              </Notice>
+
+              <h3 className="mb-3 mt-6 text-sm font-bold text-slate-950">Core contract anchors</h3>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <AnchorCard label="Notice to Proceed" value={formatDate(dates.ntp)} />
+                <AnchorCard label="Substantial Completion" value={formatDate(dates.substantialCompletion)} />
+                <AnchorCard label="Final Completion" value={formatDate(dates.originalContractCompletion)} />
+              </div>
+              <p className="mt-2 text-[11px] text-slate-500">Edit these fixed anchors under Contract dates. Do not duplicate them below.</p>
+
+              <div className="my-6 border-t border-slate-200" />
+
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-950">Project phasing</h3>
+                  <p className="mt-1 text-xs text-slate-500">Use multi-phase only when the contract recognizes separate areas, turnovers, or completion obligations.</p>
+                </div>
+                <div className="w-full sm:w-72">
+                  <SelectField
+                    label="Phasing strategy"
+                    value={phasingStrategy || 'NOT_SET'}
+                    onChange={value => {
+                      setPhasingStrategy(value as ProjectControlBasis['phasingStrategy'])
+                      clearMessages()
+                    }}
+                    options={[
+                      ['NOT_SET', 'Select phasing strategy'],
+                      ['SINGLE_PHASE', 'Single-phase project'],
+                      ['MULTI_PHASE', 'Multi-phase / phased turnover'],
+                    ]}
+                  />
+                </div>
+              </div>
+
+              {phasingStrategy === 'MULTI_PHASE' && (
+                <div className="mt-4 space-y-3">
+                  {phases.map((phase, index) => (
+                    <div key={phase.id} className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-[52px_1fr_1.4fr_auto] sm:items-end">
+                      <div>
+                        <FieldLabel label="Order" />
+                        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-center text-sm font-bold text-slate-700">{index + 1}</div>
+                      </div>
+                      <TextField
+                        label="Phase / turnover name"
+                        value={phase.name}
+                        placeholder="Example: Building A turnover"
+                        onChange={value => setPhases(current => current.map(item => item.id === phase.id ? { ...item, name: value } : item))}
+                      />
+                      <TextField
+                        label="Scope / description"
+                        value={phase.description || ''}
+                        placeholder="Area, system, or contractual scope"
+                        onChange={value => setPhases(current => current.map(item => item.id === phase.id ? { ...item, description: value } : item))}
+                      />
+                      <button type="button" onClick={() => setPhases(current => current.filter(item => item.id !== phase.id))} className="rounded-lg border border-red-200 bg-white px-3 py-2.5 text-xs font-bold text-red-600 hover:bg-red-50">Remove</button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setPhases(current => [...current, { id: newBasisId('phase'), name: '', sequence: current.length + 1 }])}
+                    className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                  >+ Add project phase</button>
+                </div>
+              )}
+
+              <div className="my-6 border-t border-slate-200" />
+
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-950">Additional contractual milestones</h3>
+                  <p className="mt-1 text-xs text-slate-500">Record only milestones supported by the contract, modification, directive, or other authorized source.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMilestones(current => [...current, {
+                    id: newBasisId('milestone'),
+                    name: '',
+                    date: '',
+                    type: 'INTERIM_CONTRACT',
+                    isApprovalGate: true,
+                  }])}
+                  className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                >+ Add contractual milestone</button>
+              </div>
+
+              {milestones.length === 0 ? (
+                <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-xs text-slate-500">
+                  No additional contractual milestones recorded. Core contract anchors remain in effect.
+                </div>
+              ) : (
+                <div className="mt-4 space-y-3">
+                  {milestones.map(milestone => (
+                    <div key={milestone.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <TextField
+                          label="Milestone name"
+                          value={milestone.name}
+                          placeholder="Contract milestone"
+                          onChange={value => setMilestones(current => current.map(item => item.id === milestone.id ? { ...item, name: value } : item))}
+                        />
+                        <SelectField
+                          label="Milestone type"
+                          value={milestone.type || 'INTERIM_CONTRACT'}
+                          onChange={value => setMilestones(current => current.map(item => item.id === milestone.id ? { ...item, type: value as ContractMilestone['type'] } : item))}
+                          options={[
+                            ['INTERIM_CONTRACT', 'Interim contract milestone'],
+                            ['PHASE_TURNOVER', 'Phase / area turnover'],
+                            ['BENEFICIAL_OCCUPANCY', 'Beneficial occupancy'],
+                            ['COMMISSIONING_IST', 'Commissioning / IST'],
+                            ['UTILITY_POWER', 'Utility / permanent power'],
+                            ['OWNER_FURNISHED', 'Owner-furnished equipment'],
+                            ['OTHER', 'Other contractual milestone'],
+                          ]}
+                        />
+                        <DateField
+                          label="Required date"
+                          value={milestone.date}
+                          source="Contract basis"
+                          onChange={value => setMilestones(current => current.map(item => item.id === milestone.id ? { ...item, date: value } : item))}
+                        />
+                        <TextField
+                          label="Phase / area"
+                          value={milestone.phaseOrArea || ''}
+                          placeholder="Optional"
+                          onChange={value => setMilestones(current => current.map(item => item.id === milestone.id ? { ...item, phaseOrArea: value } : item))}
+                        />
+                        <div className="lg:col-span-2">
+                          <TextField
+                            label="Authorized source reference"
+                            value={milestone.sourceReference || ''}
+                            placeholder="Contract clause, modification, NTP, or directive"
+                            onChange={value => setMilestones(current => current.map(item => item.id === milestone.id ? { ...item, sourceReference: value } : item))}
+                          />
+                        </div>
+                        <Toggle
+                          label="Approval gate"
+                          checked={Boolean(milestone.isApprovalGate)}
+                          onChange={checked => setMilestones(current => current.map(item => item.id === milestone.id ? { ...item, isApprovalGate: checked } : item))}
+                        />
+                        <div className="flex items-end">
+                          <button type="button" onClick={() => setMilestones(current => current.filter(item => item.id !== milestone.id))} className="w-full rounded-lg border border-red-200 bg-white px-3 py-2.5 text-xs font-bold text-red-600 hover:bg-red-50">Remove milestone</button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <SaveMessage error={error} saved={savedSection === 'milestones'} label="Contractual milestones and project phasing saved." />
+            </BasisCard>
+          )}
+
           {section === 'requirements' && (
             <BasisCard title="Schedule requirements" description="Record what the contract requires before evaluating any baseline or update." action="Save requirements" onAction={saveRequirements}>
               <Notice>Choose the governing profile; do not infer contractual requirements from the uploaded schedule.</Notice>
@@ -410,7 +622,7 @@ export default function ProjectControlBasisPage() {
             </BasisCard>
           )}
 
-          {!['contract-dates', 'requirements', 'p6-settings'].includes(section) && (
+          {!['contract-dates', 'milestones', 'requirements', 'p6-settings'].includes(section) && (
             <section className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
               <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-lg text-blue-700">⌁</div>
               <h2 className="mt-4 text-lg font-bold text-slate-950">{BASIS_SECTIONS.find(item => item.id === section)?.label}</h2>
@@ -447,6 +659,16 @@ function SaveMessage({ error, saved, label }: { error: string; saved: boolean; l
 
 function SummaryItem({ label, value, muted = false }: { label: string; value: string; muted?: boolean }) {
   return <div><div className="text-[10px] font-medium text-slate-500">{label}</div><div className={`mt-1 text-xs font-bold leading-5 ${muted ? 'text-slate-400' : 'text-slate-900'}`}>{value}</div></div>
+}
+
+function AnchorCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mt-1.5 text-sm font-bold text-slate-900">{value}</div>
+      <div className="mt-1 text-[10px] text-slate-400">Project contract basis</div>
+    </div>
+  )
 }
 
 function DateField({ label, value, source, onChange }: { label: string; value: string; source: string; onChange: (value: string) => void }) {

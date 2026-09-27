@@ -69,6 +69,17 @@ export interface ContractMilestone {
   id: string
   name: string
   date: string                         // ISO date (YYYY-MM-DD)
+  type?:
+    | 'INTERIM_CONTRACT'
+    | 'PHASE_TURNOVER'
+    | 'BENEFICIAL_OCCUPANCY'
+    | 'COMMISSIONING_IST'
+    | 'UTILITY_POWER'
+    | 'OWNER_FURNISHED'
+    | 'OTHER'
+  phaseOrArea?: string
+  sourceReference?: string
+  isApprovalGate?: boolean
 }
 
 export interface ContractDates {
@@ -140,9 +151,20 @@ export interface P6SettingsBasis {
   notes?: string
 }
 
+export interface ProjectPhaseBasis {
+  id: string
+  name: string
+  sequence: number
+  description?: string
+  turnoverMilestoneId?: string
+}
+
 export interface ProjectControlBasis {
   contractor?: string
   governingStandard?: string
+  phasingStrategy?: 'NOT_SET' | 'SINGLE_PHASE' | 'MULTI_PHASE'
+  projectPhases?: ProjectPhaseBasis[]
+  milestonesConfigured?: boolean
   scheduleRequirements?: ScheduleRequirementsBasis
   p6Settings?: P6SettingsBasis
   updatedAt?: string
