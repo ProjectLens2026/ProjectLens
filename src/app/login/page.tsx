@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import { SELF_SERVICE_SIGNUP_ENABLED, PILOT_CONTACT_HREF } from '@/lib/launchPolicy'
 import { createClient } from '@/lib/supabase/client'
 
 const ROLES = [
@@ -89,6 +90,11 @@ function LoginInner() {
 
     try {
       if (mode === 'signup') {
+        if (!SELF_SERVICE_SIGNUP_ENABLED) {
+          setError('Public account creation is paused. Please request company pilot access.')
+          setLoading(false)
+          return
+        }
         // Account type is mandatory at signup. Empty string means the user
         // hasn't picked Personal/Business/Government — block submission.
         if (!form.account_type) {
@@ -197,6 +203,7 @@ function LoginInner() {
 
         {/* Card */}
         <div className="bg-white rounded-2xl p-8 shadow-2xl">
+          {!SELF_SERVICE_SIGNUP_ENABLED ? <div className="mb-6"><h1 className="text-xl font-bold text-slate-900">Sign in to your workspace</h1><p className="mt-2 text-sm text-slate-600">Company pilot onboarding is arranged directly. Already invited? Use your invitation link.</p><a href={PILOT_CONTACT_HREF} className="mt-3 inline-block text-sm font-semibold text-blue-600 hover:underline">Request pilot access →</a></div> : <>
           {/* Toggle */}
           <div className="flex bg-slate-100 rounded-lg p-1 mb-6">
             <button
@@ -214,6 +221,8 @@ function LoginInner() {
               Create Account
             </button>
           </div>
+
+          </>}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {mode === 'signup' && (

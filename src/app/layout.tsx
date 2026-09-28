@@ -3,7 +3,7 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: 'ControlLens — Construction Schedule Intelligence',
-  description: 'Understand project condition, schedule health, and operational risk — in one screen, in under a minute.',
+  description: 'Construction schedule review, CPM evidence, version comparisons and project controls. Request access to the ControlLens company pilot.',
   icons: {
     icon: [
       { url: '/favicon.svg', type: 'image/svg+xml' },

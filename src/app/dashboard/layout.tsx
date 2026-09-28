@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import VersionNavigation, { VersionContent } from '@/components/VersionNavigation'
+import { SELF_SERVICE_CHECKOUT_ENABLED, PILOT_CONTACT_HREF } from '@/lib/launchPolicy'
 import Sidebar from '@/components/Sidebar'
 import HelpWidget from '@/components/HelpWidget'
 import { migrateLegacyData, loadProjects, getActiveProjectId, setActiveProjectId } from '@/lib/projectStore'
@@ -181,6 +182,8 @@ function PaywallScreen({ planInfo }: { planInfo: OrgPlanInfo }) {
     }
   }
 
+  if (!SELF_SERVICE_CHECKOUT_ENABLED) return <div className="flex-1 overflow-y-auto bg-slate-50 p-6"><div className="mx-auto mt-16 max-w-xl rounded-2xl border border-slate-200 bg-white p-8"><h1 className="text-2xl font-bold text-slate-900">Workspace access needs review</h1><p className="mt-3 text-sm text-slate-600">Self-service subscriptions are paused while we onboard pilot companies. Contact us to confirm access for your workspace.</p><a href={PILOT_CONTACT_HREF} className="mt-6 inline-block rounded-lg bg-blue-600 px-5 py-3 text-sm font-bold text-white">Contact the pilot team</a><p className="mt-4 text-xs text-slate-500">If you have an existing subscription, you can manage it in Settings → Billing.</p></div></div>
+
   const headline = planInfo.subscriptionStatus === 'canceled'
     ? 'Your subscription has ended'
     : 'Your 15-day free trial has ended'
@@ -280,6 +283,8 @@ function TrialBanner({ planInfo }: { planInfo: OrgPlanInfo | null }) {
       setDismissed(localStorage.getItem(`pl_trial_banner_dismissed_${k}`) === '1')
     } catch {}
   }, [])
+
+  if (!SELF_SERVICE_CHECKOUT_ENABLED) return null
 
   // Show only during trial — skip for active/canceled/lifetime subscriptions.
   if (!planInfo) return null

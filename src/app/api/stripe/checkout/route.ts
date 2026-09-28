@@ -16,6 +16,7 @@
 // =============================================================================
 
 import { NextResponse } from 'next/server'
+import { SELF_SERVICE_CHECKOUT_ENABLED } from '@/lib/launchPolicy'
 import { createClient } from '@/lib/supabase/server'
 import {
   getStripeClient,
@@ -32,6 +33,10 @@ export async function POST() {
     const { data: { user }, error: authErr } = await supabase.auth.getUser()
     if (authErr || !user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
+    if (!SELF_SERVICE_CHECKOUT_ENABLED) {
+      return NextResponse.json({ error: 'Self-service subscriptions are paused during the company pilot. Contact sales@control-lens.com for onboarding.', code: 'SELF_SERVICE_PAUSED' }, { status: 403 })
     }
 
     // 2) Find the user's primary org (the one they own — admin/owner role)
