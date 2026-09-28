@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 
-// Day 10 — light theme + correct ControlLens horizontal-bars logo
+// Day 10 — light theme + correct CPMreview horizontal-bars logo
 // (4 bars blue/red/green/slate + "Control" slate + "Lens" blue wordmark).
 
 export default function ResetPasswordPage() {
@@ -53,14 +53,14 @@ export default function ResetPasswordPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-3">
-            <svg width="44" height="36" viewBox="0 0 44 36" xmlns="http://www.w3.org/2000/svg" aria-label="ControlLens mark">
-              <rect x="2"  y="6"  width="28" height="4" rx="1" fill="#2563eb"/>
-              <rect x="2"  y="13" width="40" height="4" rx="1" fill="#dc2626"/>
-              <rect x="2"  y="20" width="22" height="4" rx="1" fill="#16a34a"/>
-              <rect x="2"  y="27" width="34" height="4" rx="1" fill="#1f2937"/>
+            <svg width="40" height="29" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" aria-label="CPMreview mark">
+              <rect x="0" y="0" width="32" height="5" rx="1" fill="#2563eb"/>
+              <rect x="0" y="9" width="44" height="5" rx="1" fill="#dc2626"/>
+              <rect x="0" y="18" width="26" height="5" rx="1" fill="#16a34a"/>
+              <rect x="0" y="27" width="36" height="5" rx="1" fill="#1f2937"/>
             </svg>
             <span className="text-2xl font-extrabold tracking-tight">
-              <span className="text-slate-800">Control</span><span className="text-blue-600">Lens</span>
+              <span className="text-slate-800">CPM</span><span className="text-blue-600">review</span>
             </span>
           </div>
         </div>

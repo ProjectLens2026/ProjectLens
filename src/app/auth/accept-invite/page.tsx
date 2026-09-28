@@ -180,9 +180,9 @@ function AcceptInviteInner() {
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2.5 mb-3">
-            <ControlLensLogo />
+            <CPMreviewLogo />
             <span className="text-2xl font-extrabold text-white">
-              Control<span className="text-blue-500">Lens</span>
+              CPM<span className="text-blue-500">review</span>
             </span>
           </div>
         </div>
@@ -326,17 +326,13 @@ function AcceptInviteInner() {
   )
 }
 
-function ControlLensLogo() {
+function CPMreviewLogo() {
   return (
-    <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" aria-label="ControlLens mark">
-      <circle cx="20" cy="20" r="15.3" fill="#0f172a"/>
-      <circle cx="20" cy="20" r="13.3" fill="#f8fafc"/>
-      <g style={{ clipPath: 'circle(13.3px at 20px 20px)' }}>
-        <rect x="8.4" y="13.9" width="16.7" height="2.3" rx="0.4" fill="#2563eb"/>
-        <rect x="8.4" y="17.2" width="22.6" height="2.3" rx="0.4" fill="#dc2626"/>
-        <rect x="8.4" y="20.5" width="13.8" height="2.3" rx="0.4" fill="#16a34a"/>
-        <rect x="8.4" y="23.8" width="18.2" height="2.3" rx="0.4" fill="#1f2937"/>
-      </g>
-    </svg>
+    <svg width="40" height="29" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" aria-label="CPMreview mark">
+              <rect x="0" y="0" width="32" height="5" rx="1" fill="#2563eb"/>
+              <rect x="0" y="9" width="44" height="5" rx="1" fill="#dc2626"/>
+              <rect x="0" y="18" width="26" height="5" rx="1" fill="#16a34a"/>
+              <rect x="0" y="27" width="36" height="5" rx="1" fill="#1f2937"/>
+            </svg>
   )
 }

@@ -115,17 +115,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (checking || !user) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-900">
       <div className="flex flex-col items-center gap-3">
-        {/* Loading mark — ControlLens 4-bar mark, pulsing.
+        {/* Loading mark — CPMreview 4-bar mark, pulsing.
             44x32 dimensions match the other inline marks across the app
             (login, auth pages, sidebar). The animate-pulse class gives the
             soft fade in/out during the brief auth-check window. */}
-        <svg width="44" height="32" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" className="animate-pulse" aria-label="ControlLens mark">
+        <svg width="44" height="32" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" className="animate-pulse" aria-label="CPMreview mark">
           <rect x="0" y="0" width="32" height="5" rx="1" fill="#2563eb"/>
           <rect x="0" y="9" width="44" height="5" rx="1" fill="#dc2626"/>
           <rect x="0" y="18" width="26" height="5" rx="1" fill="#16a34a"/>
           <rect x="0" y="27" width="36" height="5" rx="1" fill="#1f2937"/>
         </svg>
-        <div className="text-white/40 text-sm">Loading ControlLens...</div>
+        <div className="text-white/40 text-sm">Loading CPMreview...</div>
       </div>
     </div>
   )
@@ -189,8 +189,8 @@ function PaywallScreen({ planInfo }: { planInfo: OrgPlanInfo }) {
     : 'Your 15-day free trial has ended'
 
   const subhead = planInfo.subscriptionStatus === 'canceled'
-    ? 'Re-subscribe to ControlLens Pro to regain access to your projects, TIA, Trend, and EVM.'
-    : "You used the full 15 days. Subscribe to ControlLens Pro to keep your projects, TIA, Trend, and EVM."
+    ? 'Re-subscribe to CPMreview Pro to regain access to your projects, TIA, Trend, and EVM.'
+    : "You used the full 15 days. Subscribe to CPMreview Pro to keep your projects, TIA, Trend, and EVM."
 
   return (
     <div className="flex-1 overflow-y-auto bg-slate-50">
@@ -204,7 +204,7 @@ function PaywallScreen({ planInfo }: { planInfo: OrgPlanInfo }) {
 
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 mb-6 text-left">
             <div className="text-xs font-bold text-blue-900 uppercase tracking-wider mb-3">
-              ControlLens Pro
+              CPMreview Pro
             </div>
             <div className="flex items-baseline gap-1 mb-3">
               <span className="text-3xl font-extrabold text-slate-900">$99</span>

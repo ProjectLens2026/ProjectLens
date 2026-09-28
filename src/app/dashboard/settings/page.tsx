@@ -133,7 +133,7 @@ function WorkspaceTab({ perms }: { perms: ReturnType<typeof usePermissions> }) {
         </Link>
       </Card>
 
-      <SectionHeader title="Help & Support" subtitle="Reach the ControlLens team — we usually respond within 24 hours" />
+      <SectionHeader title="Help & Support" subtitle="Reach the CPMreview team — we usually respond within 24 hours" />
       <Card>
         <div className="space-y-3">
           <div className="flex items-start gap-3">
@@ -781,7 +781,7 @@ function BillingTab({ perms }: { perms: ReturnType<typeof usePermissions> }) {
       <div className="bg-white border border-slate-200 rounded-xl p-6">
         <div className="flex items-start justify-between mb-4">
           <div>
-            <h3 className="text-base font-bold text-slate-900">ControlLens Pro</h3>
+            <h3 className="text-base font-bold text-slate-900">CPMreview Pro</h3>
             <p className="text-xs text-slate-500 mt-0.5">
               5 active projects · Up to 56 users · TIA, Trend, EVM
             </p>

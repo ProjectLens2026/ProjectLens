@@ -1,6 +1,6 @@
 'use client'
 // =============================================================================
-// ControlLens — Landing page (Day 10 rebuild, v2)
+// CPMreview — Landing page (Day 10 rebuild, v2)
 //
 // v2 changes (per founder):
 //   - NO "AI" mentions anywhere — say what it does, not how
@@ -144,7 +144,7 @@ export default function LandingPage() {
               Built for the people on the jobsite — not just the scheduler.
             </h2>
             <p className="text-slate-600 max-w-3xl mx-auto leading-relaxed">
-              ControlLens is <strong className="text-slate-900">construction project scheduling for PMs, superintendents, and owners</strong>.
+              CPMreview is <strong className="text-slate-900">construction project scheduling for PMs, superintendents, and owners</strong>.
               It doesn't just flag errors — it tells your team where to focus today, and why.
               Keep the project basis, selected version and supporting evidence visible so each concern can be reviewed in context.
             </p>
@@ -202,7 +202,7 @@ export default function LandingPage() {
               <div className="flex items-center gap-2.5 mb-2">
                 <LogoSvg light />
                 <span className="text-lg font-extrabold tracking-tight">
-                  <span className="text-white">Control</span><span className="text-blue-400">Lens</span>
+                  <span className="text-white">CPM</span><span className="text-blue-400">review</span>
                 </span>
               </div>
               <div className="text-sm text-slate-500">Visibility. Insight. Control.</div>
@@ -217,7 +217,7 @@ export default function LandingPage() {
             </div>
           </div>
           <div className="mt-10 pt-6 border-t border-slate-800 text-xs text-slate-500 flex flex-col md:flex-row justify-between gap-2">
-            <div>© 2026 ControlLens. All rights reserved.</div>
+            <div>© 2026 CPMreview. All rights reserved.</div>
             <div>Built by Nobel Project Management Services</div>
           </div>
         </div>
@@ -235,7 +235,7 @@ function DashboardMockup() {
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-300/60">
       <div className="flex min-h-[440px]">
         <div className="hidden sm:block w-36 shrink-0 bg-slate-950 px-2 py-4 text-white">
-          <div className="px-2 mb-6 text-sm font-extrabold">Control<span className="text-blue-400">Lens</span></div>
+          <div className="px-2 mb-6 text-sm font-extrabold">CPM<span className="text-blue-400">review</span></div>
           <div className="px-2 mb-2 text-[9px] uppercase tracking-wide text-slate-400">Example project</div>
           <SidebarItem icon="⚙" label="Project Setup" />
           <SidebarItem icon="▦" label="Overview" />
@@ -308,7 +308,7 @@ function Logo() {
     <Link href="/" className="flex items-center gap-2.5">
       <LogoSvg />
       <span className="text-xl font-extrabold tracking-tight">
-        <span className="text-slate-800">Control</span><span className="text-blue-600">Lens</span>
+        <span className="text-slate-800">CPM</span><span className="text-blue-600">review</span>
       </span>
     </Link>
   )
@@ -316,11 +316,11 @@ function Logo() {
 
 function LogoSvg({ light }: { light?: boolean }) {
   return (
-    <svg width="36" height="30" viewBox="0 0 44 36" xmlns="http://www.w3.org/2000/svg" aria-label="ControlLens mark">
+    <svg width="36" height="30" viewBox="0 0 44 36" xmlns="http://www.w3.org/2000/svg" aria-label="CPMreview mark">
       <rect x="2"  y="6"  width="28" height="4" rx="1" fill="#2563eb"/>
       <rect x="2"  y="13" width="40" height="4" rx="1" fill="#dc2626"/>
       <rect x="2"  y="20" width="22" height="4" rx="1" fill="#16a34a"/>
-      <rect x="2"  y="27" width="34" height="4" rx="1" fill={light ? '#e2e8f0' : '#1f2937'}/>
+      <rect x="2"  y="27" width="34" height="4" rx="1" fill="#1f2937"/>
     </svg>
   )
 }

@@ -181,21 +181,21 @@ function LoginInner() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Logo — ControlLens 4-bar mark + wordmark.
+        {/* Logo — CPMreview 4-bar mark + wordmark.
             The 4 bars are the brand DNA from NobelPM, refreshed with the
-            saturated ControlLens palette. The viewBox 44x32 keeps the
+            saturated CPMreview palette. The viewBox 44x32 keeps the
             geometry crisp; width 40 / height 29 sits well next to the
             wordmark visually. */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2.5 mb-3">
-            <svg width="40" height="29" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" aria-label="ControlLens mark">
+            <svg width="40" height="29" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" aria-label="CPMreview mark">
               <rect x="0" y="0" width="32" height="5" rx="1" fill="#2563eb"/>
               <rect x="0" y="9" width="44" height="5" rx="1" fill="#dc2626"/>
               <rect x="0" y="18" width="26" height="5" rx="1" fill="#16a34a"/>
               <rect x="0" y="27" width="36" height="5" rx="1" fill="#1f2937"/>
             </svg>
             <span className="text-2xl font-extrabold text-white">
-              Control<span className="text-blue-500">Lens</span>
+              CPM<span className="text-blue-500">review</span>
             </span>
           </div>
           <p className="text-slate-400 text-sm">Visibility. Insight. Control.</p>
@@ -338,7 +338,7 @@ function LoginInner() {
               className="w-full bg-blue-600 text-white py-3.5 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors disabled:opacity-60 mt-2">
               {loading
                 ? (mode === 'signup' ? 'Creating your account...' : 'Signing you in...')
-                : (mode === 'login' ? 'Sign In to ControlLens' : 'Create My Account')
+                : (mode === 'login' ? 'Sign In to CPMreview' : 'Create My Account')
               }
             </button>
           </form>
@@ -353,14 +353,14 @@ function LoginInner() {
 
           {mode === 'signup' && (
             <p className="text-center text-xs text-slate-400 mt-4 leading-relaxed">
-              By creating an account, you agree to use ControlLens responsibly.
+              By creating an account, you agree to use CPMreview responsibly.
               We&apos;ll email you a verification link before you can sign in.
             </p>
           )}
         </div>
 
         {/* Back-to-home link. Routes to the in-app landing page at `/`,
-            which now renders the ControlLens marketing-style landing. */}
+            which now renders the CPMreview marketing-style landing. */}
         <p className="text-center text-slate-500 text-xs mt-6">
           <Link href="/" className="hover:text-white transition-colors">
             ← Back to home

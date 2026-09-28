@@ -443,7 +443,7 @@ export default function Sidebar({ user }: SidebarProps) {
       <div className="px-4 py-4 border-b border-white/10 flex-shrink-0">
         <Link href="/dashboard" className="flex items-center gap-2.5">
           <div className="flex-shrink-0">
-            <svg width="28" height="20" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" aria-label="ControlLens mark">
+            <svg width="28" height="20" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" aria-label="CPMreview mark">
               <rect x="0" y="0" width="32" height="5" rx="1" fill="#2563eb"/>
               <rect x="0" y="9" width="44" height="5" rx="1" fill="#dc2626"/>
               <rect x="0" y="18" width="26" height="5" rx="1" fill="#16a34a"/>
@@ -452,9 +452,9 @@ export default function Sidebar({ user }: SidebarProps) {
           </div>
           <div>
             <div className="text-white font-extrabold text-sm tracking-tight">
-              Control<span className="text-blue-500">Lens</span>
+              CPM<span className="text-blue-500">review</span>
             </div>
-            <div className="text-white/30 text-[9px]">Construction Intelligence</div>
+            <div className="text-white/30 text-[9px]">Construction Schedule Review</div>
           </div>
         </Link>
       </div>
@@ -1084,7 +1084,7 @@ export default function Sidebar({ user }: SidebarProps) {
         {perms.isPlatformOwner && (
           <Link href="/dashboard/portfolio"
             className="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2 text-purple-300 border-transparent hover:text-white hover:bg-purple-500/10 mt-1 border-t border-white/10 pt-2"
-            title="ControlLens staff only — cross-org view">
+            title="CPMreview staff only — cross-org view">
             <span className="text-sm w-4 text-center">🌐</span>
             <span className="flex-1">Portfolio</span>
             <span className="text-[8px] bg-purple-500/30 text-purple-200 px-1 rounded font-bold">STAFF</span>

@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 
 // =============================================================================
-// HelpWidget — floating "Ask ControlLens" chat bubble.
+// HelpWidget — floating "Ask CPMreview" chat bubble.
 //
 // Day 8 changes:
 //   - Reads localStorage key `pl_show_chatbot` (default: true). When set to
@@ -26,7 +26,7 @@ const SUGGESTED_QUESTIONS = [
   'What is the critical path?',
   'How do I move a version between projects?',
   'What triggers a rebaseline recommendation?',
-  'How does ControlLens detect fragnets?',
+  'How does CPMreview detect fragnets?',
 ]
 
 function readShowFlag(): boolean {
@@ -105,7 +105,7 @@ export default function HelpWidget() {
     if (pathname.includes('/dashboard/help')) return 'Help'
     if (pathname.includes('/dashboard/projects')) return 'Projects'
     if (pathname.includes('/dashboard')) return 'Dashboard'
-    return 'ControlLens'
+    return 'CPMreview'
   }
 
   async function sendMessage(text: string) {
@@ -177,11 +177,11 @@ export default function HelpWidget() {
         <button
           onClick={() => setIsOpen(true)}
           className="fixed bottom-6 right-6 z-40 bg-blue-600 text-white rounded-full p-4 shadow-lg hover:bg-blue-700 hover:scale-105 transition-all flex items-center gap-2 print:hidden"
-          aria-label="Open Ask ControlLens">
+          aria-label="Open Ask CPMreview">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
           </svg>
-          <span className="text-sm font-bold pr-1">Ask ControlLens</span>
+          <span className="text-sm font-bold pr-1">Ask CPMreview</span>
         </button>
       )}
       {/* Chat panel */}
@@ -190,7 +190,7 @@ export default function HelpWidget() {
              style={{ width: '380px', height: '560px', maxHeight: 'calc(100vh - 48px)' }}>
           <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 py-3 rounded-t-2xl flex items-center justify-between flex-shrink-0">
             <div>
-              <div className="font-bold text-sm">Ask ControlLens</div>
+              <div className="font-bold text-sm">Ask CPMreview</div>
               <div className="text-[10px] text-blue-100">Schedule & app help</div>
             </div>
             <div className="flex items-center gap-1">
@@ -216,9 +216,9 @@ export default function HelpWidget() {
             {messages.length === 0 ? (
               <div className="text-center py-6">
                 <div className="text-4xl mb-3">💬</div>
-                <div className="text-sm font-bold text-slate-900 mb-1">Welcome to Ask ControlLens</div>
+                <div className="text-sm font-bold text-slate-900 mb-1">Welcome to Ask CPMreview</div>
                 <div className="text-xs text-slate-500 mb-5 leading-relaxed">
-                  Ask me anything about scheduling, TIA, fragnets, or how to use ControlLens.
+                  Ask me anything about scheduling, TIA, fragnets, or how to use CPMreview.
                 </div>
                 <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Try asking:</div>
                 <div className="space-y-1.5">
@@ -266,7 +266,7 @@ export default function HelpWidget() {
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyPress}
                 disabled={isLoading}
-                placeholder="Ask about scheduling or ControlLens..."
+                placeholder="Ask about scheduling or CPMreview..."
                 className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 disabled:bg-slate-50" />
               <button
                 onClick={handleSend}
@@ -276,7 +276,7 @@ export default function HelpWidget() {
               </button>
             </div>
             <div className="text-[9px] text-slate-400 mt-1.5 text-center">
-              ControlLens supports your visibility — it does not replace your judgment.
+              CPMreview supports your visibility — it does not replace your judgment.
             </div>
           </div>
         </div>

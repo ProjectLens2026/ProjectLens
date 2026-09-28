@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'ControlLens — Construction Schedule Intelligence',
-  description: 'Construction schedule review, CPM evidence, version comparisons and project controls. Request access to the ControlLens company pilot.',
+  title: 'CPMreview — Construction Schedule Review',
+  description: 'Construction schedule review, CPM evidence, version comparisons and project controls. Request access to the CPMreview company pilot.',
   icons: {
     icon: [
       { url: '/favicon.svg', type: 'image/svg+xml' },
