@@ -1016,7 +1016,7 @@ export async function loadPendingInvitations(): Promise<Invitation[]> {
 
 /**
  * createInvitation — admin generates a fresh invitation. Returns the
- * acceptance URL (https://app.control-lens.com/auth/accept-invite?token=...)
+ * acceptance URL (https://app.cpmreview.com/auth/accept-invite?token=...)
  * which the admin pastes into an email/Slack/WhatsApp to the recipient.
  *
  * Default expiry: 7 days.
@@ -1060,7 +1060,7 @@ export async function createInvitation(opts: {
     return { ok: false, error: error.message }
   }
 
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.control-lens.com'
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.cpmreview.com'
   return {
     ok: true,
     token,
@@ -1693,7 +1693,7 @@ export async function createProjectInvitation(opts: {
     return { ok: false, error: error.message }
   }
 
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.control-lens.com'
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.cpmreview.com'
   return {
     ok: true,
     token,
@@ -1910,7 +1910,7 @@ export async function createCompanyAsPlatformOwner(opts: {
     return { ok: false, error: 'Unexpected response from server' }
   }
 
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.control-lens.com'
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.cpmreview.com'
   return {
     ok: true,
     orgId: result.org_id,

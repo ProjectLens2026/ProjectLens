@@ -8,7 +8,7 @@
 //   STRIPE_WEBHOOK_SECRET        — whsec_... (set after creating webhook endpoint)
 //   STRIPE_PRO_PRICE_ID          — the recurring $99/mo price (price_...)
 //   STRIPE_LAUNCH_COUPON_ID      — "LAUNCH50" coupon (50% off, 2 months)
-//   NEXT_PUBLIC_APP_URL          — https://app.control-lens.com
+//   NEXT_PUBLIC_APP_URL          — https://app.cpmreview.com
 // =============================================================================
 
 import Stripe from 'stripe'

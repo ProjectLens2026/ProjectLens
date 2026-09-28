@@ -5,7 +5,7 @@
 //
 // Setup in Stripe dashboard AFTER deploying this route:
 //   1) Stripe → Developers → Webhooks → Add endpoint
-//   2) Endpoint URL: https://app.control-lens.com/api/stripe/webhook
+//   2) Endpoint URL: https://app.cpmreview.com/api/stripe/webhook
 //   3) Events to send (select these 5):
 //        - checkout.session.completed
 //        - customer.subscription.updated

@@ -213,7 +213,7 @@ export default function LandingPage() {
               <a href="mailto:support@control-lens.com" className="hover:text-white">Support</a>
               <Link href="/login" className="hover:text-white">Sign in</Link>
               <a href="mailto:sales@control-lens.com" className="hover:text-white">Sales</a>
-              <a href="https://app.control-lens.com" className="hover:text-white">app.control-lens.com</a>
+              <a href="https://app.cpmreview.com" className="hover:text-white">app.cpmreview.com</a>
             </div>
           </div>
           <div className="mt-10 pt-6 border-t border-slate-800 text-xs text-slate-500 flex flex-col md:flex-row justify-between gap-2">
@@ -373,4 +373,3 @@ function PersonaCard({ icon, title, body }: { icon: string; title: string; body:
     </div>
   )
 }
-

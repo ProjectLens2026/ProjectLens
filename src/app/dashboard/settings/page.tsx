@@ -174,8 +174,8 @@ function WorkspaceTab({ perms }: { perms: ReturnType<typeof usePermissions> }) {
             <span className="text-xl">🌐</span>
             <div className="flex-1">
               <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Website</div>
-              <a href="https://app.control-lens.com" target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
-                app.control-lens.com
+              <a href="https://app.cpmreview.com" target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
+                app.cpmreview.com
               </a>
             </div>
           </div>
