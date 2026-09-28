@@ -173,7 +173,7 @@ export function evaluatePathCredibility(
         level: 'CONFLICT',
         confidence: 'high',
         title: `${s.c.system} startup begins before installation is complete`,
-        detail: 'Control Lens found a same-system startup activity beginning before the latest installation/set activity on the reported path finishes. Verify the activity definitions and logic; if these represent the same equipment/system, the sequence should be corrected.',
+        detail: 'The review found a same-system startup activity beginning before the latest installation/set activity on the reported path finishes. Verify the activity definitions and logic; if these represent the same equipment/system, the sequence should be corrected.',
         evidence: [codeName(s.t), codeName(installFinish.task)],
       })
     }

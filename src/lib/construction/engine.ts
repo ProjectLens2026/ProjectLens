@@ -402,7 +402,7 @@ function referenceSequenceFor(pred: TraceTask, succ: TraceTask, pc?: Classificat
   if (sameMeaningfulSystem(pc && pc.system, sc && sc.system)) {
     return [`${pc && pc.system ? pc.system : 'System'} — predecessor work`, `${sc && sc.system ? sc.system : 'System'} — successor work`, 'Validate location/workfront sequencing against the accepted plan']
   }
-  return ['Control Lens reference rule not yet authored for this relationship', 'Preserve actual XER dates', 'Review technical necessity of the relationship before changing logic']
+  return ['Reference rule not yet authored for this relationship', 'Preserve actual XER dates', 'Review technical necessity of the relationship before changing logic']
 }
 
 function relationMeaning(
@@ -468,17 +468,17 @@ function makeMemo(
   const found = `${logicMeaning} Actual progress does not follow that sequence: ${evidence.sentence} The recorded work therefore occurred ${varianceText} earlier than the current XER logic would allow.`
 
   let why = 'This is a schedule-logic conflict, but it does not by itself prove that the field work was performed incorrectly. The reviewer needs to determine whether the actual dates are wrong, the relationship no longer represents the intended sequence, or the work was legitimately resequenced.'
-  let assessment = 'Control Lens found a conflict between recorded actual progress and the accepted XER relationship. No authored construction rule currently establishes that this exact relationship is technically mandatory, so the condition should remain a review item until the project basis is verified.'
+  let assessment = 'The review found a conflict between recorded actual progress and the accepted XER relationship. No authored construction rule currently establishes that this exact relationship is technically mandatory, so the condition should remain a review item until the project basis is verified.'
 
   if (bucket === 'CONSTRUCTION_SEQUENCE') {
     why = 'This relationship aligns with a recognized physical, testing, environmental, or permitting prerequisite. Proceeding out of sequence may affect safety, quality, inspections, acceptance, or downstream readiness, so this condition deserves stronger review than a simple P6 date conflict.'
-    assessment = 'Control Lens recognizes a construction prerequisite behind this relationship. The schedule conflict may therefore represent a genuine sequencing concern, subject to confirmation against the contract, approved plans, permits, inspection requirements, and field records.'
+    assessment = 'The review recognizes a construction prerequisite behind this relationship. The schedule conflict may therefore represent a genuine sequencing concern, subject to confirmation against the contract, approved plans, permits, inspection requirements, and field records.'
   } else if (bucket === 'LIKELY_INCORRECT_RELATIONSHIP') {
     why = 'The two activities classify to different construction systems. Cross-system relationships can be valid, but this one may be tying the successor to work that is not its real construction driver. Leaving an unsupported relationship in place can distort float, critical-path visibility, and forecast dates.'
-    assessment = 'Control Lens sees a possible cross-system logic problem. The relationship should be preserved only if the contractor can explain the technical or contractual dependency; otherwise the schedule should be tied to the actual construction driver.'
+    assessment = 'The review indicates a possible cross-system logic problem. The relationship should be preserved only if the contractor can explain the technical or contractual dependency; otherwise the schedule should be tied to the actual construction driver.'
   } else if (bucket === 'PHASING_LOCATION') {
     why = 'The activities appear to belong to the same system but different work areas or locations. The field may have legitimately progressed by workfront, while the XER uses one broad relationship that forces the entire predecessor activity to finish first. If so, the schedule is masking the contractor’s real phasing strategy.'
-    assessment = 'Control Lens sees a likely workfront/location issue rather than automatic bad field execution. Confirm the contractor’s area-by-area sequence and, if appropriate, model the work with location-based activities or relationships while preserving truthful actual dates.'
+    assessment = 'The review indicates a likely workfront/location issue rather than automatic bad field execution. Confirm the contractor’s area-by-area sequence and, if appropriate, model the work with location-based activities or relationships while preserving truthful actual dates.'
   }
 
   const technical = [
@@ -591,7 +591,7 @@ export function runConstructionReview(analysis: {
         ? 'Review the contractor’s intended workfront and location sequence. If the activities legitimately progressed in separate areas, model the appropriate area/phase logic rather than changing truthful actual dates.'
         : bucket === 'LIKELY_INCORRECT_RELATIONSHIP'
           ? 'Validate the technical basis for this cross-system relationship. If no direct prerequisite exists, revise the relationship to the correct construction driver; do not alter truthful actual dates merely to satisfy the current XER logic.'
-          : 'Confirm whether the actual date, relationship, or milestone definition is the source of the conflict. Until a Control Lens appropriateness rule exists for this pair, retain this as Needs Review and do not make a hard engineering conclusion.'
+          : 'Confirm whether the actual date, relationship, or milestone definition is the source of the conflict. Until an appropriateness rule exists for this pair, retain this as Needs Review and do not make a hard engineering conclusion.'
 
     const relationship = relLabel(r.pred_type)
     findings.push({
@@ -698,7 +698,7 @@ export function runConstructionReview(analysis: {
       const bucket: FindingBucket = rule.ruleType === 'HARD' ? 'CONSTRUCTION_SEQUENCE' : 'NEEDS_REVIEW'
       const recommendation = rule.ruleType === 'HARD'
         ? `Verify the ${labels.join(', ')} readiness requirements in the XER path to ${target || trigger.task_name}. Add or correct the logical ties where the prerequisite is genuinely required; preserve truthful actual dates.`
-        : `The current path differs from the Control Lens reference sequence. Verify whether the project-specific plan justifies the deviation and clarify or revise the logic as appropriate.`
+        : `The current path differs from the reference sequence. Verify whether the project-specific plan justifies the deviation and clarify or revise the logic as appropriate.`
       const conditionParts = [
         missing.length ? `missing from the scoped schedule: ${missing.join(', ')}` : '',
         untied.length ? `present but not in the predecessor path: ${untied.join(', ')}` : '',
@@ -723,15 +723,15 @@ export function runConstructionReview(analysis: {
         ruleStrengthHint: strength,
         wbsPath: (trigger as any).wbs_path,
         headline: `${target || tc.system || 'System'} readiness path is incomplete for ${trigger.task_code} — ${trigger.task_name}`,
-        detail: `${rule.findingText} Control Lens found ${problems.length} unsatisfied reference prerequisite${problems.length === 1 ? '' : 's'}: ${condition}.`,
+        detail: `${rule.findingText} The review found ${problems.length} unsatisfied reference prerequisite${problems.length === 1 ? '' : 's'}: ${condition}.`,
         supporting: supporting.slice(0, 20),
         recommendation,
         memo: {
-          whatControlLensFound: `${trigger.task_code} — ${trigger.task_name} does not currently demonstrate the complete Control Lens reference path to ${target || 'the target milestone'}. ${condition}.`,
+          whatControlLensFound: `${trigger.task_code} — ${trigger.task_name} does not currently demonstrate the complete reference path to ${target || 'the target milestone'}. ${condition}.`,
           whyThisMatters: `The affected prerequisite states support ${target || 'system readiness'}. If they are genuinely required but absent from the driving path, the schedule may overstate readiness, distort float, or allow downstream startup/testing milestones to appear achievable before the system is actually ready.`,
           scheduleCondition: condition,
           xerSequence: [`Trigger: ${trigger.task_code} — ${trigger.task_name}`].concat(supporting.slice(0, 10).map(x => `${x.code} — ${x.name} (${x.note})`)),
-          xerLogicMeaning: `Control Lens traced the raw XER predecessor network for the trigger and compared the detected construction states with authored rule ${rule.id}.`,
+          xerLogicMeaning: `The raw XER predecessor network was traced for the trigger and the detected construction states were compared with authored rule ${rule.id}.`,
           clReferenceSequence: rule.recommendedChain.slice().sort((a, b) => a.order - b.order).map(x => x.label),
           clAssessment: rule.ruleType === 'HARD'
             ? `Rule ${rule.id} is a required construction/readiness prerequisite in the current reference library. The path is incomplete and should be verified before relying on ${target || 'the downstream milestone'}.`
@@ -807,8 +807,8 @@ export function runConstructionReview(analysis: {
 
     const condition = stateExists
       ? `An equivalent schedule state was identified (${anchor.task_code} — ${anchor.task_name}), but it is not modeled as an identifiable key milestone.`
-      : `Control Lens did not identify an equivalent ${ref.name} milestone in the XER.`
-    const recommendation = `Consider adding “${ref.name}” under the ${ref.recommendedWbs} WBS, or map the existing equivalent control point to it. This is a Control Lens schedule-control recommendation, not a contractual requirement unless the governing contract or owner profile requires it.`
+      : `The review did not identify an equivalent ${ref.name} milestone in the XER.`
+    const recommendation = `Consider adding “${ref.name}” under the ${ref.recommendedWbs} WBS, or map the existing equivalent control point to it. This is a schedule-control recommendation, not a contractual requirement unless the governing contract or owner profile requires it.`
 
     milestoneSuggestionFindings.push({
       id: findingId(++fid),
@@ -838,13 +838,13 @@ export function runConstructionReview(analysis: {
         xerSequence: stateExists
           ? [`Existing equivalent state: ${anchor.task_code} — ${anchor.task_name}`]
           : [`Relevant system evidence: ${anchor.task_code} — ${anchor.task_name}`],
-        xerLogicMeaning: 'Control Lens compared the systems detected in the XER with its reference control-milestone scaffold. This check does not infer a contract requirement.',
+        xerLogicMeaning: 'The systems detected in the XER were compared with the reference control-milestone scaffold. This check does not infer a contract requirement.',
         clReferenceSequence: ref.referencePath,
         clAssessment: `Adding ${ref.name} as a visible control milestone can improve milestone convergence, executive reporting, and downstream readiness review. It remains optional unless project requirements make it mandatory.`,
         recommendedAction: recommendation,
         technicalDetails: [
           `Reference control milestone: ${ref.id}`,
-          'Classification: Control Lens recommendation only',
+          'Classification: Schedule-control recommendation only',
           'Scoring impact: none',
           `Suggested WBS: ${ref.recommendedWbs}`,
         ],
@@ -892,7 +892,7 @@ export function runConstructionReview(analysis: {
         stage: c.stage,
         wbsPath: (mtask as any).wbs_path,
         headline: `${mtask.task_code} — ${late.length} supporting predecessors finish after this completion/readiness activity`,
-        detail: `The activity is recorded complete/ready while ${late.length} supporting predecessors finish later. Control Lens consolidates these as one milestone-integrity problem rather than ${late.length} repetitive violations.`,
+        detail: `The activity is recorded complete/ready while ${late.length} supporting predecessors finish later. These are consolidated as one milestone-integrity problem rather than ${late.length} repetitive violations.`,
         supporting: late.slice(0, 50),
         recommendation,
         memo: {
@@ -902,7 +902,7 @@ export function runConstructionReview(analysis: {
           xerSequence: late.slice(0, 12).map(x => `${x.code} — ${x.name} (${x.note})`).concat([`→ ${mtask.task_code} — ${mtask.task_name}`]),
           xerLogicMeaning: `The XER represents these ${late.length} activities as supporting predecessors to ${mtask.task_code} — ${mtask.task_name}, yet the milestone is recorded complete before they finish.`,
           clReferenceSequence: ['Required supporting approvals / prerequisites', '→ Completion / Readiness milestone'],
-          clAssessment: 'Control Lens identifies a milestone-definition and logic-integrity problem. First determine which linked activities are true requirements for this milestone. Genuine prerequisites should drive the milestone; unrelated activities should not be connected in a way that falsely defines completion.',
+          clAssessment: 'The review identifies a milestone-definition and logic-integrity problem. First determine which linked activities are true requirements for this milestone. Genuine prerequisites should drive the milestone; unrelated activities should not be connected in a way that falsely defines completion.',
           recommendedAction: recommendation,
           technicalDetails: late.slice(0, 20).map(x => `${x.code} — ${x.name}: ${x.note}`),
         },

@@ -190,7 +190,7 @@ function pathProfile(title: string, severity: CLSeverity): {
     why: 'The condition affects confidence that the submitted schedule represents the work that actually controls completion.',
     reviewer: 'Verify the identified condition against the project requirements and submitted schedule logic, then revise or clarify the schedule as appropriate.',
     preSubmission: 'Verify the identified condition before submission and revise or clarify the schedule as appropriate.',
-    reference: 'Control Lens nature-of-work and path-credibility review.',
+    reference: 'Nature-of-work and path-credibility review.',
   }
 }
 
@@ -215,7 +215,7 @@ function readinessConclusion(gatesPassed: boolean, counts: { critical: number; m
   return {
     status: 'READY',
     label: 'READY FOR APPROVAL REVIEW',
-    reason: 'Current Control Lens checks did not identify a material condition that blocks approval review. The authorized reviewer still makes the final decision.',
+    reason: 'Current schedule checks did not identify a material condition that blocks approval review. The authorized reviewer still makes the final decision.',
   }
 }
 
@@ -280,7 +280,7 @@ export function evaluateApprovalReadiness(
       criticalGate,
       scoreDeduction: deduction,
       title: rep.headline,
-      whatFound: `${rep.detail}${evidence.length > 1 ? ` Control Lens identified ${evidence.length} related activities under this same condition.` : ''}`,
+      whatFound: `${rep.detail}${evidence.length > 1 ? ` The review identified ${evidence.length} related activities under this same condition.` : ''}`,
       whyItMatters: impactForDomain(primaryDomain),
       reviewerCheck: kind === 'RECOMMENDATION'
         ? (rep.recommendation || 'Confirm whether this recommendation is applicable to the project and map an equivalent control point where appropriate.')
@@ -371,7 +371,7 @@ export function evaluateApprovalReadiness(
         scoreDeduction: computeDeduction(5, 'REQUIRED'),
         title: 'CL critical path does not close into the completion target',
         whatFound: path.criticalPath.connectionNote,
-        whyItMatters: 'Control Lens can identify a credible readiness chain from the submitted work, but the submitted relationship network does not close that chain into the completion target. The P6-reported critical/longest path can therefore bypass work that appears necessary for actual readiness.',
+        whyItMatters: 'The review identified a credible readiness chain from the submitted work, but the submitted relationship network does not close that chain into the completion target. The P6-reported critical/longest path can therefore bypass work that appears necessary for actual readiness.',
         reviewerCheck: 'Trace the controlling completion logic to the target milestone and confirm that the applicable readiness/acceptance chain is relationship-connected. Correct the logic or provide the basis for the current path before approval.',
         preSubmissionNote: 'Before submission, close the applicable readiness chain into the completion target or provide the basis for the current path.',
         referenceRequirement: 'The controlling path to completion should represent the real work states required to achieve the selected completion milestone.',

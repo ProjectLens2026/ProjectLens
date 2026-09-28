@@ -474,7 +474,7 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     whyItMatters: 'Procurement with little or negative float can become a controlling condition before fabrication, delivery, installation, and testing are visible to management.',
     reviewerCheck: 'Confirm submittal approval, release, fabrication, delivery, required-on-site date, installation successor, and supplier recovery information for each item.',
     preSubmissionNote: 'Update the procurement chain and narrative with current vendor dates, required-on-site dates, downstream installation, and mitigation.',
-    referenceRequirement: 'UFGS 01 32 01.00 10, 3.3.4 — critical submittal, approval, procurement, fabrication, and delivery activities must be represented; long lead is defined as more than 90 calendar days. The 14-day float threshold is a Control Lens early-warning parameter.',
+    referenceRequirement: 'UFGS 01 32 01.00 10, 3.3.4 — critical submittal, approval, procurement, fabrication, and delivery activities must be represented; long lead is defined as more than 90 calendar days. The 14-day float threshold is a configured early-warning parameter.',
     affectedActivities: affected(longLeadRisk, 'Long-lead item at risk'),
   }))
 

@@ -293,13 +293,13 @@ export default function ControlLensAnalysisPage() {
                 <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3 mb-6">
                   <div>
                     <h3 className="text-lg font-extrabold text-slate-900">Schedule Analysis</h3>
-                    <p className="text-xs text-slate-500 mt-1">Choose exactly what you want to review. Control Lens keeps the decision summary separate from detailed schedule evidence.</p>
+                    <p className="text-xs text-slate-500 mt-1">Choose exactly what you want to review. The decision summary remains separate from detailed schedule evidence.</p>
                   </div>
                   <div className="w-full lg:w-[360px]">
                     <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">Select analysis</label>
                     <select value={scheduleFilter} onChange={e => setScheduleFilter(e.target.value as any)}
                       className="w-full border-2 border-slate-300 rounded-lg bg-white px-3 py-2.5 text-sm font-bold text-slate-900 shadow-sm focus:outline-none focus:border-blue-500">
-                      <option value="cl-summary">Approval Summary — Control Lens</option>
+                      <option value="cl-summary">Schedule Approval Summary</option>
                       <option value="cl-critical">CL Critical Path</option>
                       <option value="cl-longest">CL Longest Path</option>
                       <option value="critical">P6 Critical Activities</option>
@@ -330,8 +330,8 @@ export default function ControlLensAnalysisPage() {
                     )}
 
                     <div className="mt-4 bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-700 leading-relaxed">
-                      <div className="font-bold text-slate-800 mb-1">Control Lens interpretation</div>
-                      Critical activities can belong to different branches of the network and do not, by themselves, prove one continuous critical path. Control Lens therefore does not run construction-path credibility against this list as if it were one chain. Control Lens evaluates path credibility separately through its nature-of-work and readiness analysis so this P6 activity set remains submitted schedule evidence only.
+                      <div className="font-bold text-slate-800 mb-1">Review interpretation</div>
+                      Critical activities can belong to different branches of the network and do not, by themselves, prove one continuous critical path. Construction-path credibility is therefore not assessed against this list as if it were one chain. Path credibility is evaluated separately through nature-of-work and readiness analysis so this P6 activity set remains submitted schedule evidence only.
                     </div>
                   </div>
                 )}
@@ -346,7 +346,7 @@ export default function ControlLensAnalysisPage() {
                         <div className="rounded-xl border-2 border-slate-300 bg-white p-5 mb-4">
                           <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                             <div>
-                              <div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-blue-700">Control Lens Approval Summary</div>
+                              <div className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-blue-700">Schedule Approval Summary</div>
                               <div className="text-xl font-extrabold text-slate-950 mt-1">{approval.projectUnderstanding.projectNature}</div>
                               <div className="text-sm font-semibold text-slate-600 mt-2">{approval.projectUnderstanding.deliveryNature.join(' → ')}</div>
                             </div>
@@ -464,7 +464,7 @@ export default function ControlLensAnalysisPage() {
                           </div>
                           <PathActivityTable activities={clPathIntelligence.criticalPath.activities} showRemaining />
                         </>
-                      ) : <div className="text-sm text-slate-400 py-6">Control Lens could not establish a credible readiness endpoint for the selected completion target.</div>}
+                      ) : <div className="text-sm text-slate-400 py-6">The review could not establish a credible readiness endpoint for the selected completion target.</div>}
                     </div>
                   </div>
                 )}
@@ -818,7 +818,7 @@ function PathCredibilityPanel({ result, title, compact = false }: { result: Path
       </div>
       {result.findings.length === 0 ? (
         <div className="text-[11px] text-slate-600 leading-relaxed">
-          Control Lens checked the reported path against the currently authored construction-sequence rules and did not identify a path-level conflict. This does not replace project-specific reviewer judgment.
+          The reported path was checked against the currently authored construction-sequence rules and no path-level conflict was identified. This does not replace project-specific reviewer judgment.
         </div>
       ) : (
         <div className="space-y-2">
@@ -1002,7 +1002,7 @@ function PathCard({ path, expanded, onToggle, projectStart, projectEnd, allProje
             })}
           </div>
 
-          <PathCredibilityPanel result={credibility} title="Control Lens Construction Path Review" compact />
+          <PathCredibilityPanel result={credibility} title="Construction Path Review" compact />
         </>
       )}
     </div>

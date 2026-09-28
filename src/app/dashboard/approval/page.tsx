@@ -1000,7 +1000,7 @@ export default function ApprovalReadinessPage() {
 
       {activeTab === 'comments' && !result && !running && (
         <div className="rounded-xl border border-dashed border-slate-300 bg-white p-4 mb-4 text-center">
-          <div className="text-[13px] font-bold" style={{ color: COLORS.ink }}>Run the schedule review to generate Control Lens findings</div>
+          <div className="text-[13px] font-bold" style={{ color: COLORS.ink }}>Run the schedule review to generate findings</div>
           <div className="text-[11px] text-slate-500 mt-1">Reviewer-added comments can still be entered below before the automated review is run.</div>
         </div>
       )}
@@ -1045,7 +1045,7 @@ export default function ApprovalReadinessPage() {
           {activeTab === 'evidence' && result.pathReview && (
             <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
               <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-700 mb-1">Control Path Credibility</div>
-              <div className="text-[11px] text-slate-500 mb-3">Control Lens evaluates whether the submitted schedule represents the work that should actually control completion. This is engineering schedule review—not a silent CPM recalculation.</div>
+              <div className="text-[11px] text-slate-500 mb-3">The review evaluates whether the submitted schedule represents the work that should actually control completion. This is engineering schedule review—not a silent CPM recalculation.</div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {[result.pathReview.criticalPath, result.pathReview.longestPath].filter(Boolean).map((p: any) => {
                   const c = p.status === 'CREDIBLE' ? COLORS.green : p.status === 'REVIEW_REQUIRED' ? COLORS.red : COLORS.amber
@@ -1074,7 +1074,7 @@ export default function ApprovalReadinessPage() {
           </div>}
 
           <div className="text-[10px] text-slate-400 mt-3 leading-relaxed">
-            Score is provisional pending calibration. Control Lens detects, traces, explains, scores and triggers professional review —
+            Score is provisional pending calibration. The system detects, traces, explains, scores and triggers professional review —
             the scheduler makes corrections; the authorized reviewer makes the final approval decision.
           </div>
         </>
@@ -1187,7 +1187,7 @@ function CommentRegisterPanel({
 
       {proposedGroups.length > 0 && <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 mb-3">
         <div className="flex flex-wrap items-start justify-between gap-3 mb-2">
-          <div><div className="text-[11px] font-extrabold text-blue-900">{mode === 'REVIEWER' ? 'Proposed owner comments detected by Control Lens' : 'Detected corrections for this submission'}</div><div className="text-[10px] text-blue-700 mt-0.5">Visible automatically. They are not official owner comments until issued into the register.</div></div>
+          <div><div className="text-[11px] font-extrabold text-blue-900">{mode === 'REVIEWER' ? 'Proposed owner comments detected by the review' : 'Detected corrections for this submission'}</div><div className="text-[10px] text-blue-700 mt-0.5">Visible automatically. They are not official owner comments until issued into the register.</div></div>
           {mode === 'REVIEWER' && <button disabled={disabled} onClick={onImport} className="rounded-md bg-blue-600 px-3 py-2 text-[10px] font-bold text-white disabled:opacity-50">Issue all {proposedGroups.length} comments</button>}
         </div>
         <div className="space-y-1.5">
@@ -1214,7 +1214,7 @@ function CommentRegisterPanel({
                 <span className="font-mono text-[11px] font-extrabold text-blue-600">{comment.commentNumber}</span>
                 <div className="min-w-0">
                   <div className="text-[12px] font-extrabold text-slate-900 truncate">{comment.title}</div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">{comment.source === 'REVIEWER_ADDED' ? 'Reviewer added' : comment.source === 'CL_DETECTED' ? 'Control Lens detected' : 'Converted from CL finding'} · {comment.classification.replace('_', ' ')}</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">{comment.source === 'REVIEWER_ADDED' ? 'Reviewer added' : comment.source === 'CL_DETECTED' ? 'Automatically detected' : 'Converted from detected finding'} · {comment.classification.replace('_', ' ')}</div>
                 </div>
                 <span className={`rounded-full border px-2 py-1 text-[9px] font-bold whitespace-nowrap ${reviewStatusClasses(comment.status)}`}>{reviewStatusLabel(comment.status)}</span>
                 <span className="text-slate-400">{isOpen ? '⌃' : '⌄'}</span>
@@ -1287,7 +1287,7 @@ function AddReviewItemModal({ versionId, disabled, onCancel, onSave }: {
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" role="dialog" aria-modal="true" aria-label="Add review item">
     <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-xl">
       <div className="flex items-start justify-between border-b border-slate-200 p-5">
-        <div><h2 className="text-[16px] font-extrabold text-slate-900">Add Review Item</h2><p className="text-[11px] text-slate-500 mt-1">Control Lens will assign the next permanent comment number.</p></div>
+        <div><h2 className="text-[16px] font-extrabold text-slate-900">Add Review Item</h2><p className="text-[11px] text-slate-500 mt-1">The next permanent comment number will be assigned automatically.</p></div>
         <button onClick={onCancel} className="text-slate-400 hover:text-slate-700" aria-label="Close">✕</button>
       </div>
       <div className="p-5 space-y-3">
@@ -1411,7 +1411,7 @@ function ReviewDecisionHero({ result, mode, workflowBlocking, blockingComments, 
         <p className="text-[12px] text-slate-600 leading-relaxed mt-2 max-w-[690px]">
           {workflowBlocking
             ? `${blockingComments} issued approval-blocking comment${blockingComments === 1 ? '' : 's'} remain unresolved. The technical score cannot override an open formal comment.`
-            : result.readinessReason || 'Control Lens combines schedule logic, sequencing, path credibility and readiness evidence. The authorized reviewer makes the final decision.'}
+            : result.readinessReason || 'The review combines schedule logic, sequencing, path credibility and readiness evidence. The authorized reviewer makes the final decision.'}
         </p>
         <div className="flex flex-wrap gap-2 mt-4">
           <Chip label="Benchmark: Project criteria" color={COLORS.blue} />
