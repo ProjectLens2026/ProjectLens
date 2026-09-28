@@ -293,20 +293,36 @@ function nodeFor(id: string, tasks: Record<string, TraceTask>, cls: Record<strin
 
 /** Trace the complete connected predecessor/successor subgraph around focus.
  * A safety cap prevents pathological/cyclic XERs from freezing the UI. */
+interface PathNetworkIndex {
+  predAdj: Record<string, string[]>
+  succAdj: Record<string, string[]>
+  outgoing: Map<string, number[]>
+}
+
+function indexPathNetwork(rels: Relationship[]): PathNetworkIndex {
+  const predAdj: Record<string, string[]> = {}
+  const succAdj: Record<string, string[]> = {}
+  const outgoing = new Map<string, number[]>()
+  rels.forEach((r, index) => {
+    if (!r || !r.task_id || !r.pred_task_id) return
+    ;(predAdj[r.task_id] ||= []).push(r.pred_task_id)
+    ;(succAdj[r.pred_task_id] ||= []).push(r.task_id)
+    const edges = outgoing.get(r.pred_task_id) || []
+    edges.push(index)
+    outgoing.set(r.pred_task_id, edges)
+  })
+  return { predAdj, succAdj, outgoing }
+}
+
 function buildCompletePath(
   focusId: string,
   tasks: Record<string, TraceTask>,
   rels: Relationship[],
   cls: Record<string, ClassificationResult>,
+  network: PathNetworkIndex,
   maxNodes = 250,
 ): CompleteXerPath {
-  const predAdj: Record<string, string[]> = {}
-  const succAdj: Record<string, string[]> = {}
-  for (const r of rels) {
-    if (!r || !r.task_id || !r.pred_task_id) continue
-    ;(predAdj[r.task_id] ||= []).push(r.pred_task_id)
-    ;(succAdj[r.pred_task_id] ||= []).push(r.task_id)
-  }
+  const { predAdj, succAdj, outgoing } = network
 
   const upstream = new Set<string>()
   const downstream = new Set<string>()
@@ -333,7 +349,16 @@ function buildCompletePath(
   ids.forEach(id => { const n = nodeFor(id, tasks, cls); if (n) nodes.push(n) })
 
   const edges: XerPathEdge[] = []
-  for (const r of rels) {
+  // Inspect only edges leaving the selected nodes; retain original XER order.
+  const edgeIndices: number[] = []
+  ids.forEach(id => {
+    for (const index of outgoing.get(id) || []) {
+      if (ids.has(rels[index].task_id)) edgeIndices.push(index)
+    }
+  })
+  edgeIndices.sort((a, b) => a - b)
+  for (const index of edgeIndices) {
+    const r = rels[index]
     if (ids.has(r.pred_task_id) && ids.has(r.task_id)) {
       edges.push({
         predecessorId: r.pred_task_id,
@@ -505,6 +530,16 @@ export function runConstructionReview(analysis: {
 
   let findings: ReviewFinding[] = []
   let fid = 0
+  const network = indexPathNetwork(rels)
+  const pathCache = new Map<string, CompleteXerPath>()
+  const pathFor = (id: string): CompleteXerPath => {
+    let path = pathCache.get(id)
+    if (!path) {
+      path = buildCompletePath(id, tasks, rels, cls, network)
+      pathCache.set(id, path)
+    }
+    return path
+  }
 
   // LAYER 1 + conservative LAYER 2 routing.
   for (const r of rels) {
@@ -582,7 +617,7 @@ export function runConstructionReview(analysis: {
       predecessor: { id: r.pred_task_id, code: pred.task_code, name: pred.task_name, relationship, lagDays, lagHours },
       recommendation,
       memo: makeMemo(succ, pred, relationship, lagDays, lagHours, variance, bucket, recommendation, pc, sc),
-      completeXerPath: buildCompletePath(r.task_id, tasks, rels, cls),
+      completeXerPath: pathFor(r.task_id),
     })
   }
 
@@ -709,7 +744,7 @@ export function runConstructionReview(analysis: {
             `Target milestone: ${target || '—'}`,
           ].concat(problems.map(p => `${p.label}: ${p.kind}`)),
         },
-        completeXerPath: buildCompletePath(triggerId, tasks, rels, cls),
+        completeXerPath: pathFor(triggerId),
       })
     }
   }
@@ -814,7 +849,7 @@ export function runConstructionReview(analysis: {
           `Suggested WBS: ${ref.recommendedWbs}`,
         ],
       },
-      completeXerPath: buildCompletePath(anchorId, tasks, rels, cls),
+      completeXerPath: pathFor(anchorId),
     })
   }
 
@@ -871,7 +906,7 @@ export function runConstructionReview(analysis: {
           recommendedAction: recommendation,
           technicalDetails: late.slice(0, 20).map(x => `${x.code} — ${x.name}: ${x.note}`),
         },
-        completeXerPath: buildCompletePath(id, tasks, rels, cls),
+        completeXerPath: pathFor(id),
       })
     }
   }
