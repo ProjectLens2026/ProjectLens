@@ -479,6 +479,7 @@ export default function ApprovalReadinessPage() {
           versionId: v?.id,
           mode: selectedMode,
           projectType: 'ALL',
+          basisKey: JSON.stringify([p?.id, p?.contractDates, p?.controlBasis]),
         })
         setReviewSnapshot(snapshot)
         setResult(snapshot?.approval || (v?.approvalResult as ApprovalReadinessResult) || null)
@@ -534,6 +535,8 @@ export default function ApprovalReadinessPage() {
         versionId: version?.id,
         mode,
         projectType: 'ALL',
+        basisKey: JSON.stringify([project?.id, project?.contractDates, project?.controlBasis]),
+        forceRefresh: true,
       })
       const res = snapshot?.approval || null
       setReviewSnapshot(snapshot)

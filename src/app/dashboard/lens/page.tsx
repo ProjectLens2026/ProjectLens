@@ -72,13 +72,14 @@ export default function ControlLensAnalysisPage() {
     try {
       return buildScheduleReviewSnapshot(analysis, {
         versionId: version?.id,
-        mode: version?.approvalResult?.mode === 'PRE_SUBMISSION' ? 'PRE_SUBMISSION' : 'REVIEWER',
+        mode: version?.approvalResult?.mode === 'REVIEWER' ? 'REVIEWER' : 'PRE_SUBMISSION',
+        basisKey: JSON.stringify([project?.id, project?.contractDates, project?.controlBasis]),
       })
     } catch (e) {
       console.error('[Lens] Canonical schedule review failed:', e)
       return null
     }
-  }, [analysis, version?.approvalResult?.mode, version?.id])
+  }, [analysis, version?.approvalResult?.mode, version?.id, project?.id, project?.contractDates, project?.controlBasis])
 
   const approvalFindingGroups = useMemo(() => (
     (reviewSnapshot?.approval.findings || [])

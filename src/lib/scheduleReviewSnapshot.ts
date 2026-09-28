@@ -89,6 +89,10 @@ export interface BuildScheduleReviewSnapshotOptions {
   versionId?: string
   mode?: ApprovalMode
   projectType?: ProjectTypeKey
+  /** Small project-basis revision key; never serialize the schedule to build this. */
+  basisKey?: string
+  /** Explicit Re-run Review must recompute instead of reusing a completed result. */
+  forceRefresh?: boolean
 }
 
 interface ScheduleAnalysisLike {
@@ -102,6 +106,15 @@ interface ScheduleAnalysisLike {
   longLeadItems?: unknown[]
   [key: string]: unknown
 }
+
+// Reuse work across page unmounts and store notifications. Schedule evidence is
+// immutable in projectStore: a reload/replacement produces a new analysis object.
+// Weak keys let unloaded evidence and its review be garbage-collected together.
+// Keep only the latest configuration for each analysis, not a history of reviews.
+const completedReviews = new WeakMap<ScheduleAnalysisLike, {
+  key: string
+  snapshot: ScheduleReviewSnapshot
+}>()
 
 function finiteCount(value: unknown): number {
   const numeric = Number(value)
@@ -181,7 +194,7 @@ export function buildScheduleTechnicalSignals(analysis: ScheduleAnalysisLike): S
     label: 'Forecast beyond contract completion',
     count: delayDays,
     treatment: 'STATUS_ONLY',
-    summary: `The current XER forecast is ${delayDays} calendar day${delayDays === 1 ? '' : 's'} beyond the contractual completion position. Entitlement and approval impact require the governing contract basis and approved time modifications.`,
+    summary: `The current schedule forecast is ${delayDays} calendar day${delayDays === 1 ? '' : 's'} beyond the contractual completion position. Entitlement and approval impact require the governing contract basis and approved time modifications.`,
     evidenceLocation: 'Full CPM Analysis → Schedule Filters',
   })
 
@@ -251,6 +264,15 @@ export function buildScheduleReviewSnapshot(
 ): ScheduleReviewSnapshot | null {
   if (!analysis) return null
 
+  const cacheKey = JSON.stringify([
+    options.versionId || '', options.mode || 'REVIEWER',
+    options.projectType || 'ALL', options.basisKey || '',
+  ])
+  const cached = completedReviews.get(analysis)
+  if (!options.forceRefresh && cached?.key === cacheKey) return cached.snapshot
+  // A failed refresh must not leave an old successful result available as fresh.
+  completedReviews.delete(analysis)
+
   const approval = evaluateApprovalReadiness(analysis as any, {
     mode: options.mode || 'REVIEWER',
     projectType: options.projectType || 'ALL',
@@ -268,7 +290,7 @@ export function buildScheduleReviewSnapshot(
     ),
   )
 
-  return {
+  const snapshot: ScheduleReviewSnapshot = {
     schemaVersion: '1.0.0',
     versionId: options.versionId,
     generatedAt: approval.meta.generatedAt,
@@ -291,4 +313,6 @@ export function buildScheduleReviewSnapshot(
     },
     decisionIntegrity: decisionIntegrity(approval, findings),
   }
+  completedReviews.set(analysis, { key: cacheKey, snapshot })
+  return snapshot
 }
