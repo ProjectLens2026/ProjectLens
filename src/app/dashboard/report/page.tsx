@@ -14,7 +14,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import {
-  getActiveProject, getActiveVersion, subscribeToProjects,
+  getActiveProject, getActiveVersion, subscribeToProjects, loadVersionAnalysis,
   addCalendarDays,
   Project, ScheduleVersion,
 } from '@/lib/projectStore'
@@ -22,6 +22,7 @@ import { evmCumulative, fmtDollars, fmtRatio as fmtEvmRatio } from '@/lib/evm'
 import { analyzeMultipleFloatPaths } from '@/lib/multipleFloatPaths'
 import { createClient } from '@/lib/supabase/client'
 import { reportNumber, fmtShortDate } from '@/lib/reports'
+import CurrentProjectSummary from '@/components/reports/CurrentProjectSummary'
 import ReportHeader from '@/components/ReportHeader'
 import PrintButton from '@/components/PrintButton'
 import WordButton from '@/components/WordButton'
@@ -45,6 +46,10 @@ export default function ReportPage() {
     const unsub = subscribeToProjects(refresh)
     return unsub
   }, [])
+
+  useEffect(() => {
+    if (version?.id && version.analysisState !== 'loaded' && version.analysisState !== 'loading' && version.analysisState !== 'error') void loadVersionAnalysis(version.id)
+  }, [version?.id, version?.analysisState])
 
   function refresh() {
     const p = getActiveProject()
@@ -99,6 +104,7 @@ export default function ReportPage() {
     )
   }
 
+  if (version.analysisState && version.analysisState !== 'loaded') return <div className="p-6 text-sm text-slate-500">{version.analysisState === 'error' ? 'Schedule evidence could not be loaded. Reopen the version before printing.' : 'Loading selected schedule evidence…'}</div>
   return <ReportContent project={project} version={version} orgName={orgName} />
 }
 
@@ -112,12 +118,12 @@ function ReportContent({ project, version, orgName }: { project: Project; versio
   const timeExt = version.versionDates?.timeExtensionDays ?? 0
   const manualRevised = version.versionDates?.revisedContractCompletion || undefined
   const manualDataDate = version.versionDates?.manualDataDate || undefined
-  const revisedComp = manualRevised || (manualOriginal ? addCalendarDays(manualOriginal, timeExt) : undefined)
+  const revisedComp = project.contractDates?.currentFinalCompletion || manualRevised || (manualOriginal ? addCalendarDays(manualOriginal, timeExt) : undefined)
 
   const dataDate = manualDataDate || a.dataDate || version.dataDate || version.uploadedAt
   const ntp = manualNtp || a.projectStartDate || dataDate
   const contractEnd = manualOriginal || a.contractEnd
-  const projectedEnd = a.projectedEnd || contractEnd
+  const projectedEnd = a.projectedEnd || a.forecastFinish
   const substantialXER = a.substantialCompletionDate
   const finalCompletion = a.finalCompletionDate || projectedEnd
 
@@ -212,29 +218,11 @@ function ReportContent({ project, version, orgName }: { project: Project; versio
         {/* ─────── 1. EXECUTIVE SUMMARY ──────────────────────────────── */}
         <SectionBar tag="EXEC" title="Executive Summary" />
 
-        {/* Health banner */}
-        <HealthBanner score={healthScore} label={condition} />
+        <CurrentProjectSummary project={project} version={version} />
 
-        {/* Key Dates */}
-        <SubLabel>Key dates</SubLabel>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4 print:break-inside-avoid">
-          <DateBox label="NTP" value={fmtShortDate(ntp)} />
-          <DateBox label="Original Comp." value={fmtShortDate(contractEnd)} />
-          <DateBox label="Revised Comp." value={fmtShortDate(revisedComp)} tone={revisedComp && contractEnd && revisedComp !== contractEnd ? 'amber' : undefined} />
-          <DateBox label="Data Date" value={fmtShortDate(dataDate)} />
-          <DateBox label="Substantial (manual)" value={fmtShortDate(manualSubst)} />
-          <DateBox label="Substantial (XER)" value={fmtShortDate(substantialXER)} />
-          <DateBox label="Final Completion" value={fmtShortDate(finalCompletion)} />
-          <DateBox label="Projected End" value={fmtShortDate(projectedEnd)} tone={daysBehind > 0 ? 'red' : undefined} />
-        </div>
-
-        {/* KPI tiles */}
-        <SubLabel>Key metrics</SubLabel>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4 print:break-inside-avoid">
-          <KPI label="Days Behind" value={daysBehind > 0 ? `+${daysBehind}` : `${daysBehind}`} tone={daysBehind > 0 ? 'red' : 'green'} caption={daysBehind > 0 ? 'past revised end' : 'on or ahead of plan'} />
-          <KPI label="Work Complete" value={`${Math.round(workComplete)}%`} tone="blue" caption={constructionCount ? `${constructionCount} construction acts` : 'effective % across activities'} />
+        <div className="grid grid-cols-2 gap-2 mb-4 print:break-inside-avoid">
           <KPI label="Total Activities" value={String(totalActivities)} tone="slate" caption={`${complete} done · ${inProgress} active · ${notStarted} not started`} />
-          <KPI label="Negative Float" value={String(negativeFloat)} tone={negativeFloat > 0 ? 'red' : 'green'} caption="activities" />
+          <KPI label="Negative Float" value={String(negativeFloat)} tone={negativeFloat > 0 ? 'red' : 'green'} caption="activities with negative float" />
         </div>
 
         {/* Risk summary */}

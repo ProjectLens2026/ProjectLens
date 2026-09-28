@@ -48,6 +48,7 @@ interface SCurvePoint {
 }
 
 export interface ExecutiveReportProps {
+  currentSummary?: React.ReactNode
   // Header / project info
   orgName: string
   reportNo: string
@@ -150,6 +151,7 @@ export default function ExecutiveReport(props: ExecutiveReportProps) {
           project={project}
         />
 
+        {props.currentSummary || <>
         {/* ── 1. Health banner ─────────────────────────────────────────── */}
         <div
           className="rounded-xl px-5 py-4 mb-6 flex items-center gap-4 print:break-inside-avoid"
@@ -216,6 +218,13 @@ export default function ExecutiveReport(props: ExecutiveReportProps) {
           <DateBox label="Projected End" value={fmtShortDate(projectedEnd)} tone={daysBehind > 0 ? 'red' : undefined} />
         </div>
 
+        </>}
+
+        {props.currentSummary && <div className="grid grid-cols-2 gap-2 mb-6 print:break-inside-avoid">
+          <KPI label="Critical Float" value={`${criticalFloatDays}d`} tone={criticalFloatDays <= 14 ? 'red' : criticalFloatDays <= 30 ? 'amber' : 'green'} caption="schedule float indicator" />
+          <KPI label="Long Lead at Risk" value={String(longLeadAtRisk)} tone={longLeadAtRisk > 0 ? 'amber' : 'green'} caption="incomplete items with ≤14d float" />
+        </div>}
+
         {/* ── 4. Risks summary ─────────────────────────────────────────── */}
         <SectionLabel>Risks detected · {totalRisks} {totalRisks === 1 ? 'category' : 'categories'}</SectionLabel>
         <div className="grid grid-cols-3 gap-2 mb-6 print:break-inside-avoid">
@@ -225,8 +234,8 @@ export default function ExecutiveReport(props: ExecutiveReportProps) {
         </div>
 
         {/* ── 5. Schedule Progress S-curve ─────────────────────────────── */}
-        <SectionLabel>Schedule progress</SectionLabel>
-        <SCurve points={sCurve} />
+        {!props.currentSummary && <><SectionLabel>Schedule progress</SectionLabel>
+        <SCurve points={sCurve} /></>}
 
         {/* ── 6. Top risk activities table ─────────────────────────────── */}
         {topRisks.length > 0 && (

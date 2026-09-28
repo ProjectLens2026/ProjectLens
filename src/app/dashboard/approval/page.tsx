@@ -1,5 +1,7 @@
 'use client'
 
+import PhaseProgressStrip from '@/components/PhaseProgressStrip'
+
 // =============================================================================
 // src/app/dashboard/approval/page.tsx   (Approval Readiness workspace)
 // =============================================================================
@@ -807,6 +809,7 @@ export default function ApprovalReadinessPage() {
   // of the interactive workspace. Built from the same structured result.
   if (reportKind && result) {
     return <ApprovalReport
+      version={version}
       result={result}
       mode={mode}
       kind={reportKind}
@@ -1469,7 +1472,8 @@ function RequirementBadge({ strength, gate = false }: { strength?: string; gate?
 // Save-as-PDF uses the browser print dialog; the dashboard layout hides the
 // sidebar on print, and the toolbar below is print-hidden.
 // =============================================================================
-function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis, reportSignalIds, reviewComments, onBack }: {
+function ApprovalReport({ version, result, mode, kind, project, reviewSnapshot, analysis, reportSignalIds, reviewComments, onBack }: {
+  version: any
   result: ApprovalReadinessResult
   mode: ApprovalMode
   kind: 'executive' | 'complete'
@@ -1492,6 +1496,7 @@ function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis,
     : 'Schedule Review Evidence Summary'
   const docKind = kind === 'executive' ? 'Required Corrections and Clarifications' : 'Consolidated Findings and Selected CPM Evidence'
 
+  const formalBlockers = summarizeReviewComments(reviewComments).blocking
   const reportFindings = result.findings.filter(f => approvalKind(f) === 'FINDING')
   const reportRecommendations = result.findings.filter(f => approvalKind(f) === 'RECOMMENDATION')
   const actionGroups = buildActionGroups(result)
@@ -1547,6 +1552,8 @@ function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis,
             <Info label="Project" value={project?.name || '—'} />
             <Info label="Project Code" value={project?.projectId || '—'} mono />
             <Info label="Review Mode" value={voice} />
+            <Info label="Schedule version" value={version?.versionLabel || version?.fileName || '—'} />
+            <Info label="Data date" value={version?.versionDates?.manualDataDate || analysis?.dataDate || version?.dataDate || 'Not reported'} />
           </div>
 
           {/* ── Executive summary block (both reports) ───────────────── */}
@@ -1554,10 +1561,10 @@ function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis,
           <div className="flex items-start gap-6 mb-4 print:break-inside-avoid">
             <div className="flex-1">
               <div className="text-[9px] font-extrabold uppercase tracking-[0.14em] text-slate-500 mb-1">Schedule Readiness Status</div>
-              <div className="text-[18px] font-black uppercase tracking-wide mb-1" style={{ color: readinessColor(result.readinessStatus) }}>
-                {neutralReportText(result.readinessLabel || result.recommendation)}
+              <div className="text-[18px] font-black uppercase tracking-wide mb-1" style={{ color: formalBlockers ? COLORS.red : readinessColor(result.readinessStatus) }}>
+                {formalBlockers ? 'NOT READY — OPEN REVIEW COMMENTS' : neutralReportText(result.readinessLabel || result.recommendation)}
               </div>
-              <div className="text-[10.5px] text-slate-600 leading-relaxed mb-2">{neutralReportText(result.readinessReason || result.recommendation)}</div>
+              <div className="text-[10.5px] text-slate-600 leading-relaxed mb-2">{formalBlockers ? `${formalBlockers} issued approval-blocking comments remain unresolved. The technical score cannot override these comments.` : neutralReportText(result.readinessReason || result.recommendation)}</div>
               <div className="text-[10.5px] text-slate-600">
                 Critical Gates: <b style={{ color: result.criticalGates.passed ? COLORS.green : COLORS.red }}>{result.criticalGates.passed ? 'PASS' : 'FAIL'}</b>
                 {'  ·  '}Critical {result.counts.critical} · Major {result.counts.major} · Minor {result.counts.minor}
@@ -1598,6 +1605,8 @@ function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis,
               </div>)}
             </div>
           </>}
+
+          <PhaseProgressStrip analysis={analysis} originalBaseline={version?.scheduleType === 'baseline'} dataDate={version?.versionDates?.manualDataDate || analysis?.dataDate || version?.dataDate} reportMode />
 
           {kind === 'executive' && reportSignals.length > 0 && <>
             <SectionBar>Selected CPM Technical Evidence</SectionBar>

@@ -41,6 +41,7 @@ export interface FloatBucket {
 }
 
 export interface FullAnalysisReportProps {
+  currentSummary?: React.ReactNode
   orgName: string
   reportNo: string
   versionLabel: string
@@ -114,6 +115,7 @@ export default function FullAnalysisReport(p: FullAnalysisReportProps) {
 
         {/* ──── 1. DIAGNOSTIC SUMMARY ──────────────────────────────── */}
         <SectionBar tag="DIAG" title="Diagnostic Summary" rightMeta={p.dataDate ? `Data date · ${fmtShortDate(p.dataDate)}` : undefined} />
+        {p.currentSummary || <>
         <HealthBanner score={p.healthScore} label={p.healthLabel} />
 
         <SubLabel>Schedule indicators</SubLabel>
@@ -123,6 +125,8 @@ export default function FullAnalysisReport(p: FullAnalysisReportProps) {
           <KPI label="Total Activities" value={String(p.totalActivities)} tone="slate" caption={`${p.completedCount} done · ${p.inProgressCount} active`} />
           <KPI label="Negative Float" value={String(p.negativeFloatCount)} tone={p.negativeFloatCount > 0 ? 'red' : 'green'} caption={p.negativeFloatCount === 0 ? 'no late activities' : 'activities behind'} />
         </div>
+
+        </>}
 
         {/* ──── 2. CRITICAL PATH ANALYSIS ──────────────────────────── */}
         {(p.criticalDriversCount > 0 || p.longestPathCount > 0) && (

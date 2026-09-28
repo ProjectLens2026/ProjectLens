@@ -14,8 +14,8 @@ function getPhaseModel(analysis: any) {
   return model
 }
 
-export default function PhaseProgressStrip({ analysis, originalBaseline, dataDate }: {
-  analysis: any; originalBaseline: boolean; dataDate?: string
+export default function PhaseProgressStrip({ analysis, originalBaseline, dataDate, reportMode = false }: {
+  analysis: any; originalBaseline: boolean; dataDate?: string; reportMode?: boolean
 }) {
   const model = useMemo(() => getPhaseModel(analysis), [analysis])
   const [selected, setSelected] = useState<string | null>(null)
@@ -35,22 +35,30 @@ export default function PhaseProgressStrip({ analysis, originalBaseline, dataDat
       {date && <div className="absolute top-0 h-5 border-l border-dashed border-slate-700" style={{ left: `${position(date)}%` }} title={`Data date: ${date}`} />}
     </div>
   )
-  return <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm" aria-label="Phase progress">
+  return <section className="phase-progress-summary rounded-xl border border-slate-200 bg-white p-4 shadow-sm" aria-label="Phase progress">
+    <style>{`@media print {
+      .phase-progress-summary { break-inside: avoid; }
+      .phase-progress-summary button.phase-progress-cell { display: block !important; text-align: left; padding: 0 6px !important; }
+      .phase-progress-summary .phase-progress-grid { display: grid !important; grid-template-columns: repeat(5, minmax(0, 1fr)) !important; min-width: 0 !important; width: 100% !important; }
+      .phase-progress-summary #phase-progress-details { display: none !important; }
+      .phase-progress-summary .truncate { white-space: normal !important; overflow: visible !important; }
+      .phase-progress-summary .phase-progress-help, .phase-progress-summary .phase-progress-arrow { display: none !important; }
+    }`}</style>
     <div className="flex flex-wrap justify-between gap-2 mb-3">
       <div><h2 className="text-sm font-semibold text-slate-800">Phase progress</h2><p className="text-[11px] text-slate-500">Average reported physical progress · Equal activity weights</p></div>
       <span className="text-[10px] text-slate-500">Overall not calculated — phase weights not agreed</span>
     </div>
     {!model.hasEvidence ? <p className="text-xs text-slate-500">Activity evidence is not loaded for this version. Phase progress is unavailable.</p> : <>
       {originalBaseline && model.baselineProgress > 0 && <p className="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700" role="status">Baseline contains recorded progress — verify submission. {model.baselineProgress.toLocaleString()} activities have physical progress, actual dates or a started/completed status. Reported values are preserved.</p>}
-      <div className="overflow-x-auto pb-1"><div className="grid grid-cols-5 min-w-[650px] divide-x divide-slate-200">
-        {model.phases.map(p => <button key={p.id} type="button" aria-expanded={selected === p.id} aria-controls="phase-progress-details" onClick={() => { setSelected(selected === p.id ? null : p.id); setLimit(25) }} className={`px-3 text-left first:pl-0 focus-visible:outline-blue-600 ${selected === p.id ? 'text-blue-800' : 'text-slate-700'}`}>
+      <div className="overflow-x-auto pb-1"><div className="phase-progress-grid grid grid-cols-5 min-w-[650px] divide-x divide-slate-200">
+        {model.phases.map(p => <button key={p.id} type="button" disabled={reportMode} aria-expanded={selected === p.id} aria-controls={reportMode ? undefined : 'phase-progress-details'} onClick={() => { setSelected(selected === p.id ? null : p.id); setLimit(25) }} className={`phase-progress-cell px-3 text-left first:pl-0 focus-visible:outline-blue-600 ${selected === p.id ? 'text-blue-800' : 'text-slate-700'}`}>
           <div className="text-xs font-medium truncate" title={p.label}>{p.label}</div>
-          <div className="mt-1 text-lg font-bold text-blue-600">{p.percent === null ? '—' : `${Math.round(p.percent * 10) / 10}%`} <span className="text-xs">{selected === p.id ? '▾' : '›'}</span></div>
+          <div className="mt-1 text-lg font-bold text-blue-600">{p.percent === null ? '—' : `${Math.round(p.percent * 10) / 10}%`} {!reportMode && <span className="phase-progress-arrow text-xs">{selected === p.id ? '▾' : '›'}</span>}</div>
           <div className="mt-1 h-1 rounded bg-slate-100"><div className="h-1 rounded bg-blue-500" style={{ width: `${p.percent ?? 0}%` }} /></div>
           <div className="mt-1 text-[10px] text-slate-500">{p.eligible ? `${p.reported.toLocaleString()}/${p.eligible.toLocaleString()} reported` : 'No eligible activities'}</div>
         </button>)}
       </div></div>
-      <p className="mt-2 text-[10px] text-slate-500">Select a phase for its timeline and delivery evidence. Missing values are excluded, not treated as zero. {model.unclassified.toLocaleString()} unclassified · {model.excluded.toLocaleString()} milestones / summaries / level-of-effort excluded · {model.uncertain.toLocaleString()} low-confidence phase assignments.</p>
+      <p className="mt-2 text-[10px] text-slate-500">{!reportMode && <span className="phase-progress-help">Select a phase for its timeline and delivery evidence. </span>}Missing values are excluded, not treated as zero. {model.unclassified.toLocaleString()} unclassified · {model.excluded.toLocaleString()} milestones / summaries / level-of-effort excluded · {model.uncertain.toLocaleString()} low-confidence phase assignments.</p>
       {model.phases.some(p => p.eligible > p.reported) && <p className="mt-1 text-[10px] text-amber-700">Incomplete physical-progress coverage. Older saved analyses may lack these fields; a newly analyzed upload retains them. Percentages cover reported activities only.</p>}
     </>}
     {phase && <div id="phase-progress-details" className="mt-4 border-t border-slate-200 pt-3">
