@@ -117,6 +117,9 @@ export interface USProjectDiscoveryResult {
   locations: DiscoveredLocation[]
   systems: DiscoveredSystem[]
   phases: DiscoveredPhase[]
+  /** Reuse upload-time phase classification on Overview without rerunning rules. */
+  phaseAssignments?: Record<string, ProjectPhase | null>
+  lowConfidencePhaseIds?: string[]
   procurementPackages: DiscoverySignal[]
   commissioningStates: DiscoverySignal[]
   completionTargets: DiscoverySignal[]
@@ -724,6 +727,8 @@ export function discoverUSProject(input: USProjectDiscoveryInput): USProjectDisc
     locations,
     systems,
     phases,
+    phaseAssignments: Object.fromEntries(Object.entries(classifications).map(([id, c]) => [id, c.phase || null])),
+    lowConfidencePhaseIds: Object.entries(classifications).filter(([, c]) => c.confidence.phase === 'low').map(([id]) => id),
     procurementPackages,
     commissioningStates,
     completionTargets,

@@ -11,6 +11,7 @@ import {
   Project, ScheduleVersion,
 } from '@/lib/projectStore'
 import { countRiskCategories } from '@/lib/riskDetector'
+import PhaseProgressStrip from '@/components/PhaseProgressStrip'
 
 // =============================================================================
 // Executive Dashboard — main /dashboard page.
@@ -591,6 +592,8 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
           )}
         </Card>
 
+        <PhaseProgressStrip key={version.id} analysis={a} originalBaseline={version.scheduleType === 'baseline'} dataDate={dataDate} />
+
         <Card>
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -600,7 +603,7 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
             <Link href="/dashboard/controls" className="text-xs font-semibold text-blue-600 hover:text-blue-800">Open Project Controls</Link>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Work complete</div><div className="text-xl font-black text-slate-900 mt-1">{hasWorkComplete ? `${Math.round(workCompleteNum)}%` : '—'}</div><div className="text-[10px] text-slate-400 mt-1">Selected schedule calculation</div></div>
+            <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Physical progress</div><div className="text-xl font-black text-slate-900 mt-1">By phase</div><div className="text-[10px] text-slate-400 mt-1">Reported values in the phase strip above</div></div>
             <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Risk categories</div><div className={clsx('text-xl font-black mt-1', risksCritical > 0 ? 'text-red-600' : 'text-slate-900')}>{risksAll}</div><div className="text-[10px] text-slate-400 mt-1">{risksCritical} critical · {risksHigh} high</div></div>
             <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Long-lead at risk</div><div className={clsx('text-xl font-black mt-1', longLeadAtRisk > 0 ? 'text-amber-600' : 'text-slate-900')}>{longLeadAtRisk}</div><div className="text-[10px] text-slate-400 mt-1">of {longLeadTotal} detected items</div></div>
             <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Remaining duration</div><div className="text-xl font-black text-slate-900 mt-1">{remainingDuration || '—'}</div><div className="text-[10px] text-slate-400 mt-1">calendar days to authorized completion</div></div>

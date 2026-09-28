@@ -61,6 +61,8 @@ export interface TaskActivityCode {
 // derived here — the Step 2 engine infers scope live from wbsPath + activity
 // text + codes, so scope inference can improve without a re-upload.
 export interface TraceTask {
+  /** Raw physical progress; absent in older stored analyses. */
+  phys_complete_pct?: string
   task_id: string
   task_code: string
   task_name: string
@@ -881,6 +883,7 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   for (const t of taskArr) {
     const wnode = t.wbs_id ? wbsNodes[t.wbs_id] : undefined
     traceTasks[t.task_id] = {
+      phys_complete_pct: t.phys_complete_pct,
       task_id: t.task_id,
       task_code: t.task_code,
       task_name: t.task_name,
