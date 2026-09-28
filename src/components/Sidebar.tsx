@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import clsx from 'clsx'
+import { useVersionNavigation } from '@/components/VersionNavigation'
 import {
   getActiveProject, getActiveVersion, loadProjects,
   setActiveProjectId, setActiveVersionId,
@@ -234,28 +235,20 @@ export default function Sidebar({ user }: SidebarProps) {
       router.push('/dashboard')
     }
   }
+  const versionNavigation = useVersionNavigation()
   function selectVersion(projectId: string, versionId: string) {
-    setActiveProjectId(projectId)
-    setActiveVersionId(versionId)
-    refresh()
-    // Day 10 — clicking a version ALWAYS jumps to Overview. The PM can then
-    // manually click into EVM/Trend/TIA/etc. for that version. Stops the
-    // "wait, which version am I looking at?" confusion when switching versions
-    // while staying on a sub-view like EVM or Lens.
-    router.push('/dashboard')
+    versionNavigation.request(projectId, versionId)
   }
   function openProjectLatest(projectId: string) {
     const project = projects.find(p => p.id === projectId)
     if (!project) return
     const latest = getLatestVersion(project)
-    setActiveProjectId(projectId)
     if (latest) {
-      setActiveVersionId(latest.id)
-      refresh()
-      maybeNavigateToDashboard()
+      versionNavigation.request(projectId, latest.id)
     } else {
       // Phase 3B — empty shell. No baseline yet. Send to upload page so the
       // PM can put one in. Dashboard would have nothing to render.
+      setActiveProjectId(projectId)
       setActiveVersionId(null)
       refresh()
       router.push('/dashboard/upload')
@@ -886,6 +879,11 @@ export default function Sidebar({ user }: SidebarProps) {
                               ? 'bg-blue-600/20 border-blue-500'
                               : 'border-transparent hover:bg-white/5'
                           )}
+                          role="button"
+                          tabIndex={0}
+                          aria-current={isActiveVersion ? 'true' : undefined}
+                          title={`Open ${v.versionLabel || v.fileName}`}
+                          onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); selectVersion(p.id, v.id) } }}
                           onClick={() => selectVersion(p.id, v.id)}
                         >
                           <span className={clsx('w-3 flex-shrink-0 text-[10px]', isActiveVersion ? 'text-blue-400' : 'text-transparent')}>✓</span>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
+import VersionNavigation, { VersionContent } from '@/components/VersionNavigation'
 import Sidebar from '@/components/Sidebar'
 import HelpWidget from '@/components/HelpWidget'
 import { migrateLegacyData, loadProjects, getActiveProjectId, setActiveProjectId } from '@/lib/projectStore'
@@ -135,7 +136,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const showPaywall = planInfo?.requiresPayment && !isPathAllowedDuringPaywall(pathname || '')
 
   return (
-    <div className="app-shell flex h-screen overflow-hidden bg-slate-100">
+    <VersionNavigation><div className="app-shell flex h-screen overflow-hidden bg-slate-100">
       {/* print:hidden — sidebar should not appear in printed pages.
           Each page's main content prints on its own. */}
       <div className="print:hidden">
@@ -143,12 +144,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </div>
       <div className="app-main flex-1 overflow-hidden flex flex-col min-w-0">
         {!showPaywall && <TrialBanner planInfo={planInfo} />}
-        {showPaywall ? <PaywallScreen planInfo={planInfo!} /> : children}
+        {showPaywall ? <PaywallScreen planInfo={planInfo!} /> : <VersionContent>{children}</VersionContent>}
       </div>
       <div className="print:hidden">
         <HelpWidget />
       </div>
-    </div>
+    </div></VersionNavigation>
   )
 }
 
