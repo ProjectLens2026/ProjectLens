@@ -16,6 +16,7 @@ import { analyzeCLPathIntelligence } from '@/lib/construction/clPathIntelligence
 import { buildScheduleReviewSnapshot } from '@/lib/scheduleReviewSnapshot'
 import { reviewOpenEndedLogic } from '@/lib/approval-readiness/qualityRules'
 import TraceLogicPanel from '@/components/TraceLogicPanel'
+import { printReport } from '@/lib/printReport'
 
 export default function ControlLensAnalysisPage() {
   const [analysis, setAnalysis] = useState<any>(null)
@@ -211,7 +212,13 @@ export default function ControlLensAnalysisPage() {
           <Link href="/dashboard" className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400 hover:text-blue-600 font-semibold">
             Overview
           </Link>
-          <button onClick={() => window.print()} className="text-xs border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg hover:border-slate-400 font-semibold flex items-center gap-1.5">
+          <button
+            onClick={() => printReport('full-cpm-print-area', {
+              title: `${project.name} — Full CPM Analysis`,
+              footerLabel: project.projectId || '',
+            })}
+            className="text-xs border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg hover:border-slate-400 font-semibold flex items-center gap-1.5"
+          >
             🖨 Print / Save PDF
           </button>
           <Link href="/dashboard/upload" className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400 hover:text-blue-600 font-semibold">
@@ -219,7 +226,7 @@ export default function ControlLensAnalysisPage() {
           </Link>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-5 space-y-3">
+      <div id="full-cpm-print-area" className="flex-1 overflow-y-auto p-5 space-y-3">
         {/* Header */}
         <div className="bg-white border border-slate-200 rounded-xl p-4">
           <div className="flex items-center justify-between">

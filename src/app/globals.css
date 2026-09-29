@@ -186,7 +186,7 @@ body {
       color: #9ca3af;
     }
     @bottom-left {
-      content: "PROJECT CONTROLS · " attr(data-print-date);
+      content: "CPMreview · " attr(data-print-date);
       font-size: 8pt;
       color: #9ca3af;
     }
