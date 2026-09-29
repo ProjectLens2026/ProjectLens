@@ -136,6 +136,9 @@ export default function TIAPage() {
       setProgressLabel('Loading results...')
       const data = await res.json()
       setComparison(data.comparison)
+      // The controlling-path change is the primary TIA result. Open it first;
+      // the activity and milestone detail remains available in the other tabs.
+      setActiveTab('cp')
 
       const initialCats: Record<string, FragnetCategorization> = {}
       for (const frag of data.comparison.fragnetActivities || []) {
@@ -247,7 +250,7 @@ export default function TIAPage() {
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center">
-          <Link href="/dashboard" className="mr-4 text-xs font-bold text-blue-600 hover:text-blue-800 whitespace-nowrap">← Overview</Link>
+          <Link href="/dashboard/controls" className="mr-4 text-xs font-bold text-blue-600 hover:text-blue-800 whitespace-nowrap">← Project Controls</Link>
           <div className="mr-4 h-6 border-l border-slate-200" />
           <span className="font-bold text-slate-900 text-base">TIA Comparison <span className="text-slate-400 text-xs font-normal">— Time Impact Analysis</span></span>
           <span className="text-slate-400 text-sm ml-2">· {activeProject.name}</span>
@@ -284,7 +287,7 @@ export default function TIAPage() {
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center">
-          <Link href="/dashboard" className="mr-4 text-xs font-bold text-blue-600 hover:text-blue-800 whitespace-nowrap">← Overview</Link>
+          <Link href="/dashboard/controls" className="mr-4 text-xs font-bold text-blue-600 hover:text-blue-800 whitespace-nowrap">← Project Controls</Link>
           <div className="mr-4 h-6 border-l border-slate-200" />
           <span className="font-bold text-slate-900 text-base">TIA Comparison</span>
           <span className="text-slate-400 text-sm ml-2">· {activeProject.name}</span>
@@ -365,7 +368,7 @@ export default function TIAPage() {
             )}
 
             <div className="mt-6 p-4 bg-blue-50 border-l-4 border-blue-500 rounded-r-lg text-xs text-blue-900 leading-relaxed">
-              <strong>How ControlLens detects fragnets:</strong> It looks for activities and WBS sections in the impacted schedule containing keywords like "Frag", "Schedule Issue", "TIA", or "Delay Event". Make sure your fragnet WBS uses one of these naming conventions in P6.
+              <strong>Fragnet detection:</strong> The comparison checks activities and WBS sections in the impacted schedule for terms such as "Frag", "Schedule Issue", "TIA", or "Delay Event". Use a clear fragnet WBS and activity naming convention in P6.
             </div>
           </div>
         </div>
@@ -395,7 +398,7 @@ export default function TIAPage() {
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4">
-          <Link href="/dashboard" className="text-xs font-bold text-blue-600 hover:text-blue-800 whitespace-nowrap">← Overview</Link>
+          <Link href="/dashboard/controls" className="text-xs font-bold text-blue-600 hover:text-blue-800 whitespace-nowrap">← Project Controls</Link>
           <div className="h-6 border-l border-slate-200" />
           <span className="font-bold text-slate-900 text-base">Comparison Results</span>
           <div className="ml-auto flex gap-2">
@@ -445,7 +448,7 @@ export default function TIAPage() {
                 { id: 'added', label: 'Added' },
                 { id: 'removed', label: 'Removed' },
                 { id: 'fragnets', label: 'Fragnets' },
-                { id: 'cp', label: 'Critical Path' },
+                { id: 'cp', label: 'Path Comparison' },
               ].map(t => (
                 <button key={t.id} onClick={() => setActiveTab(t.id)}
                   className={`px-4 py-3 text-xs font-semibold whitespace-nowrap ${activeTab === t.id ? 'text-blue-600 border-b-2 border-blue-600 -mb-px' : 'text-slate-500 hover:text-slate-900'}`}>
@@ -567,7 +570,8 @@ export default function TIAPage() {
               )}
               {activeTab === 'cp' && (
                 <div>
-                  <h3 className="text-sm font-bold mb-3">Critical Path Comparison</h3>
+                  <h3 className="text-sm font-bold mb-1">Controlling Path Comparison</h3>
+                  <p className="mb-4 text-xs text-slate-500">Compare the path before the delay insertion with the impacted path after the fragnet was added.</p>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <div className="font-semibold text-xs mb-2 text-green-700">Un-Impacted CP ({comparison.criticalPath?.unimpactedPath?.length || 0})</div>
@@ -604,7 +608,7 @@ export default function TIAPage() {
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center">
-          <Link href="/dashboard" className="mr-4 text-xs font-bold text-blue-600 hover:text-blue-800 whitespace-nowrap">← Overview</Link>
+          <Link href="/dashboard/controls" className="mr-4 text-xs font-bold text-blue-600 hover:text-blue-800 whitespace-nowrap">← Project Controls</Link>
           <div className="mr-4 h-6 border-l border-slate-200" />
           <span className="font-bold text-slate-900 text-base">Categorize Fragnets</span>
           <span className="text-slate-400 text-sm ml-2">· Assign cause and description to each delay event</span>
