@@ -79,6 +79,100 @@ export interface XERComparison {
   criticalPath: CriticalPathComparison
   detectedFragnetWBS: string[]      // WBS names that look like fragnet/schedule issue
   fragnetActivities: FragnetActivity[]
+  fragnetSelectionConfirmed?: boolean
+}
+
+export interface TIAValidationIssue {
+  code: string
+  severity: 'error' | 'warning'
+  title: string
+  detail: string
+  count?: number
+}
+
+function comparableDate(value?: string): string {
+  return String(value || '').slice(0, 10)
+}
+
+// Formal TIA reports must be based on a controlled insertion into a copy of
+// the same statused schedule. This deliberately does not make entitlement or
+// responsibility conclusions; it only establishes whether the comparison is
+// technically suitable for a TIA report.
+export function validateTIAComparison(comparison: XERComparison): TIAValidationIssue[] {
+  const issues: TIAValidationIssue[] = []
+  if (!comparison.fragnetSelectionConfirmed) issues.push({ code: 'FRAGNET_CONFIRMATION_REQUIRED', severity: 'error', title: 'Confirm the fragnet activity selection', detail: 'Review the added activities and explicitly confirm which ones model the event. Keyword matches are suggestions only.' })
+  const dataDateA = comparableDate(comparison.projectA?.dataDate)
+  const dataDateB = comparableDate(comparison.projectB?.dataDate)
+
+  if (!dataDateA || !dataDateB) {
+    issues.push({
+      code: 'DATA_DATE_MISSING', severity: 'error',
+      title: 'Data date is missing',
+      detail: 'Both schedules must carry a verifiable data date before a formal TIA can be generated.',
+    })
+  } else if (dataDateA !== dataDateB) {
+    issues.push({
+      code: 'DATA_DATE_MISMATCH', severity: 'error',
+      title: 'Schedules have different data dates',
+      detail: `Un-impacted: ${dataDateA}; impacted: ${dataDateB}. A fragnet must be inserted into a copy of the same statused schedule.`,
+    })
+  }
+
+  const fragnetCount = comparison.fragnetActivities?.length || 0
+  if (fragnetCount === 0) {
+    issues.push({
+      code: 'NO_FRAGNET', severity: 'error',
+      title: 'No fragnet activities were verified',
+      detail: 'The impacted schedule contains no newly added activities that the current detection rules can verify as the delay fragnet.',
+    })
+  }
+
+  const removedCount = comparison.removed?.length || 0
+  if (removedCount > 0) {
+    issues.push({
+      code: 'ACTIVITIES_REMOVED', severity: 'error', count: removedCount,
+      title: `${removedCount} existing ${removedCount === 1 ? 'activity was' : 'activities were'} removed`,
+      detail: 'An impacted copy must preserve the un-impacted activity population. Restore or explain the removed activities before reporting.',
+    })
+  }
+
+  const durationChanges = (comparison.changed || []).filter(c => Math.abs(c.duration_delta_days || 0) > 0)
+  if (durationChanges.length > 0) {
+    issues.push({
+      code: 'EXISTING_DURATIONS_CHANGED', severity: 'error', count: durationChanges.length,
+      title: `${durationChanges.length} existing activity ${durationChanges.length === 1 ? 'duration changed' : 'durations changed'}`,
+      detail: 'Existing durations must remain unchanged in a controlled prospective insertion unless each change is separately justified.',
+    })
+  }
+
+  const progressChanges = (comparison.activities || []).filter(c => c.status !== 'added' && c.status !== 'removed' && (Math.abs(c.pct_delta || 0) > 0 || c.a_status !== c.b_status))
+  if (progressChanges.length > 0) {
+    issues.push({
+      code: 'PROGRESS_CHANGED', severity: 'error', count: progressChanges.length,
+      title: `${progressChanges.length} existing ${progressChanges.length === 1 ? 'activity has' : 'activities have'} changed progress`,
+      detail: 'The two schedules are not the same statused update. Progress changes cannot be attributed to the fragnet insertion.',
+    })
+  }
+
+  const logicChanges = (comparison.changed || []).filter(c => c.logic_changed).length
+  if (logicChanges > 0) {
+    issues.push({
+      code: 'LOGIC_CHANGED', severity: 'warning', count: logicChanges,
+      title: `${logicChanges} existing ${logicChanges === 1 ? 'activity has' : 'activities have'} changed predecessor logic`,
+      detail: 'Confirm that these changes are only the intentional fragnet tie-in and tie-out relationships.',
+    })
+  }
+
+  const addedCount = comparison.added?.length || 0
+  if (addedCount > fragnetCount) {
+    issues.push({
+      code: 'UNCLASSIFIED_ADDITIONS', severity: 'warning', count: addedCount - fragnetCount,
+      title: `${addedCount - fragnetCount} added ${addedCount - fragnetCount === 1 ? 'activity is' : 'activities are'} not classified as fragnet work`,
+      detail: 'Review and classify all added activities before relying on the calculated time impact.',
+    })
+  }
+
+  return issues
 }
 
 function getEffectiveStart(t: Task): string {
@@ -106,7 +200,7 @@ function hoursToDays(hrs: string | number): number {
   return isNaN(h) ? 0 : Math.round(h / 8)
 }
 
-export function compareXER(parsedA: ParsedXER, parsedB: ParsedXER): XERComparison {
+export function compareXER(parsedA: ParsedXER, parsedB: ParsedXER, confirmedFragnetCodes?: string[]): XERComparison {
   const activitiesMap: Map<string, ActivityComparison> = new Map()
 
   // Build comparison by task_code (more stable than task_id across exports)
@@ -119,6 +213,22 @@ export function compareXER(parsedA: ParsedXER, parsedB: ParsedXER): XERCompariso
   for (const t of Object.values(parsedB.tasks)) {
     if (t.task_code) bByCode[t.task_code] = t
   }
+  const confirmedCodes = confirmedFragnetCodes === undefined ? undefined : new Set(confirmedFragnetCodes)
+  if (confirmedCodes && [...confirmedCodes].some(code => !bByCode[code] || aByCode[code])) {
+    throw new Error('Confirmed fragnet activities must be newly added activity IDs in the impacted schedule.')
+  }
+  // Internal P6 IDs can change across exports. Compare business activity IDs,
+  // relationship types and lag rather than internal predecessor IDs.
+  const logicMap = (parsed: ParsedXER) => {
+    const map = new Map<string, string[]>()
+    for (const r of parsed.relationships) {
+      const entries = map.get(r.task_id) || []
+      entries.push(JSON.stringify([parsed.tasks[r.pred_task_id]?.task_code || r.pred_task_id, r.pred_type, Number(r.lag_hr_cnt || 0)]))
+      map.set(r.task_id, entries)
+    }
+    return map
+  }
+  const aLogic = logicMap(parsedA), bLogic = logicMap(parsedB)
 
   // Activities in both
   for (const code of Object.keys(bByCode)) {
@@ -143,11 +253,11 @@ export function compareXER(parsedA: ParsedXER, parsedB: ParsedXER): XERCompariso
       const pctDelta = bPct - aPct
 
       // Check logic change
-      const aPreds = (parsedA.predMap[tA.task_id] || []).sort().join(',')
-      const bPreds = (parsedB.predMap[tB.task_id] || []).sort().join(',')
+      const aPreds = (aLogic.get(tA.task_id) || []).sort().join(',')
+      const bPreds = (bLogic.get(tB.task_id) || []).sort().join(',')
       const logicChanged = aPreds !== bPreds
 
-      const status = (startDelta !== 0 || finishDelta !== 0 || floatDelta !== 0 || durDelta !== 0 || logicChanged) ? 'changed' : 'unchanged'
+      const status = (startDelta !== 0 || finishDelta !== 0 || floatDelta !== 0 || durDelta !== 0 || pctDelta !== 0 || tA.status_code !== tB.status_code || logicChanged) ? 'changed' : 'unchanged'
 
       activitiesMap.set(code, {
         task_id: tB.task_id, task_code: code, task_name: tB.task_name,
@@ -258,6 +368,11 @@ export function compareXER(parsedA: ParsedXER, parsedB: ParsedXER): XERCompariso
 
   const detectedFragnetTasks: Task[] = []
   for (const t of Object.values(parsedB.tasks)) {
+    if (codesInA.has(t.task_code)) continue
+    if (confirmedCodes) {
+      if (confirmedCodes.has(t.task_code)) detectedFragnetTasks.push(t)
+      continue
+    }
     const upper = ((t.task_name || '') + ' ' + (t.task_code || '')).toUpperCase()
     const matchesKeyword = fragnetKeywordRegexes.some(rgx => rgx.test(upper))
     if (!matchesKeyword) continue
@@ -323,5 +438,6 @@ export function compareXER(parsedA: ParsedXER, parsedB: ParsedXER): XERCompariso
     },
     detectedFragnetWBS,
     fragnetActivities,
+    fragnetSelectionConfirmed: confirmedCodes !== undefined && confirmedCodes.size > 0,
   }
 }

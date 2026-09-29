@@ -4,6 +4,7 @@ import {
   PageBreak, PageOrientation, LevelFormat,
 } from 'docx'
 import type { XERComparison, FragnetActivity } from './xerComparator'
+import { validateTIAComparison } from './xerComparator'
 
 const border = { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' }
 const headerBorder = { style: BorderStyle.SINGLE, size: 1, color: '999999' }
@@ -70,6 +71,8 @@ export interface TIAReportInput {
 
 export async function buildTIAReport(input: TIAReportInput): Promise<Buffer> {
   const { comparison, fragnetCategorizations = {} } = input
+  const validation = validateTIAComparison(comparison)
+  if (validation.some(issue => issue.severity === 'error')) throw new Error('TIA input validation failed. Resolve the blocking issues before generating a report.')
   const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 
   const tableWidth = 9360 // US Letter content width with 1" margins
@@ -85,7 +88,7 @@ export async function buildTIAReport(input: TIAReportInput): Promise<Buffer> {
     new Paragraph({
       alignment: AlignmentType.CENTER,
       spacing: { after: 800 },
-      children: [new TextRun({ text: 'Schedule Impact Report', size: 32, font: 'Arial', color: '666666' })]
+      children: [new TextRun({ text: 'Draft Schedule Comparison — Pending Technical Review', size: 32, font: 'Arial', color: '666666' })]
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
@@ -130,15 +133,16 @@ export async function buildTIAReport(input: TIAReportInput): Promise<Buffer> {
     new Paragraph({ numbering: { reference: 'bullets', level: 0 }, spacing: { after: 80 }, children: [new TextRun({ text: `Un-impacted projected completion: ${shortDate(comparison.projectA.end)}`, size: 22, font: 'Arial' })] }),
     new Paragraph({ numbering: { reference: 'bullets', level: 0 }, spacing: { after: 80 }, children: [new TextRun({ text: `Impacted projected completion: ${shortDate(comparison.projectB.end)}`, size: 22, font: 'Arial' })] }),
     p(''),
-    p('Time Extension Request', { bold: true, size: 24, after: 80 }),
-    p(`Based on the analysis presented in this report, the Contractor requests a time extension of ${comparison.totalDelayDays} calendar days to the contract completion date. The basis for this request is detailed in the Fragnet Analysis and Trend Analysis sections that follow.`),
+    p('Review status', { bold: true, size: 24, after: 80 }),
+    p(`The exported projected finish dates differ by ${comparison.totalDelayDays} calendar days. This difference alone does not establish delay causation, entitlement, or an extension of the contractual completion date.`),
+    ...validation.map(issue => p(`Review required: ${issue.title}. ${issue.detail}`, { color: '9A6700' })),
     new Paragraph({ children: [new PageBreak()] }),
   ]
 
   // ============ METHODOLOGY ============
   const methodChildren = [
     h1('2. Methodology'),
-    p('This Time Impact Analysis follows accepted industry methodology consistent with AACE International Recommended Practice 52R-06 and standard USACE / DGS / federal contracting TIA practices.'),
+    p('This draft compares two submitted XER exports and the event activities explicitly selected by the scheduler. It does not certify compliance with a contractual or industry delay-analysis method. The reviewer must confirm the applicable method, event timing, common status date, calendars, scheduling settings and controlling milestone.'),
     h2('2.1 Schedule Files Analyzed'),
     new Table({
       width: { size: tableWidth, type: WidthType.DXA },
@@ -152,8 +156,8 @@ export async function buildTIAReport(input: TIAReportInput): Promise<Buffer> {
     p('', { after: 240 }),
     h2('2.2 Analysis Approach'),
     p('1. The current schedule (un-impacted) was analyzed to establish the projected completion date prior to the insertion of the fragnet.'),
-    p('2. The fragnet WBS containing the delay event activities was inserted into the current schedule with appropriate logic ties to the affected activities on the critical or longest path.'),
-    p('3. Both schedules were calculated using Primavera P6 default scheduling logic. Finish dates reflect P6-calculated values; actual start dates were used where they exist, otherwise scheduled start dates were applied.'),
+    p('2. Newly added activities selected by the scheduler are treated as the event fragnet. Their insertion relationships require technical review.'),
+    p('3. Dates and path flags are read from the submitted exports. This comparison does not rerun the P6 scheduling engine or verify the settings used to calculate those exports.'),
     p('4. The impacted schedule was compared to the un-impacted schedule to identify activity movements, float deterioration, and critical path changes.'),
     p('5. The total time impact was calculated as the difference between the un-impacted and impacted projected completion dates.'),
     new Paragraph({ children: [new PageBreak()] }),
@@ -284,8 +288,9 @@ export async function buildTIAReport(input: TIAReportInput): Promise<Buffer> {
     fragnetSection.push(p(`The impacted schedule contains ${comparison.fragnetActivities.length} fragnet activities representing the delay events analyzed in this TIA. Each fragnet activity is detailed below with its categorization, description, and impact on successor activities.`))
 
     comparison.fragnetActivities.forEach((frag, idx) => {
-      const cat = fragnetCategorizations[frag.task_id] || { category: 'owner', description: '' }
+      const cat = fragnetCategorizations[frag.task_id] || { category: 'unassigned', description: '' }
       const catLabel = ({
+        unassigned: 'Not assessed',
         owner: 'Owner-Caused',
         force_majeure: 'Force Majeure',
         third_party: 'Third-Party',
@@ -351,15 +356,16 @@ export async function buildTIAReport(input: TIAReportInput): Promise<Buffer> {
 
   // ============ TIME EXTENSION REQUEST ============
   const requestChildren = [
-    h1('9. Time Extension Request'),
-    p('Based on the analysis presented in the preceding sections, the Contractor formally requests a time extension to the contract completion date as follows:'),
+    h1('9. Contractual Position and Review'),
+    p('The following values describe the submitted schedules. A time-extension request, concurrency assessment and responsibility determination require separate review and supporting records.'),
     new Table({
       width: { size: tableWidth, type: WidthType.DXA },
       columnWidths: [4680, 4680],
       rows: [
-        new TableRow({ children: [cell('Time Extension Requested', 4680, true, 'E7EEF7'), cell(`${comparison.totalDelayDays} calendar days`, 4680)] }),
+        new TableRow({ children: [cell('Exported Finish Movement', 4680, true, 'E7EEF7'), cell(`${comparison.totalDelayDays} calendar days`, 4680)] }),
         new TableRow({ children: [cell('Current Contract Completion', 4680, true, 'E7EEF7'), cell(shortDate(input.contractCompletionDate), 4680)] }),
-        new TableRow({ children: [cell('Requested New Contract Completion', 4680, true, 'E7EEF7'), cell(shortDate(comparison.projectB.end), 4680)] }),
+        new TableRow({ children: [cell('Impacted Forecast Completion', 4680, true, 'E7EEF7'), cell(shortDate(comparison.projectB.end), 4680)] }),
+        new TableRow({ children: [cell('Time Extension Requested / Approved', 4680, true, 'E7EEF7'), cell('Not established by this comparison', 4680)] }),
       ]
     }),
     p('', { after: 240 }),
@@ -370,10 +376,10 @@ export async function buildTIAReport(input: TIAReportInput): Promise<Buffer> {
 
   // ============ CONCLUSION & SIGNATURE ============
   const conclusionChildren = [
-    h1('10. Conclusion and Certification'),
-    p(`This Time Impact Analysis demonstrates that the delay events identified in the fragnet WBS have a cumulative impact of ${comparison.totalDelayDays} calendar days on the contract completion date for ${input.projectName}.`),
-    p('The analysis was prepared using accepted industry methodology and is based on the un-impacted and impacted current schedules as identified in Section 2.'),
-    p('The Contractor reserves the right to update this analysis as additional information becomes available or as delay events evolve.'),
+    h1('10. Review and Sign-off'),
+    p(`The submitted schedules for ${input.projectName} show a projected finish movement of ${comparison.totalDelayDays} calendar days. Attribution to the event remains subject to review of the insertion logic, controlling path, calculation settings and other changes.`),
+    p('This draft does not certify entitlement, compensability or an approved revised contract date.'),
+    p('The reviewer should document conclusions and supporting evidence before issuing a final analysis.'),
     p('', { after: 600 }),
     new Table({
       width: { size: tableWidth, type: WidthType.DXA },

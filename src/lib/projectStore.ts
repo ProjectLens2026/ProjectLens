@@ -243,6 +243,11 @@ export interface ScheduleVersion {
   analysisError?: string
   versionDates?: VersionDates           // NEW — per-version manual entries
 
+  // TIA lineage — a fragnet must identify the exact un-impacted version from
+  // which it was copied. Stored with the version so the pair cannot silently
+  // drift when newer project updates are uploaded later.
+  parentVersionId?: string
+
   // NEW (Day 6, v14) — structured version labeling.
   // scheduleType drives label format: BL-NTP-NN for baseline/rebaseline,
   // CU-NTP-NN for updates. sequenceNumber is the NN (0 for first baseline,

@@ -373,6 +373,7 @@ function rowToVersion(row: any): ScheduleVersion {
     aiNarrative: row.ai_narrative || undefined,
     context: context.projectContext || {},
     versionDates: context.versionDates || undefined,
+    parentVersionId: context.parentVersionId || undefined,
     analysis,
     analysisPath: row.analysis_path || undefined,
     analysisState: row.analysis_path ? 'summary' : 'unavailable',
@@ -667,6 +668,7 @@ async function insertVersionToSupabase(
   const contextBundle = {
     projectContext: version.context || null,
     versionDates: version.versionDates || null,
+    parentVersionId: version.parentVersionId || null,
   }
   const a = version.analysis || {}
 
@@ -1016,7 +1018,7 @@ export async function loadPendingInvitations(): Promise<Invitation[]> {
 
 /**
  * createInvitation — admin generates a fresh invitation. Returns the
- * acceptance URL (https://app.cpmreview.com/auth/accept-invite?token=...)
+ * acceptance URL (https://app.control-lens.com/auth/accept-invite?token=...)
  * which the admin pastes into an email/Slack/WhatsApp to the recipient.
  *
  * Default expiry: 7 days.
@@ -1060,7 +1062,7 @@ export async function createInvitation(opts: {
     return { ok: false, error: error.message }
   }
 
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.cpmreview.com'
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.control-lens.com'
   return {
     ok: true,
     token,
@@ -1693,7 +1695,7 @@ export async function createProjectInvitation(opts: {
     return { ok: false, error: error.message }
   }
 
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.cpmreview.com'
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.control-lens.com'
   return {
     ok: true,
     token,
@@ -1910,7 +1912,7 @@ export async function createCompanyAsPlatformOwner(opts: {
     return { ok: false, error: 'Unexpected response from server' }
   }
 
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.cpmreview.com'
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://app.control-lens.com'
   return {
     ok: true,
     orgId: result.org_id,
