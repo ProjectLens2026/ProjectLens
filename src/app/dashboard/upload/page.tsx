@@ -115,6 +115,7 @@ export default function UploadPage() {
 
   // v14 — schedule type + validation state
   const [scheduleType, setScheduleType] = useState<ScheduleType | null>(null)
+  const [fragnetParentVersionId, setFragnetParentVersionId] = useState<string>('')
   const [projectIdError, setProjectIdError] = useState<string>('')
 
   // Phase A.1 — Pro plan project limit info (loaded on mount)
@@ -188,6 +189,26 @@ export default function UploadPage() {
 
   // v14 — reset schedule type when switching between new/existing modes
   useEffect(() => { setScheduleType(null) }, [projectMode])
+
+  const fragnetParentVersions = useMemo(() => {
+    if (projectMode !== 'existing' || !selectedProjectId) return []
+    const project = existingProjects.find(p => p.id === selectedProjectId)
+    return (project?.versions || [])
+      .filter(v => !v.deletedAt && v.scheduleType !== 'fragnet' && v.analysis?.sourceFormat !== 'MS_PROJECT_XML')
+      .sort((a, b) => new Date(b.dataDate || b.uploadedAt).getTime() - new Date(a.dataDate || a.uploadedAt).getTime())
+  }, [projectMode, selectedProjectId, existingProjects])
+
+  useEffect(() => {
+    if (scheduleType !== 'fragnet') {
+      setFragnetParentVersionId('')
+      return
+    }
+    setFragnetParentVersionId(current =>
+      fragnetParentVersions.some(v => v.id === current)
+        ? current
+        : (fragnetParentVersions[0]?.id || '')
+    )
+  }, [scheduleType, fragnetParentVersions])
 
   function updateOriginal(val: string) {
     setCd(c => ({
@@ -336,6 +357,10 @@ export default function UploadPage() {
       setDateError('Please pick a Schedule Type (Baseline, Rebaseline, or Update) above')
       return
     }
+    if (scheduleType === 'fragnet' && !fragnetParentVersionId) {
+      setDateError('Select the exact un-impacted parent version used to create this fragnet')
+      return
+    }
     // v14 — Project ID required for new projects
     if (projectMode === 'new') {
       const trimmed = sanitizeProjectId(newProjectId)  // strict: trim + collapse hyphens
@@ -482,6 +507,7 @@ export default function UploadPage() {
             context: ctx,
             rawXER,
             versionDates,
+            parentVersionId: scheduleType === 'fragnet' ? fragnetParentVersionId : undefined,
             scheduleType,
             sequenceNumber: nextSeq,
             versionLabel,
@@ -925,6 +951,33 @@ export default function UploadPage() {
                     : projectMode === 'new'
                       ? 'Enter Project ID and NTP date below to see the version label →'
                       : 'Pick a project above to see the version label →'}
+                </div>
+              )}
+              {scheduleType === 'fragnet' && projectMode === 'existing' && (
+                <div className="mt-3 rounded-lg border border-red-200 bg-white p-3">
+                  <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-red-700">
+                    Un-impacted parent version <span className="text-red-600">*</span>
+                  </label>
+                  <p className="mb-2 text-[10px] leading-relaxed text-slate-600">
+                    Select the exact schedule copy used before the fragnet activities were inserted. TIA will only compare this linked pair.
+                  </p>
+                  <select
+                    value={fragnetParentVersionId}
+                    onChange={e => { setFragnetParentVersionId(e.target.value); setDateError('') }}
+                    className="w-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm focus:border-red-500 focus:outline-none"
+                  >
+                    <option value="">— Select the source version —</option>
+                    {fragnetParentVersions.map(v => (
+                      <option key={v.id} value={v.id}>
+                        {v.versionLabel || v.fileName} · data date {(v.dataDate || 'not recorded').slice(0, 10)}
+                      </option>
+                    ))}
+                  </select>
+                  {fragnetParentVersions.length === 0 && (
+                    <div className="mt-2 text-[10px] font-semibold text-red-700">
+                      Upload the un-impacted XER version before uploading its fragnet.
+                    </div>
+                  )}
                 </div>
               )}
             </div>

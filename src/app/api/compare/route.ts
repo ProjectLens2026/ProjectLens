@@ -16,7 +16,7 @@
 // =============================================================================
 import { NextRequest, NextResponse } from 'next/server'
 import { parseXER } from '@/lib/xerParser'
-import { compareXER } from '@/lib/xerComparator'
+import { compareXER, validateTIAComparison } from '@/lib/xerComparator'
 import { buildTIAReport } from '@/lib/tiaReportBuilder'
 
 export const runtime = 'nodejs'
@@ -109,9 +109,22 @@ export async function POST(req: NextRequest) {
     console.log('[api/compare] parsing impacted...')
     const parsedB = parseXER(textB)
     console.log('[api/compare] running comparison...')
-    const comparison = compareXER(parsedA, parsedB)
+    const selection = formData.get('confirmedFragnetCodes')
+    const codes: unknown = typeof selection === 'string' ? JSON.parse(selection) : undefined
+    if (codes !== undefined && (!Array.isArray(codes) || !codes.every(code => typeof code === 'string'))) {
+      return NextResponse.json({ error: 'Fragnet selection must be an array of activity IDs.' }, { status: 400 })
+    }
+    const comparison = compareXER(parsedA, parsedB, codes as string[] | undefined)
+    const validation = validateTIAComparison(comparison)
 
     if (mode === 'tia') {
+      const blockingIssues = validation.filter(issue => issue.severity === 'error')
+      if (blockingIssues.length > 0) {
+        return NextResponse.json({
+          error: 'Formal TIA report blocked because the schedule pair failed validation.',
+          validation,
+        }, { status: 422 })
+      }
       // Generate Word document
       const ctx = contextStr ? JSON.parse(contextStr) : {}
       const fragnetCategorizations = fragnetCategorizationsStr ? JSON.parse(fragnetCategorizationsStr) : {}
@@ -135,7 +148,7 @@ export async function POST(req: NextRequest) {
     }
 
     console.log('[api/compare] returning comparison JSON')
-    return NextResponse.json({ success: true, comparison })
+    return NextResponse.json({ success: true, comparison, validation })
   } catch (error: any) {
     console.error('[api/compare] error:', error)
     return NextResponse.json({ error: error.message || 'Comparison failed' }, { status: 500 })

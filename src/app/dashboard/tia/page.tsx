@@ -19,6 +19,7 @@ import {
 } from '@/lib/projectStore'
 import { getSavedVersionXerSignedUrl } from '@/lib/supabase/db'
 import { usePermissions } from '@/lib/usePermissions'
+import type { TIAValidationIssue } from '@/lib/xerComparator'
 
 type Step = 'pick' | 'analyzing' | 'review' | 'categorize' | 'generating'
 
@@ -34,6 +35,9 @@ export default function TIAPage() {
   const [unimpactedId, setUnimpactedId] = useState<string>('')
   const [fragnetId, setFragnetId] = useState<string>('')
   const [comparison, setComparison] = useState<any>(null)
+  const [validation, setValidation] = useState<TIAValidationIssue[]>([])
+  const [selectedFragnetCodes, setSelectedFragnetCodes] = useState<string[]>([])
+  const [confirmedFragnetCodes, setConfirmedFragnetCodes] = useState<string[] | null>(null)
   const [activeTab, setActiveTab] = useState('summary')
   const [progress, setProgress] = useState(0)
   const [progressLabel, setProgressLabel] = useState('Starting...')
@@ -54,19 +58,24 @@ export default function TIAPage() {
       const nonFragVersions = p.versions
         .filter(v => !v.deletedAt && v.scheduleType !== 'fragnet' && v.analysis?.sourceFormat !== 'MS_PROJECT_XML')
         .sort((a, b) => new Date(b.dataDate || b.uploadedAt).getTime() - new Date(a.dataDate || a.uploadedAt).getTime())
-      if (nonFragVersions[0]) setUnimpactedId(nonFragVersions[0].id)
-
       // Default fragnet = latest FRAG version
       const fragVersions = p.versions
         .filter(v => !v.deletedAt && v.scheduleType === 'fragnet' && v.analysis?.sourceFormat !== 'MS_PROJECT_XML')
         .sort((a, b) => new Date(b.dataDate || b.uploadedAt).getTime() - new Date(a.dataDate || a.uploadedAt).getTime())
-      if (fragVersions[0]) setFragnetId(fragVersions[0].id)
+      if (fragVersions[0]) {
+        setFragnetId(fragVersions[0].id)
+        const linkedParent = nonFragVersions.find(v => v.id === fragVersions[0].parentVersionId)
+        setUnimpactedId(linkedParent?.id || nonFragVersions[0]?.id || '')
+      } else if (nonFragVersions[0]) {
+        setUnimpactedId(nonFragVersions[0].id)
+      }
 
       setCtx(prev => ({ ...prev, projectName: p.name, projectNumber: p.projectId || '' }))
     }
   }, [])
 
   const categories = [
+    { value: 'unassigned', label: 'Not assessed' },
     { value: 'owner', label: 'Owner-Caused' },
     { value: 'force_majeure', label: 'Force Majeure (weather, pandemic)' },
     { value: 'third_party', label: 'Third-Party (utility, AHJ, permit)' },
@@ -78,6 +87,49 @@ export default function TIAPage() {
   function shortDate(d?: string) {
     if (!d) return '—'
     return d.slice(0, 10)
+  }
+
+  function pairValidationIssues(): TIAValidationIssue[] {
+    if (!activeProject || !unimpactedId || !fragnetId) return []
+    const unimpacted = activeProject.versions.find(v => v.id === unimpactedId)
+    const fragnet = activeProject.versions.find(v => v.id === fragnetId)
+    if (!unimpacted || !fragnet) return []
+    const issues: TIAValidationIssue[] = []
+    if (fragnet.parentVersionId && fragnet.parentVersionId !== unimpacted.id) {
+      const linked = activeProject.versions.find(v => v.id === fragnet.parentVersionId)
+      issues.push({
+        code: 'PARENT_VERSION_MISMATCH', severity: 'error',
+        title: 'Wrong un-impacted parent selected',
+        detail: `This fragnet was created from ${linked?.versionLabel || linked?.fileName || 'another version'}. Select that linked version.`,
+      })
+    } else if (!fragnet.parentVersionId) {
+      issues.push({
+        code: 'PARENT_VERSION_NOT_RECORDED', severity: 'warning',
+        title: 'Legacy fragnet has no recorded parent',
+        detail: 'Confirm that the selected un-impacted XER is the exact file copied before the fragnet was inserted.',
+      })
+    }
+    const aDate = String(unimpacted.dataDate || '').slice(0, 10)
+    const bDate = String(fragnet.dataDate || '').slice(0, 10)
+    if (!aDate || !bDate) {
+      issues.push({
+        code: 'DATA_DATE_MISSING', severity: 'error', title: 'Data date is missing',
+        detail: 'Both versions require a verifiable data date before TIA comparison.',
+      })
+    } else if (aDate !== bDate) {
+      issues.push({
+        code: 'DATA_DATE_MISMATCH', severity: 'error', title: 'The versions have different data dates',
+        detail: `Un-impacted: ${aDate}; impacted: ${bDate}. Select the same statused schedule copy.`,
+      })
+    }
+    return issues
+  }
+
+  function selectFragnet(versionId: string) {
+    setFragnetId(versionId)
+    setValidation([])
+    const selected = activeProject?.versions.find(v => v.id === versionId)
+    if (selected?.parentVersionId) setUnimpactedId(selected.parentVersionId)
   }
 
   // Cache resolved signed URLs so report-gen can reuse without re-fetching
@@ -101,7 +153,12 @@ export default function TIAPage() {
     return { ok: true, aUrl: aResult.signedUrl, bUrl: bResult.signedUrl }
   }
 
-  async function runComparison() {
+  async function runComparison(confirmedCodes?: string[]) {
+    const blockingPairIssues = pairValidationIssues().filter(issue => issue.severity === 'error')
+    if (blockingPairIssues.length > 0) {
+      alert(blockingPairIssues.map(issue => issue.title).join('\n'))
+      return
+    }
     setStep('analyzing')
     setProgress(5)
     setProgressLabel('Preparing files...')
@@ -121,6 +178,7 @@ export default function TIAPage() {
       fd.append('fileAUrl', urls.aUrl)
       fd.append('fileBUrl', urls.bUrl)
       fd.append('mode', 'compare')
+      if (confirmedCodes) fd.append('confirmedFragnetCodes', JSON.stringify(confirmedCodes))
 
       const res = await fetch('/api/compare', { method: 'POST', body: fd })
       if (!res.ok) {
@@ -136,13 +194,16 @@ export default function TIAPage() {
       setProgressLabel('Loading results...')
       const data = await res.json()
       setComparison(data.comparison)
+      setValidation(data.validation || [])
+      setConfirmedFragnetCodes(confirmedCodes || null)
+      setSelectedFragnetCodes((data.comparison.fragnetActivities || []).map((f: any) => f.task_code))
       // The controlling-path change is the primary TIA result. Open it first;
       // the activity and milestone detail remains available in the other tabs.
       setActiveTab('cp')
 
       const initialCats: Record<string, FragnetCategorization> = {}
       for (const frag of data.comparison.fragnetActivities || []) {
-        initialCats[frag.task_id] = { category: 'owner', description: '' }
+        initialCats[frag.task_id] = categorizations[frag.task_id] || { category: 'unassigned', description: '' }
       }
       setCategorizations(initialCats)
       setProgress(100)
@@ -156,6 +217,12 @@ export default function TIAPage() {
 
   async function generateReport() {
     if (!comparison) return
+    if (!confirmedFragnetCodes?.length) return
+    const blockingIssues = validation.filter(issue => issue.severity === 'error')
+    if (blockingIssues.length > 0) {
+      alert('Formal TIA report is blocked:\n\n' + blockingIssues.map(issue => `• ${issue.title}`).join('\n'))
+      return
+    }
     setStep('generating')
 
     try {
@@ -171,6 +238,7 @@ export default function TIAPage() {
       fd.append('fileAUrl', aUrl)
       fd.append('fileBUrl', bUrl)
       fd.append('mode', 'tia')
+      fd.append('confirmedFragnetCodes', JSON.stringify(confirmedFragnetCodes))
       fd.append('context', JSON.stringify(ctx))
       fd.append('fragnetCategorizations', JSON.stringify(categorizations))
 
@@ -283,7 +351,9 @@ export default function TIAPage() {
   }
 
   if (step === 'pick') {
+    const pairIssues = pairValidationIssues()
     const canRun = !!(unimpactedId && fragnetId && unimpactedId !== fragnetId)
+      && !pairIssues.some(issue => issue.severity === 'error')
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center">
@@ -307,7 +377,7 @@ export default function TIAPage() {
               </div>
               <select
                 value={unimpactedId}
-                onChange={e => setUnimpactedId(e.target.value)}
+                onChange={e => { setUnimpactedId(e.target.value); setValidation([]) }}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-blue-500">
                 <option value="">— Pick a version —</option>
                 {unimpactedVersions.map(v => (
@@ -329,7 +399,7 @@ export default function TIAPage() {
               </div>
               <select
                 value={fragnetId}
-                onChange={e => setFragnetId(e.target.value)}
+                onChange={e => selectFragnet(e.target.value)}
                 className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm focus:outline-none focus:border-amber-500 bg-amber-50">
                 <option value="">— Pick a fragnet —</option>
                 {fragnetVersions.map(v => (
@@ -339,6 +409,19 @@ export default function TIAPage() {
                 ))}
               </select>
             </div>
+
+            {pairIssues.length > 0 && (
+              <div className="mb-4 space-y-2">
+                {pairIssues.map(issue => (
+                  <div key={issue.code} className={`rounded-lg border px-4 py-3 ${issue.severity === 'error' ? 'border-red-300 bg-red-50' : 'border-amber-300 bg-amber-50'}`}>
+                    <div className={`text-xs font-extrabold ${issue.severity === 'error' ? 'text-red-800' : 'text-amber-800'}`}>
+                      {issue.severity === 'error' ? 'BLOCKED' : 'CONFIRM'} — {issue.title}
+                    </div>
+                    <div className="mt-1 text-xs leading-relaxed text-slate-700">{issue.detail}</div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Project info for the report */}
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
@@ -357,7 +440,7 @@ export default function TIAPage() {
 
             <button
               disabled={!canRun}
-              onClick={runComparison}
+              onClick={() => runComparison()}
               className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold disabled:bg-slate-200 disabled:text-slate-400 hover:bg-blue-700 transition-colors">
               🔍 Compare Schedules →
             </button>
@@ -368,7 +451,7 @@ export default function TIAPage() {
             )}
 
             <div className="mt-6 p-4 bg-blue-50 border-l-4 border-blue-500 rounded-r-lg text-xs text-blue-900 leading-relaxed">
-              <strong>Fragnet detection:</strong> The comparison checks activities and WBS sections in the impacted schedule for terms such as "Frag", "Schedule Issue", "TIA", or "Delay Event". Use a clear fragnet WBS and activity naming convention in P6.
+              <strong>Controlled TIA pair:</strong> Both XERs must share the same data date. The impacted file must be a copy of the selected parent with only the delay fragnet and its tie-in/tie-out logic added.
             </div>
           </div>
         </div>
@@ -402,17 +485,58 @@ export default function TIAPage() {
           <div className="h-6 border-l border-slate-200" />
           <span className="font-bold text-slate-900 text-base">Comparison Results</span>
           <div className="ml-auto flex gap-2">
-            <button onClick={() => { setStep('pick'); setComparison(null); signedUrlsRef.current = {} }}
+            <button onClick={() => { setStep('pick'); setComparison(null); setValidation([]); setConfirmedFragnetCodes(null); setSelectedFragnetCodes([]); signedUrlsRef.current = {} }}
               className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400">
               ← Pick different versions
             </button>
-            <button onClick={() => setStep('categorize')}
-              className="text-xs bg-blue-600 text-white px-4 py-1.5 rounded-lg font-bold hover:bg-blue-700">
-              Generate TIA Report →
+            <button
+              disabled={validation.some(issue => issue.severity === 'error')}
+              onClick={() => setStep('categorize')}
+              className="text-xs bg-blue-600 text-white px-4 py-1.5 rounded-lg font-bold hover:bg-blue-700 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed">
+              {validation.some(issue => issue.severity === 'error') ? 'Report Blocked' : 'Generate TIA Report →'}
             </button>
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
+          <div className="rounded-xl border border-blue-200 bg-white p-4">
+            <h3 className="text-sm font-bold">Confirm event activities</h3>
+            <p className="mt-1 text-xs text-slate-600">Select the added activities that belong to this delay event, including event milestones. Suggested matches must be checked by the scheduler.</p>
+            <div className="my-3 max-h-64 overflow-y-auto divide-y divide-slate-100">
+              {(comparison.added || []).map((activity: any) => (
+                <label key={activity.task_code} className="flex items-center gap-3 py-2 text-xs">
+                  <input type="checkbox" checked={selectedFragnetCodes.includes(activity.task_code)} onChange={e => {
+                    setSelectedFragnetCodes(current => e.target.checked ? [...current, activity.task_code] : current.filter(code => code !== activity.task_code))
+                    setConfirmedFragnetCodes(null)
+                    setValidation(current => [...current.filter(issue => issue.code !== 'FRAGNET_CONFIRMATION_REQUIRED'), { code: 'FRAGNET_CONFIRMATION_REQUIRED', severity: 'error', title: 'Confirm the revised selection', detail: 'Revalidate this selection before generating the report.' }])
+                  }} />
+                  <span><strong>{activity.task_code}</strong> — {activity.task_name}</span>
+                </label>
+              ))}
+            </div>
+            <button disabled={!selectedFragnetCodes.length} onClick={() => runComparison(selectedFragnetCodes)} className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white disabled:bg-slate-300">Confirm {selectedFragnetCodes.length} activities and revalidate</button>
+          </div>
+          <div className={`rounded-xl border p-4 ${validation.some(issue => issue.severity === 'error') ? 'border-red-300 bg-red-50' : validation.length > 0 ? 'border-amber-300 bg-amber-50' : 'border-emerald-300 bg-emerald-50'}`}>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className={`text-sm font-extrabold ${validation.some(issue => issue.severity === 'error') ? 'text-red-900' : validation.length > 0 ? 'text-amber-900' : 'text-emerald-900'}`}>
+                  {validation.some(issue => issue.severity === 'error') ? 'TIA VALIDATION FAILED — FORMAL REPORT BLOCKED' : validation.length > 0 ? 'TIA REQUIRES REVIEW' : 'TIA PAIR VALIDATED'}
+                </div>
+                <div className="mt-1 text-xs text-slate-700">
+                  {validation.length === 0 ? 'Initial checks passed. Confirm calendars, scheduling settings, event logic and the controlling milestone before relying on the result.' : `${validation.filter(i => i.severity === 'error').length} blocking issue(s) · ${validation.filter(i => i.severity === 'warning').length} warning(s)`}
+                </div>
+              </div>
+              <div className="text-2xl">{validation.some(issue => issue.severity === 'error') ? '⛔' : validation.length > 0 ? '⚠️' : '✓'}</div>
+            </div>
+            {validation.length > 0 && (
+              <div className="mt-3 space-y-2 border-t border-current/10 pt-3">
+                {validation.map(issue => (
+                  <div key={issue.code} className="text-xs text-slate-800">
+                    <span className={`font-extrabold ${issue.severity === 'error' ? 'text-red-800' : 'text-amber-800'}`}>{issue.severity === 'error' ? 'BLOCKER' : 'REVIEW'} — {issue.title}.</span>{' '}{issue.detail}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <div className={`rounded-xl border p-4 flex items-center gap-4 ${comparison.totalDelayDays > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
             <div className="text-3xl">{comparison.totalDelayDays > 0 ? '🔴' : '🟢'}</div>
             <div className="flex-1">
@@ -635,10 +759,7 @@ export default function TIAPage() {
               <div className="bg-white border border-slate-200 rounded-xl p-8 text-center">
                 <div className="text-3xl mb-2">⚠️</div>
                 <div className="font-bold text-slate-700 mb-1">No fragnets detected</div>
-                <div className="text-sm text-slate-500">The Word report will still generate, but the Fragnet Analysis and Trend Analysis sections will be empty.</div>
-                <button onClick={generateReport} className="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700">
-                  Generate Report Anyway →
-                </button>
+                <div className="text-sm text-slate-500">Return to the comparison and confirm the added event activities before generating a draft.</div>
               </div>
             ) : (
               <div className="space-y-3">
@@ -657,7 +778,7 @@ export default function TIAPage() {
                       <div>
                         <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Responsibility</label>
                         <select className="w-full mt-1 px-2 py-1.5 border border-slate-200 rounded-lg text-xs bg-white"
-                          value={categorizations[frag.task_id]?.category || 'owner'}
+                          value={categorizations[frag.task_id]?.category || 'unassigned'}
                           onChange={e => setCategorizations({...categorizations, [frag.task_id]: { ...categorizations[frag.task_id], category: e.target.value, description: categorizations[frag.task_id]?.description || '' }})}>
                           {categories.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                         </select>
@@ -667,7 +788,7 @@ export default function TIAPage() {
                         <input className="w-full mt-1 px-2 py-1.5 border border-slate-200 rounded-lg text-xs"
                           placeholder="e.g. RFI #045 approval delayed by 30 days affecting MEP submittal sequence..."
                           value={categorizations[frag.task_id]?.description || ''}
-                          onChange={e => setCategorizations({...categorizations, [frag.task_id]: { ...categorizations[frag.task_id], category: categorizations[frag.task_id]?.category || 'owner', description: e.target.value }})} />
+                          onChange={e => setCategorizations({...categorizations, [frag.task_id]: { ...categorizations[frag.task_id], category: categorizations[frag.task_id]?.category || 'unassigned', description: e.target.value }})} />
                       </div>
                     </div>
                   </div>
