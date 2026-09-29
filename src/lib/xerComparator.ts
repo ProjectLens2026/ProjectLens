@@ -214,7 +214,7 @@ export function compareXER(parsedA: ParsedXER, parsedB: ParsedXER, confirmedFrag
     if (t.task_code) bByCode[t.task_code] = t
   }
   const confirmedCodes = confirmedFragnetCodes === undefined ? undefined : new Set(confirmedFragnetCodes)
-  if (confirmedCodes && [...confirmedCodes].some(code => !bByCode[code] || aByCode[code])) {
+  if (confirmedCodes && Array.from(confirmedCodes).some(code => !bByCode[code] || aByCode[code])) {
     throw new Error('Confirmed fragnet activities must be newly added activity IDs in the impacted schedule.')
   }
   // Internal P6 IDs can change across exports. Compare business activity IDs,
