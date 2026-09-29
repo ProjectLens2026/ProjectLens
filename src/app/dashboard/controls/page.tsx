@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import {
   Project,
-  ScheduleVersion,
   getActiveProject,
   getVisibleVersions,
   subscribeToProjects,
@@ -21,6 +20,13 @@ interface ControlArea {
 }
 
 const CONTROL_AREAS: ControlArea[] = [
+  {
+    href: '/dashboard/tia',
+    icon: '◷',
+    title: 'Time Impact Analysis',
+    description: 'Select the unimpacted update and impacted fragnet, validate the pair, and review schedule movement.',
+    advanced: true,
+  },
   {
     href: '/dashboard/risks',
     icon: '⚠',
@@ -95,23 +101,6 @@ export default function ProjectControlsPage() {
 
   const visibleVersions = getVisibleVersions(project)
   const versionCount = visibleVersions.length
-  const xerVersions = visibleVersions.filter(version => version.analysis?.sourceFormat !== 'MS_PROJECT_XML')
-  const byMostRecent = (a: ScheduleVersion, b: ScheduleVersion) =>
-    new Date(b.dataDate || b.uploadedAt).getTime() - new Date(a.dataDate || a.uploadedAt).getTime()
-  const latestUnimpacted = [...xerVersions]
-    .filter(version => version.scheduleType !== 'fragnet')
-    .sort(byMostRecent)[0]
-  const latestFragnet = [...xerVersions]
-    .filter(version => version.scheduleType === 'fragnet')
-    .sort(byMostRecent)[0]
-  const tiaReady = Boolean(latestUnimpacted && latestFragnet)
-  const versionName = (version: ScheduleVersion | undefined) =>
-    version ? (version.versionLabel || version.fileName) : 'Not uploaded'
-  const versionDate = (version: ScheduleVersion | undefined) => {
-    if (!version?.dataDate) return 'Data date unavailable'
-    const date = new Date(version.dataDate)
-    return Number.isNaN(date.getTime()) ? version.dataDate : date.toLocaleDateString('en-US')
-  }
 
   return (
     <div className="flex h-full flex-col">
@@ -142,69 +131,6 @@ export default function ProjectControlsPage() {
               <Link href="/dashboard/project-setup" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">
                 Project Setup
               </Link>
-            </div>
-          </section>
-
-          <section className="mb-5 overflow-hidden rounded-2xl border border-blue-200 bg-white shadow-sm">
-            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-blue-100 bg-blue-50 px-5 py-4">
-              <div>
-                <div className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-blue-700">Primary project control</div>
-                <h2 className="mt-1 text-lg font-extrabold text-slate-950">Time Impact Analysis</h2>
-                <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-600">
-                  Establish the schedule immediately before the delay, compare it with the impacted fragnet schedule, and trace the change in the controlling path.
-                </p>
-              </div>
-              <span className={`rounded-full border px-3 py-1 text-[10px] font-extrabold uppercase tracking-wide ${tiaReady ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
-                {tiaReady ? 'Ready to compare' : 'Schedule evidence required'}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 divide-y divide-slate-100 md:grid-cols-3 md:divide-x md:divide-y-0">
-              <div className="p-5">
-                <div className="flex items-center gap-2">
-                  <span className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-extrabold ${latestUnimpacted ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-900 text-white'}`}>1</span>
-                  <h3 className="text-sm font-extrabold text-slate-900">Unimpacted update</h3>
-                </div>
-                <p className="mt-2 text-xs leading-5 text-slate-500">Use the most recent unimpacted update immediately before the delay event was inserted.</p>
-                <div className={`mt-3 rounded-lg border p-3 ${latestUnimpacted ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
-                  <div className="truncate text-xs font-bold text-slate-900">{versionName(latestUnimpacted)}</div>
-                  <div className="mt-1 text-[10px] text-slate-500">{versionDate(latestUnimpacted)}</div>
-                </div>
-                {!latestUnimpacted && (
-                  <Link href="/dashboard/upload" className="mt-3 inline-flex text-xs font-bold text-blue-600 hover:text-blue-800">Upload current update →</Link>
-                )}
-              </div>
-
-              <div className="p-5">
-                <div className="flex items-center gap-2">
-                  <span className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-extrabold ${latestFragnet ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-900 text-white'}`}>2</span>
-                  <h3 className="text-sm font-extrabold text-slate-900">Impacted fragnet schedule</h3>
-                </div>
-                <p className="mt-2 text-xs leading-5 text-slate-500">Upload the same update with the fragnet inserted and logically tied to the affected work.</p>
-                <div className={`mt-3 rounded-lg border p-3 ${latestFragnet ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
-                  <div className="truncate text-xs font-bold text-slate-900">{versionName(latestFragnet)}</div>
-                  <div className="mt-1 text-[10px] text-slate-500">{versionDate(latestFragnet)}</div>
-                </div>
-                {!latestFragnet && (
-                  <Link href="/dashboard/upload" className="mt-3 inline-flex text-xs font-bold text-blue-600 hover:text-blue-800">Upload fragnet schedule →</Link>
-                )}
-              </div>
-
-              <div className="p-5">
-                <div className="flex items-center gap-2">
-                  <span className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-extrabold ${tiaReady ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-500'}`}>3</span>
-                  <h3 className="text-sm font-extrabold text-slate-900">Compare controlling paths</h3>
-                </div>
-                <p className="mt-2 text-xs leading-5 text-slate-500">Measure completion impact and compare the unimpacted and impacted critical paths side by side.</p>
-                <Link
-                  href="/dashboard/tia"
-                  aria-disabled={!tiaReady}
-                  className={`mt-5 inline-flex w-full items-center justify-center rounded-lg px-4 py-2.5 text-xs font-extrabold ${tiaReady ? 'bg-blue-600 text-white hover:bg-blue-700' : 'pointer-events-none bg-slate-100 text-slate-400'}`}
-                >
-                  {tiaReady ? 'Run TIA Comparison →' : 'Complete steps 1 and 2'}
-                </Link>
-                <div className="mt-2 text-center text-[10px] text-slate-400">Results include path divergence, milestone movement, fragnet effects and a formal Word report.</div>
-              </div>
             </div>
           </section>
 
