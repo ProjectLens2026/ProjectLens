@@ -71,6 +71,15 @@ export default function TIAPage() {
       }
 
       setCtx(prev => ({ ...prev, projectName: p.name, projectNumber: p.projectId || '' }))
+      // Honor the pair selected in Project Controls instead of silently
+      // returning to the newest versions. Validate IDs against this project.
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('project') === p.id) {
+        const requestedA = nonFragVersions.find(v => v.id === params.get('unimpacted'))
+        const requestedB = fragVersions.find(v => v.id === params.get('fragnet'))
+        setUnimpactedId(requestedA?.id || '')
+        setFragnetId(requestedB?.id || '')
+      }
     }
   }, [])
 
@@ -478,6 +487,39 @@ export default function TIAPage() {
   }
 
   if (step === 'review' && comparison) {
+    const identical = comparison.identicalInputs === true
+    const noChanges = !(comparison.changed?.length || comparison.added?.length || comparison.removed?.length || comparison.milestoneMovements?.length) && comparison.totalDelayDays === 0
+    if (identical || noChanges) {
+      const a = activeProject.versions.find(v => v.id === unimpactedId)
+      const b = activeProject.versions.find(v => v.id === fragnetId)
+      return (
+        <div className="flex h-full flex-col bg-slate-50">
+          <header className="flex items-center gap-4 border-b border-slate-200 bg-white px-6 py-4">
+            <Link href="/dashboard/controls" className="text-xs font-bold text-blue-600">← Project Controls</Link>
+            <h1 className="font-bold text-slate-900">Check schedule selection</h1>
+          </header>
+          <main className="mx-auto w-full max-w-3xl p-6">
+            <section className="rounded-xl border border-amber-300 bg-white p-6">
+              <div className="text-xs font-extrabold uppercase text-amber-800">Comparison unavailable</div>
+              <h2 className="mt-2 text-xl font-bold text-slate-900">{identical ? 'Same schedule compared' : 'No changes detected in the compared schedule fields'}</h2>
+              <p className="mt-3 text-sm leading-6 text-slate-600">{identical ? 'The two XER files contain identical text, even if their filenames or version labels differ.' : 'No added, removed or changed activities, milestone movement, or projected finish movement was detected by this comparison.'} Select the impacted copy containing the delay fragnet. This result does not establish that the event has no time impact.</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                {[{ label: 'Selected reference', version: a }, { label: 'Selected event model', version: b }].map(item => (
+                  <div key={item.label} className="rounded-lg border border-slate-200 p-3 text-xs">
+                    <div className="font-bold text-slate-500">{item.label}</div>
+                    <div className="mt-1 font-bold">{item.version?.versionLabel || 'Selected version'}</div>
+                    <div className="mt-1 break-all">{item.version?.fileName}</div>
+                    <div className="mt-1 text-slate-500">Data date: {shortDate(item.version?.dataDate)}</div>
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => { setStep('pick'); setComparison(null); setValidation([]); setConfirmedFragnetCodes(null); setSelectedFragnetCodes([]); signedUrlsRef.current = {} }} className="mt-5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white">Choose different versions</button>
+              <Link href="/dashboard/upload" className="ml-4 text-sm font-bold text-blue-600">Upload corrected fragnet →</Link>
+            </section>
+          </main>
+        </div>
+      )
+    }
     return (
       <div className="flex flex-col h-full">
         <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4">

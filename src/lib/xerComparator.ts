@@ -68,6 +68,7 @@ export interface AffectedActivity {
 }
 
 export interface XERComparison {
+  identicalInputs?: boolean
   projectA: { name: string; end: string; dataDate: string }
   projectB: { name: string; end: string; dataDate: string }
   totalDelayDays: number
@@ -99,6 +100,8 @@ function comparableDate(value?: string): string {
 // responsibility conclusions; it only establishes whether the comparison is
 // technically suitable for a TIA report.
 export function validateTIAComparison(comparison: XERComparison): TIAValidationIssue[] {
+  if (comparison.identicalInputs) return [{ code: 'IDENTICAL_INPUTS', severity: 'error', title: 'Same schedule compared', detail: 'The two uploaded XER contents are identical. Select a different impacted version containing the event fragnet.' }]
+  if (!comparison.added.length && !comparison.removed.length && !comparison.changed.length && !comparison.milestoneMovements.length && comparison.totalDelayDays === 0) return [{ code: 'NO_COMPARISON_CHANGES', severity: 'error', title: 'No changes detected in the compared schedule fields', detail: 'No event insertion or finish movement was detected. Check both source files and select the impacted copy containing the fragnet. This does not establish that the event has no time impact.' }]
   const issues: TIAValidationIssue[] = []
   if (!comparison.fragnetSelectionConfirmed) issues.push({ code: 'FRAGNET_CONFIRMATION_REQUIRED', severity: 'error', title: 'Confirm the fragnet activity selection', detail: 'Review the added activities and explicitly confirm which ones model the event. Keyword matches are suggestions only.' })
   const dataDateA = comparableDate(comparison.projectA?.dataDate)

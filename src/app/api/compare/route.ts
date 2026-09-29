@@ -115,6 +115,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Fragnet selection must be an array of activity IDs.' }, { status: 400 })
     }
     const comparison = compareXER(parsedA, parsedB, codes as string[] | undefined)
+    comparison.identicalInputs = textA === textB
     const validation = validateTIAComparison(comparison)
 
     if (mode === 'tia') {
