@@ -244,7 +244,7 @@ export function analyzeCLPathIntelligence(analysis: any): CLPathIntelligenceResu
       const p=byId.get(String(r.pred_task_id||'')); if (!p) continue
       const ps=scopeOf(p)
       if (ps!=='Project Wide' && ps!=='Site / Civil' && ps!==s) add('HIGH','Cross-scope predecessor drives an area completion milestone',
-        `${codeOf(t)} — ${nameOf(t)} is driven by ${codeOf(p)} — ${nameOf(p)}, which the review classifies under ${ps}, not ${s}. Verify whether the predecessor is mislinked or the milestone is mislabeled.`,[codeOf(p),codeOf(t)])
+        `${codeOf(t)} — ${nameOf(t)} is driven by ${codeOf(p)} — ${nameOf(p)}, which Control Lens classifies under ${ps}, not ${s}. Verify whether the predecessor is mislinked or the milestone is mislabeled.`,[codeOf(p),codeOf(t)])
     }
   }
 
@@ -268,7 +268,7 @@ export function analyzeCLPathIntelligence(analysis: any): CLPathIntelligenceResu
     const downstream=Array.from(reach).map(id=>byId.get(id)).filter(Boolean)
     if (!downstream.some(t=>['STARTUP','TESTING','COMMISSIONING','IST'].includes(semantic(t)) || /energiz|acceptance/.test(textOf(t)))) {
       add('HIGH','Electrical distribution chain does not demonstrate energization / testing readiness',
-        `${codeOf(d)} — ${nameOf(d)} has downstream installation logic, but the review does not find an energization, protection/test, or commissioning state within the submitted successor chain.`,[codeOf(d),...downstream.slice(0,5).map(codeOf)])
+        `${codeOf(d)} — ${nameOf(d)} has downstream installation logic, but Control Lens does not find an energization, protection/test, or commissioning state within the submitted successor chain.`,[codeOf(d),...downstream.slice(0,5).map(codeOf)])
       break
     }
   }
@@ -317,7 +317,7 @@ export function analyzeCLPathIntelligence(analysis: any): CLPathIntelligenceResu
     const crit=greedyCredibleBacktrace(endpoint,byId,pred,18)
     const directToTarget=(succ.get(String(endpoint.task_id))||[]).some(r=>String(r.task_id)===String(target.task_id))
     criticalPath={
-      title:'CL Critical Path',
+      title:'CPMr Critical Path',
       basis:'Engineering control chain selected from the submitted XER after recognizing project scope, system readiness and turnover states. Dates, durations and float remain the contractor-submitted attributes.',
       activities:[...crit,target],
       connectionToTarget: directToTarget?'SUBMITTED':'REFERENCE_GAP',
@@ -327,13 +327,13 @@ export function analyzeCLPathIntelligence(analysis: any): CLPathIntelligenceResu
     }
     const long=longestCredibleChain(endpoint,byId,pred,26)
     longestPath={
-      title:'CL Longest Path',
+      title:'CPMr Longest Path',
       basis:'Longest credible work-state chain to the selected readiness endpoint using the submitted relationships and activity durations, constrained by the recognized nature/scope of the work. This is not a P6 CPM recalculation.',
       activities:[...long,target],
       connectionToTarget: directToTarget?'SUBMITTED':'REFERENCE_GAP',
       connectionNote: directToTarget
         ? 'The selected readiness endpoint is submitted as a predecessor to the completion target.'
-        : 'The review identifies a credible readiness chain that should be checked against the completion milestone because the submitted logic does not close the chain into that target.',
+        : 'Control Lens identifies a credible readiness chain that should be reviewed against the completion milestone because the submitted logic does not close the chain into that target.',
     }
   }
 
