@@ -1,19 +1,32 @@
 'use client'
-import { useEffect,useState } from 'react'
-import { getActiveProject,getActiveVersion } from '@/lib/projectStore'
-import { reportNumber } from '@/lib/reports'
-import { daysBetween,projectedEnd } from '@/lib/reportData'
-import TIAReport from '@/components/reports/TIAReport'
-import ReportPageFrame from '@/components/reports/ReportPageFrame'
-export default function TIAReportPage(){
- const [project,setProject]=useState<any>(null),[version,setVersion]=useState<any>(null),[ready,setReady]=useState(false)
- useEffect(()=>{const p=getActiveProject();setProject(p);setVersion(getActiveVersion(p));setReady(true)},[])
- if(!ready)return <ReportPageFrame><div className="text-sm text-slate-500">Loading report…</div></ReportPageFrame>
- const a=version?.analysis
- if(!project||!version||!a)return <ReportPageFrame><Missing/></ReportPageFrame>
- const ntp=project.contractDates?.ntp||a.projectStartDate; const original=project.contractDates?.originalContractCompletion||a.contractEnd
- const revised=version.versionDates?.revisedContractCompletion||original; const forecast=projectedEnd(a)
- const behindRevised=revised&&forecast?Math.max(0,daysBetween(revised,forecast)):Math.max(0,Number(a.delayDays||0)); const behindOriginal=original&&forecast?Math.max(0,daysBetween(original,forecast)):behindRevised
- return <ReportPageFrame><TIAReport orgName={(project as any).company||''} reportNo={reportNumber(project.projectId||project.name,'TIA')} versionLabel={version.versionLabel||version.fileName||'Active version'} project={project} ntp={ntp} originalCompletion={original} revisedCompletion={revised} timeExtensionDays={Number(version.versionDates?.timeExtensionDays||0)} dataDate={a.dataDate||version.dataDate} projectedEnd={forecast} daysBehindRevised={behindRevised} daysBehindOriginal={behindOriginal} criticalDrivers={Array.isArray(a.criticalDrivers)?a.criticalDrivers.slice(0,10):[]} criticalDriversTotal={Array.isArray(a.criticalDrivers)?a.criticalDrivers.length:0} oosCount={Array.isArray(a.outOfSequence)?a.outOfSequence.length:0} noTiesCount={Array.isArray(a.noTies)?a.noTies.length:0} longLeadAtRisk={Number(a.longLeadAtRisk??0)} negativeFloatCount={Number(a.negativeFloat||0)}/></ReportPageFrame>
+import { useEffect, useState } from 'react'
+import Link from 'next/link'
+import { getActiveProject } from '@/lib/projectStore'
+import { usePermissions } from '@/lib/usePermissions'
+import { loadTIAReportSnapshot, TIAReportSnapshot } from '@/lib/tiaReportSnapshot'
+import { printReport } from '@/lib/printReport'
+import TIAComparisonReport from '@/components/reports/TIAComparisonReport'
+
+export default function TIAReportPage() {
+  const perms = usePermissions()
+  const [snapshot, setSnapshot] = useState<TIAReportSnapshot | null>(null)
+  const [ready, setReady] = useState(false)
+  useEffect(() => {
+    const project = getActiveProject()
+    setSnapshot(project ? loadTIAReportSnapshot(project) : null)
+    setReady(true)
+  }, [])
+  if (!ready || perms.loading) return <div className="p-6">Loading TIA report…</div>
+  if (!perms.can.runAdvancedAnalytics) return <div className="p-6">Ask your project administrator for access to Time Impact Analysis.</div>
+  return <div className="h-full overflow-y-auto bg-slate-50">
+    <header className="flex flex-wrap items-center gap-3 p-4 border-b bg-white">
+      <Link href="/dashboard/reports" className="text-sm text-blue-600">← Reports</Link>
+      <h1 className="font-bold">Time Impact Analysis Report</h1>
+      {snapshot && <button className="ml-auto bg-blue-600 text-white rounded-lg px-3 py-2 text-xs font-bold" onClick={() => printReport('tia-comparison-report', { title: 'TIA Comparison' })}>Print / Save PDF</button>}
+      <Link href={snapshot ? '/dashboard/tia?resume=1' : '/dashboard/tia'} className="text-xs border rounded-lg px-3 py-2">{snapshot ? 'Return to comparison / Word export' : 'Run TIA comparison'}</Link>
+    </header>
+    <main className="max-w-5xl mx-auto p-5">
+      {snapshot ? <><p className="text-xs text-slate-500 mb-3">Last comparison for this project in this browser session. The two versions below define this report; changing the sidebar version does not change this comparison.</p><TIAComparisonReport snapshot={snapshot} /></> : <section className="bg-white rounded-xl border p-8 text-center"><h2 className="text-lg font-bold">Run a two-schedule comparison first</h2><p className="text-sm text-slate-600 mt-3">No comparison is available in this session for this project. A TIA cannot be generated from one active schedule. Select the unimpacted update and impacted fragnet schedule, then compare them.</p><Link href="/dashboard/tia" className="inline-block mt-5 rounded-lg bg-blue-600 px-4 py-2 text-white text-sm">Open Time Impact Analysis →</Link></section>}
+    </main>
+  </div>
 }
-function Missing(){return <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">No active schedule analysis is available for the selected project/version.</div>}

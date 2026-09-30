@@ -60,6 +60,10 @@ function shortDate(d?: string) {
 }
 
 export interface TIAReportInput {
+  unimpactedVersion?: string
+  impactedVersion?: string
+  fileAName?: string
+  fileBName?: string
   projectName: string
   projectNumber: string
   owner: string
@@ -111,7 +115,7 @@ export async function buildTIAReport(input: TIAReportInput): Promise<Buffer> {
         new TableRow({ children: [cell('Contract Completion Date', 3120, true, 'E7EEF7'), cell(shortDate(input.contractCompletionDate), 6240)] }),
         new TableRow({ children: [cell('Un-Impacted Projected End', 3120, true, 'E7EEF7'), cell(shortDate(comparison.projectA.end), 6240)] }),
         new TableRow({ children: [cell('Impacted Projected End', 3120, true, 'E7EEF7'), cell(shortDate(comparison.projectB.end), 6240)] }),
-        new TableRow({ children: [cell('Total Time Impact', 3120, true, 'E7EEF7'), cell(`${comparison.totalDelayDays} calendar days`, 6240)] }),
+        new TableRow({ children: [cell('Exported Finish Difference', 3120, true, 'E7EEF7'), cell(`${comparison.totalDelayDays} calendar days`, 6240)] }),
         new TableRow({ children: [cell('Prepared By', 3120, true, 'E7EEF7'), cell(input.preparedBy || '—', 6240)] }),
         new TableRow({ children: [cell('Report Date', 3120, true, 'E7EEF7'), cell(today, 6240)] }),
       ]
@@ -126,7 +130,7 @@ export async function buildTIAReport(input: TIAReportInput): Promise<Buffer> {
     h1('1. Executive Summary'),
     p(`This Time Impact Analysis (TIA) evaluates the schedule impact of identified delay events on the construction of ${input.projectName}. The analysis compares two schedules — an un-impacted current schedule and an impacted current schedule that includes a fragnet representing the delay events.`),
     p('Key Findings:', { bold: true, after: 80 }),
-    new Paragraph({ numbering: { reference: 'bullets', level: 0 }, spacing: { after: 80 }, children: [new TextRun({ text: `Total time impact: ${comparison.totalDelayDays} calendar days`, size: 22, font: 'Arial' })] }),
+    new Paragraph({ numbering: { reference: 'bullets', level: 0 }, spacing: { after: 80 }, children: [new TextRun({ text: `Exported finish difference: ${comparison.totalDelayDays} calendar days`, size: 22, font: 'Arial' })] }),
     new Paragraph({ numbering: { reference: 'bullets', level: 0 }, spacing: { after: 80 }, children: [new TextRun({ text: `Fragnet activities identified: ${fragnetCount}`, size: 22, font: 'Arial' })] }),
     new Paragraph({ numbering: { reference: 'bullets', level: 0 }, spacing: { after: 80 }, children: [new TextRun({ text: `Activities changed between schedules: ${comparison.changed.length}`, size: 22, font: 'Arial' })] }),
     new Paragraph({ numbering: { reference: 'bullets', level: 0 }, spacing: { after: 80 }, children: [new TextRun({ text: `Milestones affected: ${comparison.milestoneMovements.length}`, size: 22, font: 'Arial' })] }),
@@ -149,8 +153,8 @@ export async function buildTIAReport(input: TIAReportInput): Promise<Buffer> {
       columnWidths: [2340, 3510, 3510],
       rows: [
         new TableRow({ children: [cell('Reference', 2340, true, 'E7EEF7'), cell('Schedule Name', 3510, true, 'E7EEF7'), cell('Data Date', 3510, true, 'E7EEF7')] }),
-        new TableRow({ children: [cell('Schedule A (Un-Impacted)', 2340), cell(comparison.projectA.name, 3510), cell(shortDate(comparison.projectA.dataDate), 3510)] }),
-        new TableRow({ children: [cell('Schedule B (Impacted)', 2340), cell(comparison.projectB.name, 3510), cell(shortDate(comparison.projectB.dataDate), 3510)] }),
+        new TableRow({ children: [cell('Schedule A (Un-Impacted)', 2340), cell(`${input.unimpactedVersion || comparison.projectA.name} / ${input.fileAName || 'File not recorded'}`, 3510), cell(shortDate(comparison.projectA.dataDate), 3510)] }),
+        new TableRow({ children: [cell('Schedule B (Impacted)', 2340), cell(`${input.impactedVersion || comparison.projectB.name} / ${input.fileBName || 'File not recorded'}`, 3510), cell(shortDate(comparison.projectB.dataDate), 3510)] }),
       ]
     }),
     p('', { after: 240 }),
@@ -159,12 +163,12 @@ export async function buildTIAReport(input: TIAReportInput): Promise<Buffer> {
     p('2. Newly added activities selected by the scheduler are treated as the event fragnet. Their insertion relationships require technical review.'),
     p('3. Dates and path flags are read from the submitted exports. This comparison does not rerun the P6 scheduling engine or verify the settings used to calculate those exports.'),
     p('4. The impacted schedule was compared to the un-impacted schedule to identify activity movements, float deterioration, and critical path changes.'),
-    p('5. The total time impact was calculated as the difference between the un-impacted and impacted projected completion dates.'),
+    p('5. The exported project finish difference was calculated between the two schedules. This is not by itself an event-attributable delay determination.'),
     new Paragraph({ children: [new PageBreak()] }),
   ]
 
   // ============ UN-IMPACTED CP ============
-  const unimpactedCP = comparison.criticalPath.unimpactedPath.slice(0, 30)
+  const unimpactedCP = comparison.criticalPath.unimpactedPath
   const unimpactedChildren = [
     h1('3. Un-Impacted Critical Path'),
     p(`The following activities form the driving (critical / longest) path in the un-impacted current schedule. Projected completion: ${shortDate(comparison.projectA.end)}.`),
@@ -192,7 +196,7 @@ export async function buildTIAReport(input: TIAReportInput): Promise<Buffer> {
   ]
 
   // ============ IMPACTED CP ============
-  const impactedCP = comparison.criticalPath.impactedPath.slice(0, 30)
+  const impactedCP = comparison.criticalPath.impactedPath
   const impactedChildren = [
     h1('4. Impacted Critical Path'),
     p(`The following activities form the driving (critical / longest) path in the impacted current schedule (after fragnet insertion). Projected completion: ${shortDate(comparison.projectB.end)}.`),
@@ -223,7 +227,7 @@ export async function buildTIAReport(input: TIAReportInput): Promise<Buffer> {
   ]
 
   // ============ SCHEDULE COMPARISON SUMMARY ============
-  const topChanged = comparison.changed.slice(0, 25)
+  const topChanged = comparison.changed.slice()
   const comparisonChildren = [
     h1('5. Schedule Comparison Summary'),
     p(`Of ${comparison.activities.length} activities compared, ${comparison.changed.length} changed, ${comparison.added.length} were added, and ${comparison.removed.length} were removed between the two schedules.`),
@@ -240,7 +244,7 @@ export async function buildTIAReport(input: TIAReportInput): Promise<Buffer> {
           cell('Old Finish', 1040, true, 'E7EEF7'),
           cell('New Finish', 1040, true, 'E7EEF7'),
         ]}),
-        ...topChanged.sort((a,b) => Math.abs(b.finish_delta_days||0) - Math.abs(a.finish_delta_days||0)).slice(0, 25).map(c => new TableRow({ children: [
+        ...topChanged.sort((a,b) => Math.abs(b.finish_delta_days||0) - Math.abs(a.finish_delta_days||0)).map(c => new TableRow({ children: [
           cell(c.task_code, 1560),
           cell(c.task_name, 3640),
           cell(shortDate(c.a_start), 1040),
@@ -269,7 +273,7 @@ export async function buildTIAReport(input: TIAReportInput): Promise<Buffer> {
           cell('Original Finish', 1560, true, 'E7EEF7'),
           cell('New Finish', 1560, true, 'E7EEF7'),
         ]}),
-        ...comparison.milestoneMovements.slice(0, 30).map(m => new TableRow({ children: [
+        ...comparison.milestoneMovements.map(m => new TableRow({ children: [
           cell(m.task_code, 1560),
           cell(m.task_name, 4680),
           cell(shortDate(m.a_finish), 1560),
@@ -453,4 +457,50 @@ export async function buildTIAReport(input: TIAReportInput): Promise<Buffer> {
   })
 
   return await Packer.toBuffer(doc)
+}
+
+// A diagnostic export records failed checks without issuing a formal TIA.
+export async function buildTIADiagnosticReport(input: TIAReportInput & { unimpactedVersion?: string; impactedVersion?: string; fileAName?: string; fileBName?: string }): Promise<Buffer> {
+  const c = input.comparison
+  const issues = validateTIAComparison(c)
+  const width = 9360
+  const rows = (headers: string[], values: (string | number | undefined)[][]) => new Table({
+    width: { size: width, type: WidthType.DXA },
+    rows: [new TableRow({ children: headers.map(h => cell(h, Math.floor(width / headers.length), true, 'E7EEF7')) }),
+      ...values.map(row => new TableRow({ children: row.map(v => cell(v === undefined ? '—' : String(v), Math.floor(width / headers.length))) }))],
+  })
+  const children: (Paragraph | Table)[] = [
+    h1('TIA DIAGNOSTIC COMPARISON'),
+    p('DIAGNOSTIC ONLY — NOT A VALIDATED TIA OR TIME-EXTENSION DETERMINATION', { bold: true, color: 'B91C1C' }),
+    p(`${input.projectName} · ${input.projectNumber}`),
+    p(`Prepared by: ${input.preparedBy || 'Not recorded'} · Owner: ${input.owner || 'Not recorded'}`),
+    p(`Generated: ${new Date().toISOString()}`),
+    p(`Observed exported project finish difference: ${c.totalDelayDays} calendar days. This does not establish event causation or entitlement. No scheduling-engine recalculation was performed.`),
+    h1('1. Schedules compared'),
+    rows(['Source', 'Version / file', 'Data date', 'Exported finish'], [
+      ['Unimpacted', `${input.unimpactedVersion || c.projectA.name} / ${input.fileAName || 'Not recorded'}`, shortDate(c.projectA.dataDate), shortDate(c.projectA.end)],
+      ['Impacted', `${input.impactedVersion || c.projectB.name} / ${input.fileBName || 'Not recorded'}`, shortDate(c.projectB.dataDate), shortDate(c.projectB.end)],
+    ]),
+    h1('2. Validation and corrections'),
+    ...issues.map(i => p(`${i.severity === 'error' ? 'BLOCKER' : 'REVIEW'} — ${i.title}. ${i.detail}`, { bold: true, color: i.severity === 'error' ? 'B91C1C' : '92400E' })),
+    ...(!issues.length ? [p('Automated input checks passed. Technical review is still required.')] : []),
+    h2('Existing duration changes'),
+    p('Durations below use the comparator’s rounded eight-hour conversion. Verify source original-duration hours and calendars. These are not elapsed calendar days.'),
+    rows(['Activity ID — name', 'Unimpacted duration', 'Impacted duration', 'Difference'], c.changed.filter(a => a.duration_delta_days).map(a => [`${a.task_code} — ${a.task_name}`, a.a_duration_days, a.b_duration_days, a.duration_delta_days])),
+    h1('3. Event activities and narrative'),
+    p(c.fragnetSelectionConfirmed ? 'Event selection confirmed by the user.' : 'Event selection not confirmed — suggestions only.'),
+    rows(['Activity ID — name', 'Responsibility (user entry)', 'Narrative (user entry)'], c.fragnetActivities.map(a => [`${a.task_code} — ${a.task_name}`, input.fragnetCategorizations?.[a.task_id]?.category || 'Not assessed', input.fragnetCategorizations?.[a.task_id]?.description || 'Not recorded'])),
+    h1('4. Milestone movements'),
+    rows(['Activity ID — name', 'Unimpacted finish', 'Impacted finish', 'Calendar-day movement'], c.milestoneMovements.map(a => [`${a.task_code} — ${a.task_name}`, shortDate(a.a_finish), shortDate(a.b_finish), a.delta_days])),
+    h1('5. Changed activities'),
+    rows(['Activity ID — name', 'Unimpacted finish', 'Impacted finish', 'Logic changed'], c.changed.map(a => [`${a.task_code} — ${a.task_name}`, shortDate(a.a_finish), shortDate(a.b_finish), a.logic_changed ? 'Yes' : 'No'])),
+    h1('6. Added and removed activities'),
+    rows(['Change', 'Activity ID — name'], [...c.added.map(a => ['Added', `${a.task_code} — ${a.task_name}`]), ...c.removed.map(a => ['Removed', `${a.task_code} — ${a.task_name}`])]),
+    h1('7. Submitted critical activity comparison'),
+    p('The following submitted critical-activity lists are not a verified continuous controlling path or proof of fragnet causation.'),
+    h2('Unimpacted'), rows(['Activity ID — name'], c.criticalPath.unimpactedPath.map(a => [`${a.task_code} — ${a.task_name}`])),
+    h2('Impacted'), rows(['Activity ID — name'], c.criticalPath.impactedPath.map(a => [`${a.task_code} — ${a.task_name}`])),
+    p('DIAGNOSTIC ONLY — Resolve validation issues and rerun before relying on an event-impact conclusion.', { bold: true, color: 'B91C1C' }),
+  ]
+  return Packer.toBuffer(new Document({ sections: [{ properties: { page: { margin: { top: 720, bottom: 720, left: 720, right: 720 } } }, children }] }))
 }

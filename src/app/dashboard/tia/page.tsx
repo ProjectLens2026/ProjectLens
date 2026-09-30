@@ -19,6 +19,9 @@ import {
 } from '@/lib/projectStore'
 import { getSavedVersionXerSignedUrl } from '@/lib/supabase/db'
 import { usePermissions } from '@/lib/usePermissions'
+import { printReport } from '@/lib/printReport'
+import TIAComparisonReport from '@/components/reports/TIAComparisonReport'
+import { saveTIAReportSnapshot, loadTIAReportSnapshot, clearTIAReportSnapshot, tiaResultHeading, TIAReportSnapshot } from '@/lib/tiaReportSnapshot'
 import type { TIAValidationIssue } from '@/lib/xerComparator'
 
 type Step = 'pick' | 'analyzing' | 'review' | 'categorize' | 'generating'
@@ -38,6 +41,7 @@ export default function TIAPage() {
   const [validation, setValidation] = useState<TIAValidationIssue[]>([])
   const [selectedFragnetCodes, setSelectedFragnetCodes] = useState<string[]>([])
   const [confirmedFragnetCodes, setConfirmedFragnetCodes] = useState<string[] | null>(null)
+  const [comparisonRunAt, setComparisonRunAt] = useState('')
   const [activeTab, setActiveTab] = useState('summary')
   const [progress, setProgress] = useState(0)
   const [progressLabel, setProgressLabel] = useState('Starting...')
@@ -70,6 +74,14 @@ export default function TIAPage() {
         setUnimpactedId(nonFragVersions[0].id)
       }
 
+      const saved = loadTIAReportSnapshot(p)
+      if (saved && new URLSearchParams(window.location.search).get('resume') === '1') {
+        setUnimpactedId(saved.unimpacted.id); setFragnetId(saved.impacted.id)
+        setComparisonRunAt(saved.createdAt); setComparison(saved.comparison); setValidation(saved.validation)
+        setConfirmedFragnetCodes(saved.confirmedCodes); setSelectedFragnetCodes(saved.confirmedCodes || [])
+        setCategorizations(saved.categorizations); setCtx(saved.context); setStep('review')
+        return
+      }
       setCtx(prev => ({ ...prev, projectName: p.name, projectNumber: p.projectId || '' }))
       // Honor the pair selected in Project Controls instead of silently
       // returning to the newest versions. Validate IDs against this project.
@@ -82,6 +94,19 @@ export default function TIAPage() {
       }
     }
   }, [])
+
+  const versionA = activeProject?.versions.find(v => v.id === unimpactedId)
+  const versionB = activeProject?.versions.find(v => v.id === fragnetId)
+  const snapshot: TIAReportSnapshot | null = comparison && activeProject && versionA && versionB ? {
+    schema: 1, projectId: activeProject.id, projectName: activeProject.name,
+    createdAt: comparisonRunAt,
+    unimpacted: { id: versionA.id, label: versionA.versionLabel || versionA.fileName, fileName: versionA.fileName, uploadedAt: versionA.uploadedAt },
+    impacted: { id: versionB.id, label: versionB.versionLabel || versionB.fileName, fileName: versionB.fileName, uploadedAt: versionB.uploadedAt },
+    comparison, validation, confirmedCodes: confirmedFragnetCodes, context: ctx, categorizations,
+  } : null
+  useEffect(() => {
+    if (snapshot && (step === 'review' || step === 'categorize')) saveTIAReportSnapshot(snapshot)
+  }, [comparison, validation, confirmedFragnetCodes, ctx, categorizations, step, comparisonRunAt])
 
   const categories = [
     { value: 'unassigned', label: 'Not assessed' },
@@ -168,6 +193,8 @@ export default function TIAPage() {
       alert(blockingPairIssues.map(issue => issue.title).join('\n'))
       return
     }
+    if (activeProject) clearTIAReportSnapshot(activeProject.id)
+    setComparison(null)
     setStep('analyzing')
     setProgress(5)
     setProgressLabel('Preparing files...')
@@ -202,8 +229,9 @@ export default function TIAPage() {
       setProgress(95)
       setProgressLabel('Loading results...')
       const data = await res.json()
+      setComparisonRunAt(new Date().toISOString())
       setComparison(data.comparison)
-      setValidation(data.validation || [])
+      setValidation([...(data.validation || []), ...pairValidationIssues().filter(i => !(data.validation || []).some((server: TIAValidationIssue) => server.code === i.code))])
       setConfirmedFragnetCodes(confirmedCodes || null)
       setSelectedFragnetCodes((data.comparison.fragnetActivities || []).map((f: any) => f.task_code))
       // The controlling-path change is the primary TIA result. Open it first;
@@ -224,31 +252,28 @@ export default function TIAPage() {
     }
   }
 
-  async function generateReport() {
+  async function generateReport(diagnostic = false) {
     if (!comparison) return
-    if (!confirmedFragnetCodes?.length) return
+    if (!diagnostic && !confirmedFragnetCodes?.length) return
     const blockingIssues = validation.filter(issue => issue.severity === 'error')
-    if (blockingIssues.length > 0) {
+    if (!diagnostic && blockingIssues.length > 0) {
       alert('Formal TIA report is blocked:\n\n' + blockingIssues.map(issue => `• ${issue.title}`).join('\n'))
       return
     }
     setStep('generating')
 
     try {
-      let aUrl = signedUrlsRef.current.a
-      let bUrl = signedUrlsRef.current.b
-      if (!aUrl || !bUrl) {
-        const urls = await resolveSignedUrls()
-        if (!urls.ok) { alert(urls.error); setStep('categorize'); return }
-        aUrl = urls.aUrl; bUrl = urls.bUrl
-      }
+      // Resolve fresh URLs; a restored report must not use expired storage links.
+      const urls = await resolveSignedUrls()
+      if (!urls.ok) { alert(urls.error); setStep('review'); return }
+      const aUrl = urls.aUrl, bUrl = urls.bUrl
 
       const fd = new FormData()
       fd.append('fileAUrl', aUrl)
       fd.append('fileBUrl', bUrl)
-      fd.append('mode', 'tia')
-      fd.append('confirmedFragnetCodes', JSON.stringify(confirmedFragnetCodes))
-      fd.append('context', JSON.stringify(ctx))
+      fd.append('mode', diagnostic ? 'diagnostic' : 'tia')
+      if (confirmedFragnetCodes) fd.append('confirmedFragnetCodes', JSON.stringify(confirmedFragnetCodes))
+      fd.append('context', JSON.stringify({ ...ctx, unimpactedVersion: versionA?.versionLabel, impactedVersion: versionB?.versionLabel, fileAName: versionA?.fileName, fileBName: versionB?.fileName }))
       fd.append('fragnetCategorizations', JSON.stringify(categorizations))
 
       const res = await fetch('/api/compare', { method: 'POST', body: fd })
@@ -265,7 +290,7 @@ export default function TIAPage() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `TIA_Report_${ctx.projectNumber || 'Schedule'}.docx`
+      a.download = `${diagnostic ? "TIA_Diagnostic" : "TIA_Report"}_${ctx.projectNumber || 'Schedule'}.docx`
       document.body.appendChild(a)
       a.click()
       a.remove()
@@ -531,11 +556,13 @@ export default function TIAPage() {
               className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400">
               ← Pick different versions
             </button>
+            <button onClick={() => printReport('tia-comparison-report', { title: 'TIA Comparison' })} className="text-xs border rounded-lg px-3 py-1.5">Print / Save PDF</button>
+            <button onClick={() => generateReport(true)} className="text-xs border rounded-lg px-3 py-1.5">Diagnostic Word Report</button>
             <button
               disabled={validation.some(issue => issue.severity === 'error')}
               onClick={() => setStep('categorize')}
               className="text-xs bg-blue-600 text-white px-4 py-1.5 rounded-lg font-bold hover:bg-blue-700 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed">
-              {validation.some(issue => issue.severity === 'error') ? 'Report Blocked' : 'Generate TIA Report →'}
+              {validation.some(issue => issue.severity === 'error') ? 'Formal TIA Blocked' : 'Generate TIA Report →'}
             </button>
           </div>
         </div>
@@ -579,25 +606,17 @@ export default function TIAPage() {
               </div>
             )}
           </div>
-          <div className={`rounded-xl border p-4 flex items-center gap-4 ${comparison.totalDelayDays > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
-            <div className="text-3xl">{comparison.totalDelayDays > 0 ? '🔴' : '🟢'}</div>
-            <div className="flex-1">
-              <div className={`font-bold text-sm ${comparison.totalDelayDays > 0 ? 'text-red-900' : 'text-green-900'}`}>
-                {comparison.totalDelayDays > 0
-                  ? `IMPACTED SCHEDULE IS ${comparison.totalDelayDays} CALENDAR DAYS LATER THAN UN-IMPACTED`
-                  : 'NO TIME IMPACT DETECTED'}
-              </div>
-              <div className="text-xs mt-1 opacity-80">
-                Un-impacted projected end: {shortDate(comparison.projectA.end)} · Impacted projected end: {shortDate(comparison.projectB.end)}
-              </div>
-            </div>
-            <div className="text-center flex-shrink-0">
-              <div className={`text-3xl font-extrabold ${comparison.totalDelayDays > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                {comparison.totalDelayDays >= 0 ? '+' : ''}{comparison.totalDelayDays}
-              </div>
-              <div className="text-[10px] opacity-70">calendar days</div>
-            </div>
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4">
+            <div className="font-bold text-sm text-amber-900">{tiaResultHeading(comparison, validation)}</div>
+            <div className="text-xs mt-2">Observed exported finish difference: {comparison.totalDelayDays} calendar days. Unimpacted: {shortDate(comparison.projectA.end)} · Impacted: {shortDate(comparison.projectB.end)}</div>
+            <p className="text-xs mt-1">{validation.some(i => i.severity === 'error') ? 'Diagnostic comparison only. Resolve the validation issues before relying on a time-impact conclusion. You can still print or download the diagnostic evidence.' : 'A project finish difference alone does not establish event causation or entitlement. Check milestone movements and driving logic.'}</p>
           </div>
+          {snapshot && <div className="hidden"><TIAComparisonReport snapshot={snapshot} /></div>}
+          {(comparison.changed || []).some((a: any) => a.duration_delta_days) && <details className="border border-red-200 bg-white rounded-xl p-4">
+            <summary className="cursor-pointer text-sm font-bold text-red-800">Inspect existing duration changes</summary>
+            <p className="text-xs my-2">Original durations converted using the comparator’s eight-hour basis. Verify source hours and calendars before correcting or explaining these changes.</p>
+            {(comparison.changed || []).filter((a: any) => a.duration_delta_days).map((a: any) => <div key={a.task_code} className="text-xs border-t py-2"><strong>{a.task_code} — {a.task_name}</strong> · Unimpacted: {a.a_duration_days} → Impacted: {a.b_duration_days} · Difference: {a.duration_delta_days}</div>)}
+          </details>}
           <div className="grid grid-cols-5 gap-2">
             <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Activities Changed</div><div className="text-xl font-bold text-amber-600">{comparison.changed?.length || 0}</div></div>
             <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-500">Activities Added</div><div className="text-xl font-bold text-blue-600">{comparison.added?.length || 0}</div></div>
@@ -782,7 +801,7 @@ export default function TIAPage() {
             <button onClick={() => setStep('review')} className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400">
               ← Back
             </button>
-            <button onClick={generateReport} className="text-xs bg-green-600 text-white px-4 py-1.5 rounded-lg font-bold hover:bg-green-700">
+            <button onClick={() => generateReport()} className="text-xs bg-green-600 text-white px-4 py-1.5 rounded-lg font-bold hover:bg-green-700">
               📄 Generate Word Report
             </button>
           </div>

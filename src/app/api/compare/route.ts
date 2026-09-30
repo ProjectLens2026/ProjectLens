@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { parseXER } from '@/lib/xerParser'
 import { compareXER, validateTIAComparison } from '@/lib/xerComparator'
-import { buildTIAReport } from '@/lib/tiaReportBuilder'
+import { buildTIAReport, buildTIADiagnosticReport } from '@/lib/tiaReportBuilder'
 
 export const runtime = 'nodejs'
 export const maxDuration = 120  // 2-minute timeout (Vercel Pro allows up to 300s)
@@ -118,9 +118,9 @@ export async function POST(req: NextRequest) {
     comparison.identicalInputs = textA === textB
     const validation = validateTIAComparison(comparison)
 
-    if (mode === 'tia') {
+    if (mode === 'tia' || mode === 'diagnostic') {
       const blockingIssues = validation.filter(issue => issue.severity === 'error')
-      if (blockingIssues.length > 0) {
+      if (mode === 'tia' && blockingIssues.length > 0) {
         return NextResponse.json({
           error: 'Formal TIA report blocked because the schedule pair failed validation.',
           validation,
@@ -130,7 +130,9 @@ export async function POST(req: NextRequest) {
       const ctx = contextStr ? JSON.parse(contextStr) : {}
       const fragnetCategorizations = fragnetCategorizationsStr ? JSON.parse(fragnetCategorizationsStr) : {}
       console.log('[api/compare] building TIA report...')
-      const buffer = await buildTIAReport({
+      const builder = mode === 'diagnostic' ? buildTIADiagnosticReport : buildTIAReport
+      const buffer = await builder({
+        unimpactedVersion: ctx.unimpactedVersion, impactedVersion: ctx.impactedVersion, fileAName: ctx.fileAName, fileBName: ctx.fileBName,
         projectName: ctx.projectName || parsedB.projectName || 'Untitled Project',
         projectNumber: ctx.projectNumber || '',
         owner: ctx.owner || '',
@@ -143,7 +145,7 @@ export async function POST(req: NextRequest) {
         status: 200,
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          'Content-Disposition': `attachment; filename="TIA_Report_${(ctx.projectNumber || 'Schedule').replace(/[^a-zA-Z0-9-_]/g, '_')}.docx"`,
+          'Content-Disposition': `attachment; filename="${mode === 'diagnostic' ? 'TIA_Diagnostic' : 'TIA_Report'}_${(ctx.projectNumber || 'Schedule').replace(/[^a-zA-Z0-9-_]/g, '_')}.docx"`,
         },
       })
     }
