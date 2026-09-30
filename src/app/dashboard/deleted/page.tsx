@@ -103,9 +103,9 @@ export default function DeletedPage() {
     setProjects(loadProjects())
   }
 
-  function handlePermanentDeleteVersion(projectId: string, versionId: string) {
+  async function handlePermanentDeleteVersion(projectId: string, versionId: string) {
     if (!canPermDeleteVersion) return
-    const result = permanentlyDeleteVersion(projectId, versionId)
+    const result = await permanentlyDeleteVersion(projectId, versionId)
     if (!result.ok) {
       alert(result.error || 'Failed to permanently delete version.')
       return

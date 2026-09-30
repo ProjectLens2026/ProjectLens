@@ -243,11 +243,6 @@ export interface ScheduleVersion {
   analysisError?: string
   versionDates?: VersionDates           // NEW — per-version manual entries
 
-  // TIA lineage — a fragnet must identify the exact un-impacted version from
-  // which it was copied. Stored with the version so the pair cannot silently
-  // drift when newer project updates are uploaded later.
-  parentVersionId?: string
-
   // NEW (Day 6, v14) — structured version labeling.
   // scheduleType drives label format: BL-NTP-NN for baseline/rebaseline,
   // CU-NTP-NN for updates. sequenceNumber is the NN (0 for first baseline,
@@ -1518,7 +1513,7 @@ export function permanentlyDeleteProject(id: string) {
  * Refuses if this is the only non-deleted version on the project — UI also
  * blocks this but we enforce here too (defense in depth).
  */
-export function deleteVersion(projectId: string, versionId: string): { ok: boolean; error?: string } {
+export async function deleteVersion(projectId: string, versionId: string): Promise<{ ok: boolean; error?: string }> {
   const idx = _projects.findIndex(p => p.id === projectId)
   if (idx === -1) return { ok: false, error: 'Project not found' }
 
@@ -1526,6 +1521,17 @@ export function deleteVersion(projectId: string, versionId: string): { ok: boole
   const activeVersions = project.versions.filter(v => !v.deletedAt)
   if (activeVersions.length <= 1 && activeVersions.some(v => v.id === versionId)) {
     return { ok: false, error: 'Cannot delete the only version on this project. Upload a new version first.' }
+  }
+
+  // Persist in Supabase before changing the local mirror. Previously this was
+  // fire-and-forget, so a failed/locked cloud write could be overwritten by a
+  // later cloud hydration and make the deleted version reappear.
+  try {
+    const cloudOk = await softDeleteVersionInSupabase(projectId, versionId)
+    if (!cloudOk) return { ok: false, error: 'The version could not be deleted from the cloud. Please try again.' }
+  } catch (err) {
+    console.error('[ControlLens] deleteVersion: Supabase soft-delete failed:', err)
+    return { ok: false, error: 'The version could not be deleted from the cloud. Please try again.' }
   }
 
   const updated: Project = {
@@ -1537,16 +1543,16 @@ export function deleteVersion(projectId: string, versionId: string): { ok: boole
   }
   _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
   notifyListeners()
-  idbPutProject(updated).catch(err => {
+  try {
+    await idbPutProject(updated)
+  } catch (err) {
     console.error('[ControlLens] deleteVersion: IndexedDB persist failed:', err)
-  })
-  // v15 / Day 10 — mark as soft-deleted in Supabase (deletedAt field).
-  // We do NOT delete the row; Owner/Admin can permanently delete later.
-  softDeleteVersionInSupabase(projectId, versionId).catch(err => {
-    console.error('[ControlLens] deleteVersion: Supabase soft-delete failed:', err)
-  })
+  }
   if (getActiveVersionId() === versionId) {
-    setActiveVersionId(null)
+    const fallback = updated.versions
+      .filter(v => !v.deletedAt)
+      .sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''))[0]
+    setActiveVersionId(fallback?.id || null)
   }
   return { ok: true }
 }
@@ -1582,9 +1588,17 @@ export function restoreVersion(projectId: string, versionId: string): { ok: bool
  * permanentlyDeleteVersion — Day 10. Owner/Admin only. Removes the version
  * row entirely from local + Supabase. No recovery.
  */
-export function permanentlyDeleteVersion(projectId: string, versionId: string): { ok: boolean; error?: string } {
+export async function permanentlyDeleteVersion(projectId: string, versionId: string): Promise<{ ok: boolean; error?: string }> {
   const idx = _projects.findIndex(p => p.id === projectId)
   if (idx === -1) return { ok: false, error: 'Project not found' }
+
+  try {
+    const cloudOk = await deleteVersionFromSupabase(projectId, versionId)
+    if (!cloudOk) return { ok: false, error: 'The version could not be permanently deleted from the cloud.' }
+  } catch (err) {
+    console.error('[ControlLens] permanentlyDeleteVersion: Supabase failed:', err)
+    return { ok: false, error: 'The version could not be permanently deleted from the cloud.' }
+  }
 
   const updated: Project = {
     ..._projects[idx],
@@ -1593,12 +1607,11 @@ export function permanentlyDeleteVersion(projectId: string, versionId: string): 
   }
   _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
   notifyListeners()
-  idbPutProject(updated).catch(err => {
+  try {
+    await idbPutProject(updated)
+  } catch (err) {
     console.error('[ControlLens] permanentlyDeleteVersion: IndexedDB persist failed:', err)
-  })
-  deleteVersionFromSupabase(projectId, versionId).catch(err => {
-    console.error('[ControlLens] permanentlyDeleteVersion: Supabase failed:', err)
-  })
+  }
   if (getActiveVersionId() === versionId) {
     setActiveVersionId(null)
   }

@@ -286,7 +286,7 @@ export default function Sidebar({ user }: SidebarProps) {
     refresh()
     setConfirmDeleteProjectId(null)
   }
-  function handleDeleteVersion(projectId: string, versionId: string) {
+  async function handleDeleteVersion(projectId: string, versionId: string) {
     if (!perms.can.deleteVersion) {
       console.warn('[Sidebar] handleDeleteVersion blocked — no deleteVersion permission')
       setConfirmDeleteVersionId(null)
@@ -294,7 +294,7 @@ export default function Sidebar({ user }: SidebarProps) {
     }
     // Day 10 — deleteVersion now returns { ok, error } since it's soft-delete
     // with rules (can't delete last version on project).
-    const result = deleteVersion(projectId, versionId)
+    const result = await deleteVersion(projectId, versionId)
     if (!result.ok) {
       alert(result.error || 'Failed to delete version.')
       setConfirmDeleteVersionId(null)

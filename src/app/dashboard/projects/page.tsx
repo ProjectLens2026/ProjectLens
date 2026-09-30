@@ -46,8 +46,8 @@ export default function ProjectsPage() {
     setConfirmDelete(null)
   }
 
-  function handleDeleteVersion(projectId: string, versionId: string) {
-    const result = deleteVersion(projectId, versionId)
+  async function handleDeleteVersion(projectId: string, versionId: string) {
+    const result = await deleteVersion(projectId, versionId)
     if (!result.ok) {
       window.alert(result.error || 'Unable to delete this version.')
       return
