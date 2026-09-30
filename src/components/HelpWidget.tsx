@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
+import { HELP_FAQS, HELP_VERSION } from '@/lib/helpKnowledge'
 
 // =============================================================================
 // HelpWidget — floating "Ask CPMreview" chat bubble.
@@ -18,16 +19,10 @@ interface ChatMessage {
   timestamp: number
 }
 
-const STORAGE_KEY = 'pl_help_chat_history'
+const STORAGE_KEY = `cpmreview_help_chat_${HELP_VERSION}`
 const SHOW_KEY = 'pl_show_chatbot'
 
-const SUGGESTED_QUESTIONS = [
-  'How do I run a TIA?',
-  'What is the critical path?',
-  'How do I move a version between projects?',
-  'What triggers a rebaseline recommendation?',
-  'How does CPMreview detect fragnets?',
-]
+const SUGGESTED_QUESTIONS = HELP_FAQS.slice(0, 5).map(item => item.question)
 
 function readShowFlag(): boolean {
   try {
@@ -90,21 +85,24 @@ export default function HelpWidget() {
   }, [isOpen])
 
   function getCurrentPageContext(): string {
-    if (!pathname) return 'Dashboard'
-    if (pathname.includes('/dashboard/lens')) return 'Full Analysis'
+    if (!pathname) return 'Overview'
+    if (pathname.includes('/dashboard/approval')) return 'Review Schedule'
+    if (pathname.includes('/dashboard/project-setup')) return 'Project Setup'
+    if (pathname.includes('/dashboard/controls')) return 'Project Controls'
+    if (pathname.includes('/dashboard/lens')) return 'Full CPM Analysis'
     if (pathname.includes('/dashboard/risks')) return 'Risks & Issues'
     if (pathname.includes('/dashboard/procurement')) return 'Procurement'
     if (pathname.includes('/dashboard/submittals')) return 'Submittals'
     if (pathname.includes('/dashboard/changes')) return 'Change Orders'
     if (pathname.includes('/dashboard/rfis')) return 'RFIs'
-    if (pathname.includes('/dashboard/tia')) return 'TIA Comparison'
+    if (pathname.includes('/dashboard/tia')) return 'Time Impact Analysis'
     if (pathname.includes('/dashboard/trend')) return 'Trend Analysis'
     if (pathname.includes('/dashboard/upload')) return 'Upload New Version'
     if (pathname.includes('/dashboard/report')) return 'Complete Report'
     if (pathname.includes('/dashboard/profile')) return 'User Profile'
     if (pathname.includes('/dashboard/help')) return 'Help'
     if (pathname.includes('/dashboard/projects')) return 'Projects'
-    if (pathname.includes('/dashboard')) return 'Dashboard'
+    if (pathname.includes('/dashboard')) return 'Overview'
     return 'CPMreview'
   }
 
