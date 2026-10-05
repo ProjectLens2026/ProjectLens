@@ -228,6 +228,7 @@ export interface ProjectControlBasis {
 }
 
 export interface ScheduleVersion {
+  parentVersionId?: string
   id: string
   uploadedAt: string
   dataDate?: string
