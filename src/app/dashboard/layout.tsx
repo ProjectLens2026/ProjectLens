@@ -2,8 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import VersionNavigation, { VersionContent } from '@/components/VersionNavigation'
-import { SELF_SERVICE_CHECKOUT_ENABLED, PILOT_CONTACT_HREF } from '@/lib/launchPolicy'
 import Sidebar from '@/components/Sidebar'
 import HelpWidget from '@/components/HelpWidget'
 import { migrateLegacyData, loadProjects, getActiveProjectId, setActiveProjectId } from '@/lib/projectStore'
@@ -115,17 +113,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (checking || !user) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-900">
       <div className="flex flex-col items-center gap-3">
-        {/* Loading mark — CPMreview 4-bar mark, pulsing.
+        {/* Loading mark — ControlLens 4-bar mark, pulsing.
             44x32 dimensions match the other inline marks across the app
             (login, auth pages, sidebar). The animate-pulse class gives the
             soft fade in/out during the brief auth-check window. */}
-        <svg width="44" height="32" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" className="animate-pulse" aria-label="CPMreview mark">
+        <svg width="44" height="32" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" className="animate-pulse" aria-label="ControlLens mark">
           <rect x="0" y="0" width="32" height="5" rx="1" fill="#2563eb"/>
           <rect x="0" y="9" width="44" height="5" rx="1" fill="#dc2626"/>
           <rect x="0" y="18" width="26" height="5" rx="1" fill="#16a34a"/>
           <rect x="0" y="27" width="36" height="5" rx="1" fill="#1f2937"/>
         </svg>
-        <div className="text-white/40 text-sm">Loading CPMreview...</div>
+        <div className="text-white/40 text-sm">Loading ControlLens...</div>
       </div>
     </div>
   )
@@ -137,7 +135,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const showPaywall = planInfo?.requiresPayment && !isPathAllowedDuringPaywall(pathname || '')
 
   return (
-    <VersionNavigation><div className="app-shell flex h-screen overflow-hidden bg-slate-100">
+    <div className="app-shell flex h-screen overflow-hidden bg-slate-100">
       {/* print:hidden — sidebar should not appear in printed pages.
           Each page's main content prints on its own. */}
       <div className="print:hidden">
@@ -145,12 +143,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </div>
       <div className="app-main flex-1 overflow-hidden flex flex-col min-w-0">
         {!showPaywall && <TrialBanner planInfo={planInfo} />}
-        {showPaywall ? <PaywallScreen planInfo={planInfo!} /> : <VersionContent>{children}</VersionContent>}
+        {showPaywall ? <PaywallScreen planInfo={planInfo!} /> : children}
       </div>
       <div className="print:hidden">
         <HelpWidget />
       </div>
-    </div></VersionNavigation>
+    </div>
   )
 }
 
@@ -182,15 +180,13 @@ function PaywallScreen({ planInfo }: { planInfo: OrgPlanInfo }) {
     }
   }
 
-  if (!SELF_SERVICE_CHECKOUT_ENABLED) return <div className="flex-1 overflow-y-auto bg-slate-50 p-6"><div className="mx-auto mt-16 max-w-xl rounded-2xl border border-slate-200 bg-white p-8"><h1 className="text-2xl font-bold text-slate-900">Workspace access needs review</h1><p className="mt-3 text-sm text-slate-600">Self-service subscriptions are paused while we onboard pilot companies. Contact us to confirm access for your workspace.</p><a href={PILOT_CONTACT_HREF} className="mt-6 inline-block rounded-lg bg-blue-600 px-5 py-3 text-sm font-bold text-white">Contact the pilot team</a><p className="mt-4 text-xs text-slate-500">If you have an existing subscription, you can manage it in Settings → Billing.</p></div></div>
-
   const headline = planInfo.subscriptionStatus === 'canceled'
     ? 'Your subscription has ended'
     : 'Your 15-day free trial has ended'
 
   const subhead = planInfo.subscriptionStatus === 'canceled'
-    ? 'Re-subscribe to CPMreview Pro to regain access to your projects, TIA, Trend, and EVM.'
-    : "You used the full 15 days. Subscribe to CPMreview Pro to keep your projects, TIA, Trend, and EVM."
+    ? 'Re-subscribe to ControlLens Pro to regain access to your projects, TIA, Trend, and EVM.'
+    : "You used the full 15 days. Subscribe to ControlLens Pro to keep your projects, TIA, Trend, and EVM."
 
   return (
     <div className="flex-1 overflow-y-auto bg-slate-50">
@@ -204,7 +200,7 @@ function PaywallScreen({ planInfo }: { planInfo: OrgPlanInfo }) {
 
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 mb-6 text-left">
             <div className="text-xs font-bold text-blue-900 uppercase tracking-wider mb-3">
-              CPMreview Pro
+              ControlLens Pro
             </div>
             <div className="flex items-baseline gap-1 mb-3">
               <span className="text-3xl font-extrabold text-slate-900">$99</span>
@@ -245,7 +241,7 @@ function PaywallScreen({ planInfo }: { planInfo: OrgPlanInfo }) {
           )}
 
           <p className="text-[11px] text-slate-400 mt-4">
-            Need more than 5 projects? <a href="mailto:sales@control-lens.com" className="text-blue-600 hover:underline">Contact sales</a>
+            Need more than 5 projects? <a href="mailto:sales@cpmreview.com" className="text-blue-600 hover:underline">Contact sales</a>
           </p>
         </div>
       </div>
@@ -283,8 +279,6 @@ function TrialBanner({ planInfo }: { planInfo: OrgPlanInfo | null }) {
       setDismissed(localStorage.getItem(`pl_trial_banner_dismissed_${k}`) === '1')
     } catch {}
   }, [])
-
-  if (!SELF_SERVICE_CHECKOUT_ENABLED) return null
 
   // Show only during trial — skip for active/canceled/lifetime subscriptions.
   if (!planInfo) return null
