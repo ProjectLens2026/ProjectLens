@@ -251,12 +251,12 @@ export default function ProfilePage() {
 
         <section className="bg-white border border-slate-200 rounded-xl p-5">
           <h2 className="text-base font-bold text-slate-900 mb-1">Preferences</h2>
-          <p className="text-xs text-slate-500 mb-5">Tweak how ControlLens looks and behaves for you.</p>
+          <p className="text-xs text-slate-500 mb-5">Tweak how CPMReview looks and behaves for you.</p>
           <div className="flex items-start justify-between p-4 bg-slate-50 border border-slate-200 rounded-lg">
             <div className="flex-1">
-              <div className="text-sm font-bold text-slate-900 mb-0.5">Show "Ask ControlLens" chat widget</div>
+              <div className="text-sm font-bold text-slate-900 mb-0.5">Show "Ask CPMReview" chat widget</div>
               <div className="text-xs text-slate-500 leading-relaxed">
-                The floating chat bubble at the bottom-right of every page. Turn off if you want a cleaner UI - you can still get help by emailing support@control-lens.com.
+                The floating chat bubble at the bottom-right of every page. Turn off if you want a cleaner UI - you can still get help by emailing support@cpmreview.com.
               </div>
             </div>
             <button
