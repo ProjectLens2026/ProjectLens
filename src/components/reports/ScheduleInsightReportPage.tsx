@@ -84,6 +84,7 @@ export default function ScheduleInsightReportPage({ mode }: { mode: Mode }) {
           title={cfg.title}
           reportNo={reportNo}
           versionLabel={version.versionLabel || version.fileName || 'Active version'}
+          sourceFileName={version.fileName || ''}
           orgName={(project as any).company || undefined}
           project={project}
         />

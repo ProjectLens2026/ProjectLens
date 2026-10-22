@@ -833,6 +833,7 @@ export default function ApprovalReadinessPage() {
       mode={mode}
       kind={reportKind}
       project={project}
+      sourceFileName={version?.fileName || ''}
       reviewSnapshot={reviewSnapshot}
       analysis={analysis}
       reportSignalIds={reportSignalIds}
@@ -1036,6 +1037,7 @@ export default function ApprovalReadinessPage() {
           narrative={narrativeForCurrentVersion}
           projectName={project?.name || 'Project'}
           versionLabel={version?.versionLabel || version?.fileName || 'Schedule version'}
+          sourceFileName={version?.fileName || ''}
           disabled={reviewMutation}
           onSave={saveNarrative}
         />
@@ -1328,10 +1330,11 @@ function AddReviewItemModal({ versionId, disabled, onCancel, onSave }: {
   </div>
 }
 
-function ScheduleNarrativePanel({ narrative, projectName, versionLabel, disabled, onSave }: {
+function ScheduleNarrativePanel({ narrative, projectName, versionLabel, sourceFileName, disabled, onSave }: {
   narrative: ScheduleNarrative
   projectName: string
   versionLabel: string
+  sourceFileName: string
   disabled: boolean
   onSave: (narrative: ScheduleNarrative, issue: boolean) => Promise<void>
 }) {
@@ -1371,7 +1374,7 @@ function ScheduleNarrativePanel({ narrative, projectName, versionLabel, disabled
       </div>
     </div>
     <div id="schedule-narrative-print-area" className="fixed -left-[10000px] top-0 w-[760px] bg-white p-6" aria-hidden="true">
-      <div className="border-b-2 border-slate-900 pb-3 mb-4"><div className="text-[10px] font-bold uppercase tracking-widest text-blue-600">Schedule Update Narrative</div><div className="text-[20px] font-black text-slate-900 mt-1">{projectName}</div><div className="text-[11px] text-slate-500 mt-1">{versionLabel} · {narrative.reviewPurpose.replaceAll('_', ' ')}</div></div>
+      <div className="border-b-2 border-slate-900 pb-3 mb-4"><div className="text-[10px] font-bold uppercase tracking-widest text-blue-600">Schedule Update Narrative</div><div className="text-[20px] font-black text-slate-900 mt-1">{projectName}</div><div className="text-[11px] text-slate-500 mt-1">{versionLabel} · {narrative.reviewPurpose.replaceAll('_', ' ')}</div><div className="text-[10px] text-slate-500 mt-1"><span className="font-bold uppercase tracking-wide text-slate-400">Reviewed source file:</span> <span className="font-mono text-slate-700">{sourceFileName || '—'}</span></div></div>
       {draft.sections.map((item, index) => <section key={item.key} className="mb-5 break-inside-avoid">
         <h2 className="border-b border-slate-300 pb-1 text-[13px] font-extrabold text-slate-900">{index + 1}. {item.title}</h2>
         {item.automatedFacts.length > 0 && <div className="mt-2 space-y-1">{item.automatedFacts.map(fact => <div key={fact.id} className="text-[10px] text-slate-700"><b>{fact.label}:</b> {fact.currentValue}{fact.priorValue && fact.priorValue !== '—' ? ` · Prior: ${fact.priorValue}` : ''}</div>)}</div>}
@@ -1392,9 +1395,9 @@ function VersionChangesPanel({ project, version }: { project: any; version: any 
     <h2 className="text-[15px] font-extrabold text-slate-900">Changes Since Prior Version</h2>
     <p className="text-[11px] text-slate-500 mt-1">Use the deterministic version comparison for added/deleted activities, relationship changes, duration changes and forecast movement.</p>
     {prior ? <div className="grid md:grid-cols-[1fr_auto_1fr] gap-3 items-center mt-4">
-      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4"><div className="text-[9px] font-bold uppercase text-slate-500">Prior submission</div><div className="text-[12px] font-extrabold text-slate-900 mt-1">{prior.versionLabel || prior.fileName}</div><div className="text-[10px] text-slate-500 mt-1">Data date: {shortDate(prior.dataDate || prior.analysis?.dataDate)}</div></div>
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4"><div className="text-[9px] font-bold uppercase text-slate-500">Prior submission</div><div className="text-[12px] font-extrabold text-slate-900 mt-1">{prior.versionLabel || prior.fileName}</div><div className="text-[10px] text-slate-500 mt-1">Data date: {shortDate(prior.dataDate || prior.analysis?.dataDate)}</div><div className="text-[9px] font-mono text-slate-600 mt-1">File: {prior.fileName || '—'}</div></div>
       <span className="text-slate-400 text-center">→</span>
-      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4"><div className="text-[9px] font-bold uppercase text-blue-600">Current submission</div><div className="text-[12px] font-extrabold text-slate-900 mt-1">{version?.versionLabel || version?.fileName}</div><div className="text-[10px] text-slate-500 mt-1">Data date: {shortDate(version?.dataDate || version?.analysis?.dataDate)}</div></div>
+      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4"><div className="text-[9px] font-bold uppercase text-blue-600">Current submission</div><div className="text-[12px] font-extrabold text-slate-900 mt-1">{version?.versionLabel || version?.fileName}</div><div className="text-[10px] text-slate-500 mt-1">Data date: {shortDate(version?.dataDate || version?.analysis?.dataDate)}</div><div className="text-[9px] font-mono text-slate-600 mt-1">File: {version?.fileName || '—'}</div></div>
     </div> : <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-[11px] text-slate-500 mt-4">This is the first schedule version. Upload a later submission before running a version comparison.</div>}
     {prior && <div className="flex justify-end mt-4"><Link href="/dashboard/changes" className="rounded-lg bg-blue-600 px-4 py-2 text-[11px] font-bold text-white">Open Version Comparison →</Link></div>}
   </section>
@@ -1491,11 +1494,12 @@ function RequirementBadge({ strength, gate = false }: { strength?: string; gate?
 // Save-as-PDF uses the browser print dialog; the dashboard layout hides the
 // sidebar on print, and the toolbar below is print-hidden.
 // =============================================================================
-function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis, reportSignalIds, reviewComments, onBack }: {
+function ApprovalReport({ result, mode, kind, project, sourceFileName, reviewSnapshot, analysis, reportSignalIds, reviewComments, onBack }: {
   result: ApprovalReadinessResult
   mode: ApprovalMode
   kind: 'executive' | 'complete'
   project: any
+  sourceFileName: string
   reviewSnapshot: ScheduleReviewSnapshot | null
   analysis: any
   reportSignalIds: string[]
@@ -1565,10 +1569,11 @@ function ApprovalReport({ result, mode, kind, project, reviewSnapshot, analysis,
           </div>
 
           {/* project strip */}
-          <div className="grid grid-cols-3 gap-6 mb-5">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-5">
             <Info label="Project" value={project?.name || '—'} />
             <Info label="Project Code" value={project?.projectId || '—'} mono />
             <Info label="Review Mode" value={voice} />
+            <Info label="Reviewed Source File" value={sourceFileName || '—'} mono />
           </div>
 
           {/* ── Executive summary block (both reports) ───────────────── */}

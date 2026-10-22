@@ -92,6 +92,7 @@ export default function LogicTraceReportPage() {
             title="Logic Trace Report"
             reportNo={reportNo}
             versionLabel={version.versionLabel || version.fileName || 'Active version'}
+            sourceFileName={version.fileName || ''}
             project={project}
           />
 

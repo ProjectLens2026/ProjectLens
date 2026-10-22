@@ -57,6 +57,7 @@ export default function ApprovalReadinessReportPage() {
           title={result.mode === 'REVIEWER' ? "Owner's Schedule Review" : 'Schedule Readiness Review'}
           reportNo={reportNo}
           versionLabel={version.versionLabel || version.fileName || 'Active version'}
+          sourceFileName={version.fileName || ''}
           project={project}
         />
 
