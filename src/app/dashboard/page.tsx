@@ -11,7 +11,7 @@ import {
   Project, ScheduleVersion,
 } from '@/lib/projectStore'
 import { countRiskCategories } from '@/lib/riskDetector'
-import PhaseProgressStrip from '@/components/PhaseProgressStrip'
+import { analysisWithProjectBasis } from '@/lib/projectReviewBasis'
 
 // =============================================================================
 // Executive Dashboard — main /dashboard page.
@@ -121,7 +121,7 @@ function ExecutiveDashboardInner() {
 }
 
 function DashboardContent({ project, version }: { project: Project; version: ScheduleVersion }) {
-  const a = version.analysis || {}
+  const a = analysisWithProjectBasis(version.analysis || {}, project)
 
   // ============================================================================
   // MANUAL CONTRACT DATES (project + version level) — primary source of truth
@@ -179,14 +179,15 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
     ['final completion', 'final compl', 'project finish', 'project close', 'closeout', 'project completion', 'punch list complete']
   )
 
-  // Contract End: MANUAL Original Contract Completion → XER fallback
+  // Contract completion is contractual project-basis data. P6 plan_end_date is
+  // an administrative term and must never be used to report project delay.
   const contractEnd = manualOriginalCompletion
-    || a.contractEnd || a.contract_end || a.contractFinish || a.contract_finish || a.contractCompletion
 
   // Forecast must come from the selected XER analysis. Never substitute the
   // contract completion date, because that would manufacture an on-time
   // forecast when the schedule provides no usable projected finish.
   const projectedEnd = a.projectedEnd || a.projected_end || a.forecastFinish || a.forecast_finish || a.projectedFinish
+  const administrativeTermDate = project.contractDates?.administrativeTermDate || a.administrativeTermDate
   const finalCompletion = a.finalCompletion || a.final_completion || a.projectFinish || a.project_finish || a.finalComp || findMilestoneDate(finalMilestoneObj) || projectedEnd
   const substantialCompletion = a.substantialCompletion || a.substantial_completion || a.substComp || a.subComp || a.substantialComp || a.substCompletion || findMilestoneDate(substMilestoneObj)
 
@@ -241,8 +242,8 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   const remainingDuration = remainingDurationComputed ?? remainingDurationField ?? 0
 
   // Days Behind = Projected End - Revised Contract Completion (if forecast is past contract)
-  let daysBehind: number | undefined = numOrUndefAtTop(a.daysBehind ?? a.days_behind ?? a.behindContract)
-  if (daysBehind === undefined && revisedContractCompletion && projectedEnd) {
+  let daysBehind: number | undefined
+  if (revisedContractCompletion && projectedEnd) {
     const cD = new Date(revisedContractCompletion)
     const pD = new Date(projectedEnd)
     if (!isNaN(cD.getTime()) && !isNaN(pD.getTime())) {
@@ -541,6 +542,7 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
             <div className="space-y-3 text-xs">
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-2"><span className="text-slate-500">Version</span><span className="font-bold text-slate-900 text-right">{version.versionLabel || xerFile}</span></div>
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-2"><span className="text-slate-500">Data date</span><span className="font-bold text-slate-900">{fmtDate(dataDate)}</span></div>
+              <div className="flex justify-between gap-4 border-b border-slate-100 pb-2"><span className="text-slate-500">Administrative term date</span><span className="font-bold text-slate-900">{fmtDate(administrativeTermDate)}</span></div>
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-2"><span className="text-slate-500">Activities</span><span className="font-bold text-slate-900">{totalActivities > 0 ? totalActivities.toLocaleString() : '—'}</span></div>
               <div className="flex justify-between gap-4"><span className="text-slate-500">Uploaded</span><span className="font-bold text-slate-900">{lastUpdated}</span></div>
             </div>
@@ -592,8 +594,6 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
           )}
         </Card>
 
-        <PhaseProgressStrip key={version.id} analysis={a} originalBaseline={version.scheduleType === 'baseline'} dataDate={dataDate} />
-
         <Card>
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -603,7 +603,7 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
             <Link href="/dashboard/controls" className="text-xs font-semibold text-blue-600 hover:text-blue-800">Open Project Controls</Link>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Physical progress</div><div className="text-xl font-black text-slate-900 mt-1">By phase</div><div className="text-[10px] text-slate-400 mt-1">Reported values in the phase strip above</div></div>
+            <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Work complete</div><div className="text-xl font-black text-slate-900 mt-1">{hasWorkComplete ? `${Math.round(workCompleteNum)}%` : '—'}</div><div className="text-[10px] text-slate-400 mt-1">Selected schedule calculation</div></div>
             <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Risk categories</div><div className={clsx('text-xl font-black mt-1', risksCritical > 0 ? 'text-red-600' : 'text-slate-900')}>{risksAll}</div><div className="text-[10px] text-slate-400 mt-1">{risksCritical} critical · {risksHigh} high</div></div>
             <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Long-lead at risk</div><div className={clsx('text-xl font-black mt-1', longLeadAtRisk > 0 ? 'text-amber-600' : 'text-slate-900')}>{longLeadAtRisk}</div><div className="text-[10px] text-slate-400 mt-1">of {longLeadTotal} detected items</div></div>
             <div><div className="text-[10px] uppercase tracking-wide text-slate-500 font-bold">Remaining duration</div><div className="text-xl font-black text-slate-900 mt-1">{remainingDuration || '—'}</div><div className="text-[10px] text-slate-400 mt-1">calendar days to authorized completion</div></div>

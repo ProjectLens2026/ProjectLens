@@ -194,7 +194,7 @@ export const NARRATIVE_SECTION_TITLES: Record<NarrativeSectionKey, string> = {
   CONTRACT_MILESTONES: 'Contract dates and milestone status',
   PROGRESS_THIS_PERIOD: 'Progress completed this period',
   NEXT_PERIOD_WORK: 'Planned work for the next period',
-  CHANGES_FROM_PRIOR_VERSION: 'Changes from the previous XER',
+  CHANGES_FROM_PRIOR_VERSION: 'Changes from the previous schedule version',
   LONGEST_AND_CRITICAL_PATHS: 'Current longest path and critical path',
   DELAYS_AND_CONSTRAINTS: 'Delays, constraints and unresolved issues',
   PROCUREMENT_AND_LONG_LEAD: 'Procurement and long-lead items',
@@ -371,4 +371,3 @@ export function upsertScheduleNarrative(
     updatedAt: now,
   }
 }
-

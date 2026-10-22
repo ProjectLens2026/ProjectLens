@@ -10,6 +10,7 @@ import {
 } from '@/lib/projectStore'
 import { countRiskCategories } from '@/lib/riskDetector'
 import { evmCumulative, migrateEvmData, fmtRatio, spiMeaning } from '@/lib/evm'
+import { analysisWithProjectBasis } from '@/lib/projectReviewBasis'
 // =============================================================================
 // Enterprise Dashboard — portfolio-level view across ALL projects in the workspace.
 //
@@ -397,7 +398,7 @@ function buildRows(projects: Project[]): ProjectRowData[] {
     .map(p => {
       const status = getProjectStatus(p)
       const latest = getLatestVersion(p)
-      const a: any = latest?.analysis || {}
+      const a: any = analysisWithProjectBasis(latest?.analysis || {}, p)
       const condition = a.condition || a.healthLabel
       const healthScore = num(a.healthScore, deriveScoreFromCondition(condition))
       // -----------------------------------------------------------------------
@@ -407,7 +408,7 @@ function buildRows(projects: Project[]): ProjectRowData[] {
       // scheduler re-baselines or adjusts.
       // -----------------------------------------------------------------------
       const manualNtp = p.contractDates?.ntp
-      const manualOriginalCompletion = p.contractDates?.originalContractCompletion
+      const manualOriginalCompletion = p.contractDates?.currentFinalCompletion || p.contractDates?.originalContractCompletion
       // Dates — order matters. We resolve dataDate first because both
       // projectStart and daysBehind depend on it.
       const dataDate = a.dataDate || a.data_date || (latest as any)?.dataDate || latest?.uploadedAt
@@ -416,14 +417,15 @@ function buildRows(projects: Project[]): ProjectRowData[] {
       // column reflects what the PM entered on the upload form, not whatever
       // the XER analyzer guessed.
       const projectStart = manualNtp || a.projectStart || a.project_start || a.ntp || a.ntpDate || dataDate
-      // Contract End — MANUAL Original Contract Completion first, then XER fallback.
-      const contractEnd = manualOriginalCompletion || a.contractEnd || a.contract_end || a.contractFinish || a.contract_finish
+      // Contract End is project-basis data. Never fall back to P6's
+      // administrative project term when calculating contractual delay.
+      const contractEnd = manualOriginalCompletion
       const projectedEnd = a.projectedEnd || a.projected_end || a.forecastFinish || a.forecast_finish || a.projectedFinish
       // Days behind — if the analysis pipeline didn't store it explicitly,
       // compute as the gap in days between projectedEnd and contractEnd.
       // Positive = behind, negative = ahead, undefined = unknown.
-      let daysBehind: number | undefined = numOrUndef(a.daysBehind ?? a.days_behind ?? a.behindContract)
-      if (daysBehind === undefined && projectedEnd && contractEnd) {
+      let daysBehind: number | undefined
+      if (projectedEnd && contractEnd) {
         // Normalize both to date-only so time-of-day / timezone parsing differences
         // don't produce phantom +1 day diffs when the dates are actually the same.
         const cD = new Date(contractEnd)

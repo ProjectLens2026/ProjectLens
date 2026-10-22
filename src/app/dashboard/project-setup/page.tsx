@@ -56,6 +56,10 @@ const EMPTY_REQUIREMENTS: ScheduleRequirementsBasis = {
   resourceLoadedRequired: false,
   sdefRequired: false,
   narrativeRequired: false,
+  reviewApprovalDurationBasis: 'NOT_SET',
+  saturdayWorkPolicy: 'NOT_SET',
+  weatherCalendarPolicy: 'NOT_SET',
+  procurementCalendarBasis: 'NOT_SET',
 }
 
 const UFGS_REQUIREMENTS: ScheduleRequirementsBasis = {
@@ -138,6 +142,11 @@ function requirementsComplete(value: ScheduleRequirementsBasis) {
   return value.profile !== 'NOT_SET'
     && value.schedulingSoftware !== 'NOT_SET'
     && value.updateFrequency !== 'NOT_SET'
+    && Number(value.reviewApprovalDuration || 0) > 0
+    && value.reviewApprovalDurationBasis !== 'NOT_SET'
+    && value.saturdayWorkPolicy !== 'NOT_SET'
+    && value.weatherCalendarPolicy !== 'NOT_SET'
+    && value.procurementCalendarBasis !== 'NOT_SET'
 }
 
 function p6SettingsComplete(value: P6SettingsBasis) {
@@ -230,6 +239,10 @@ export default function ProjectControlBasisPage() {
       setProject(active)
       setDates({
         ntp: active?.contractDates?.ntp || '',
+        administrativeTermDate: active?.contractDates?.administrativeTermDate
+          || active?.versions?.[0]?.analysis?.administrativeTermDate
+          || active?.versions?.[0]?.analysis?.contractEnd
+          || '',
         substantialCompletion: active?.contractDates?.substantialCompletion || '',
         originalContractCompletion: active?.contractDates?.originalContractCompletion || '',
         contractMilestones: active?.contractDates?.contractMilestones || [],
@@ -285,6 +298,7 @@ export default function ProjectControlBasisPage() {
     const authorized = calculateAuthorizedPosition(dates, timeModifications)
     updateProjectContractDates(project.id, {
       ntp: dates.ntp || '',
+      administrativeTermDate: dates.administrativeTermDate || '',
       substantialCompletion: dates.substantialCompletion || '',
       originalContractCompletion: dates.originalContractCompletion || '',
       approvedTimeExtensionDays: authorized.finalDays,
@@ -364,7 +378,7 @@ export default function ProjectControlBasisPage() {
   function saveRequirements() {
     if (!project) return
     if (!requirementsComplete(requirements)) {
-      setError('Select a requirements profile, scheduling software, and update frequency before saving.')
+      setError('Complete the requirements profile, review/approval duration, and calendar policies before saving.')
       return
     }
     updateProjectControlBasis(project.id, {
@@ -628,6 +642,7 @@ export default function ProjectControlBasisPage() {
                 <DateField label="Notice to Proceed" value={dates.ntp || ''} onChange={value => { setDates(current => ({ ...current, ntp: value })); clearMessages() }} source="Project basis" />
                 <DateField label="Original substantial completion" value={dates.substantialCompletion || ''} onChange={value => { setDates(current => ({ ...current, substantialCompletion: value })); clearMessages() }} source="Project basis" />
                 <DateField label="Original final completion" value={dates.originalContractCompletion || ''} onChange={value => { setDates(current => ({ ...current, originalContractCompletion: value })); clearMessages() }} source="Project basis" />
+                <DateField label="Administrative term date" value={dates.administrativeTermDate || ''} onChange={value => { setDates(current => ({ ...current, administrativeTermDate: value })); clearMessages() }} source="Administrative only — excluded from delay" />
               </div>
               <SaveMessage error={error} saved={savedSection === 'contract-dates'} label="Contract dates saved to the project basis." />
               <div className="my-6 border-t border-slate-200" />
@@ -839,6 +854,19 @@ export default function ProjectControlBasisPage() {
               <div className="mt-5 grid gap-4 sm:grid-cols-2">
                 <NumberField label="Maximum normal activity duration" value={requirements.maxActivityDurationDays} suffix="workdays" onChange={value => setRequirements(current => ({ ...current, maxActivityDurationDays: value }))} />
                 <NumberField label="Long-lead procurement threshold" value={requirements.longLeadThresholdDays} suffix="calendar days" onChange={value => setRequirements(current => ({ ...current, longLeadThresholdDays: value }))} />
+              </div>
+              <h3 className="mb-3 mt-6 text-sm font-bold text-slate-950">Review, approval and calendar basis</h3>
+              <Notice tone="blue">These contract requirements become approval gates. CPMreview does not assume a review period or permitted workweek.</Notice>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <NumberField label="Review / approval duration" value={requirements.reviewApprovalDuration} suffix={requirements.reviewApprovalDurationBasis === 'CALENDAR_DAYS' ? 'calendar days' : requirements.reviewApprovalDurationBasis === 'WORKING_DAYS' ? 'working days' : 'days'} onChange={value => { setRequirements(current => ({ ...current, reviewApprovalDuration: value })); clearMessages() }} />
+                <SelectField label="Review duration basis" value={requirements.reviewApprovalDurationBasis || 'NOT_SET'} onChange={value => { setRequirements(current => ({ ...current, reviewApprovalDurationBasis: value as ScheduleRequirementsBasis['reviewApprovalDurationBasis'] })); clearMessages() }}
+                  options={[["NOT_SET", "Select day basis"], ["CALENDAR_DAYS", "Calendar days"], ["WORKING_DAYS", "Working days"]]} />
+                <SelectField label="Saturday work" value={requirements.saturdayWorkPolicy || 'NOT_SET'} onChange={value => { setRequirements(current => ({ ...current, saturdayWorkPolicy: value as ScheduleRequirementsBasis['saturdayWorkPolicy'] })); clearMessages() }}
+                  options={[["NOT_SET", "Select contract rule"], ["PROHIBITED", "Not permitted"], ["ALLOWED", "Permitted"]]} />
+                <SelectField label="Weather calendar" value={requirements.weatherCalendarPolicy || 'NOT_SET'} onChange={value => { setRequirements(current => ({ ...current, weatherCalendarPolicy: value as ScheduleRequirementsBasis['weatherCalendarPolicy'] })); clearMessages() }}
+                  options={[["NOT_SET", "Select contract rule"], ["REQUIRED", "Required"], ["NOT_REQUIRED", "Not required"]]} />
+                <SelectField label="Procurement calendar" value={requirements.procurementCalendarBasis || 'NOT_SET'} onChange={value => { setRequirements(current => ({ ...current, procurementCalendarBasis: value as ScheduleRequirementsBasis['procurementCalendarBasis'] })); clearMessages() }}
+                  options={[["NOT_SET", "Select contract rule"], ["SEVEN_DAY", "7-day calendar required"], ["PROJECT_SPECIFIC", "Project-specific"]]} />
               </div>
               <TextArea label="Project-specific requirements / exceptions" value={requirements.notes || ''} onChange={value => setRequirements(current => ({ ...current, notes: value }))} />
               <SaveMessage error={error} saved={savedSection === 'requirements'} label="Schedule requirements saved at the project level." />

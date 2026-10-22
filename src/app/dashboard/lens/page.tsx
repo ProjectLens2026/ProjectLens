@@ -17,14 +17,7 @@ import { buildScheduleReviewSnapshot } from '@/lib/scheduleReviewSnapshot'
 import { reviewOpenEndedLogic } from '@/lib/approval-readiness/qualityRules'
 import TraceLogicPanel from '@/components/TraceLogicPanel'
 import { printReport } from '@/lib/printReport'
-
-// Normalize generated and previously cached narrative wording at display time.
-// Do not change finding IDs, activity IDs, saved review records or route keys.
-function neutralFindingText(value: string | null | undefined): string {
-  return String(value || '')
-    .replace(/\bControl\s*Lens\b/gi, 'Schedule analysis')
-    .replace(/\bCL\s+(?=critical\s+path|longest\s+path|path\s+evidence)/gi, '')
-}
+import { analysisWithProjectBasis } from '@/lib/projectReviewBasis'
 
 export default function ControlLensAnalysisPage() {
   const [analysis, setAnalysis] = useState<any>(null)
@@ -54,7 +47,7 @@ export default function ControlLensAnalysisPage() {
     const v = getActiveVersion(p)
     setVersion(v)
     const waitingForDetail = v?.analysisState === 'summary' || v?.analysisState === 'loading'
-    setAnalysis(waitingForDetail ? null : v?.analysis || null)
+    setAnalysis(waitingForDetail ? null : analysisWithProjectBasis(v?.analysis || null, p))
     if (v && v.analysisState === 'summary') void loadVersionAnalysis(v.id)
   }
 
@@ -220,7 +213,13 @@ export default function ControlLensAnalysisPage() {
           <Link href="/dashboard" className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400 hover:text-blue-600 font-semibold">
             Overview
           </Link>
-          <button onClick={() => printReport('full-cpm-print-area', { title: `${project.name} — Full CPM Analysis`, footerLabel: project.projectId || '' })} className="text-xs border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg hover:border-slate-400 font-semibold flex items-center gap-1.5">
+          <button
+            onClick={() => printReport('full-cpm-print-area', {
+              title: `${project.name} — Full CPM Analysis`,
+              footerLabel: project.projectId || '',
+            })}
+            className="text-xs border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg hover:border-slate-400 font-semibold flex items-center gap-1.5"
+          >
             🖨 Print / Save PDF
           </button>
           <Link href="/dashboard/upload" className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400 hover:text-blue-600 font-semibold">
@@ -238,8 +237,9 @@ export default function ControlLensAnalysisPage() {
               <div className="text-xs text-slate-500 mt-0.5">{a.fileType || 'Primavera P6 XER'} · Data date: {fmtDate(a.dataDate) || 'N/A'}</div>
             </div>
             <div className="text-right">
-              <div className="text-xs text-slate-500">Contract completion</div>
+              <div className="text-xs text-slate-500">Authorized contract completion</div>
               <div className="text-sm font-bold text-red-600">{fmtDate(a.contractEnd) || 'N/A'} <span className="text-xs font-normal text-slate-500">· Projected {fmtDate(a.projectedEnd) || 'N/A'}</span></div>
+              {a.administrativeTermDate && <div className="text-[10px] text-slate-400 mt-0.5">Administrative term: {fmtDate(a.administrativeTermDate)}</div>}
             </div>
           </div>
         </div>
@@ -308,8 +308,8 @@ export default function ControlLensAnalysisPage() {
                     <select value={scheduleFilter} onChange={e => setScheduleFilter(e.target.value as any)}
                       className="w-full border-2 border-slate-300 rounded-lg bg-white px-3 py-2.5 text-sm font-bold text-slate-900 shadow-sm focus:outline-none focus:border-blue-500">
                       <option value="cl-summary">CPM Analysis Summary</option>
-                      <option value="cl-critical">Critical Path Analysis</option>
-                      <option value="cl-longest">Longest Path Analysis</option>
+                      <option value="cl-critical">CPMr Critical Path</option>
+                      <option value="cl-longest">CPMr Longest Path</option>
                       <option value="critical">P6 Critical Activities</option>
                       <option value="lookahead">2 Week Lookahead</option>
                       <option value="not-started">Activities Not Started</option>
@@ -338,8 +338,8 @@ export default function ControlLensAnalysisPage() {
                     )}
 
                     <div className="mt-4 bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-700 leading-relaxed">
-                      <div className="font-bold text-slate-800 mb-1">CPM Analysis Interpretation</div>
-                      Critical activities can belong to different branches of the network and do not, by themselves, prove one continuous critical path. CPM Analysis Summary therefore does not run construction-path credibility against this list as if it were one chain. Path credibility is evaluated separately through the nature-of-work and readiness analysis so this P6 activity set remains submitted schedule evidence only.
+                      <div className="font-bold text-slate-800 mb-1">CPM analysis interpretation</div>
+                      Critical activities can belong to different branches of the network and do not, by themselves, prove one continuous critical path. Construction-path credibility is therefore not evaluated against this list as if it were one chain. Path credibility is evaluated separately through nature-of-work and readiness analysis so this P6 activity set remains submitted schedule evidence only.
                     </div>
                   </div>
                 )}
@@ -390,8 +390,8 @@ export default function ControlLensAnalysisPage() {
                               <div className="space-y-3">
                                 {highPriorityGroups.slice(0, 5).map((g: any) => (
                                   <div key={g.id} className="border-t border-red-200 pt-3 first:border-t-0 first:pt-0">
-                                    <div className="text-sm font-extrabold text-red-950">{neutralFindingText(g.title)}{g.count > 1 ? ` (${g.count})` : ''}</div>
-                                    <div className="text-xs font-medium text-red-900 mt-1 leading-relaxed">{neutralFindingText(g.detail)}</div>
+                                    <div className="text-sm font-extrabold text-red-950">{g.title}{g.count > 1 ? ` (${g.count})` : ''}</div>
+                                    <div className="text-xs font-medium text-red-900 mt-1 leading-relaxed">{g.detail}</div>
                                   </div>
                                 ))}
                               </div>
@@ -409,10 +409,10 @@ export default function ControlLensAnalysisPage() {
                               <div className="space-y-3">
                                 {reviewGroups.slice(0, 5).map((g: any) => (
                                   <div key={g.id} className="border-t border-amber-200 pt-3 first:border-t-0 first:pt-0">
-                                    <div className="text-sm font-extrabold text-amber-950">{neutralFindingText(g.title)}{g.count > 1 ? ` (${g.count})` : ''}</div>
+                                    <div className="text-sm font-extrabold text-amber-950">{g.title}{g.count > 1 ? ` (${g.count})` : ''}</div>
                                     <div className="text-xs font-medium text-amber-900 mt-1 leading-relaxed">{g.count > 1 && /area completion milestone/i.test(g.title)
                                       ? `${g.count} submitted area/building completion states occur before later readiness, startup, commissioning, training or turnover work. Review the affected completion logic rather than reading each activity as a separate issue.`
-                                      : neutralFindingText(g.detail)}</div>
+                                      : g.detail}</div>
                                   </div>
                                 ))}
                               </div>
@@ -424,22 +424,22 @@ export default function ControlLensAnalysisPage() {
                           <button type="button" onClick={() => setScheduleFilter('cl-critical')} className="text-left rounded-xl border-2 border-blue-200 bg-blue-50 p-5 hover:border-blue-400 transition-colors">
                             <div className="flex items-center justify-between gap-3">
                               <div>
-                                <div className="text-base font-extrabold text-slate-950">🎯 Critical Path Analysis</div>
+                                <div className="text-base font-extrabold text-slate-950">🎯 CPMr Critical Path</div>
                                 <div className="text-xs font-semibold text-slate-600 mt-1">Nature-of-work / readiness path</div>
                               </div>
                               <span className="text-sm font-extrabold text-blue-700">View Path →</span>
                             </div>
-                            {clPathIntelligence?.criticalPath && <div className="text-xs font-medium text-slate-700 mt-3 leading-relaxed">{neutralFindingText(clPathIntelligence.criticalPath.connectionNote)}</div>}
+                            {clPathIntelligence?.criticalPath && <div className="text-xs font-medium text-slate-700 mt-3 leading-relaxed">{clPathIntelligence.criticalPath.connectionNote}</div>}
                           </button>
                           <button type="button" onClick={() => setScheduleFilter('cl-longest')} className="text-left rounded-xl border-2 border-violet-200 bg-violet-50 p-5 hover:border-violet-400 transition-colors">
                             <div className="flex items-center justify-between gap-3">
                               <div>
-                                <div className="text-base font-extrabold text-slate-950">📏 Longest Path Analysis</div>
+                                <div className="text-base font-extrabold text-slate-950">📏 CPMr Longest Path</div>
                                 <div className="text-xs font-semibold text-slate-600 mt-1">Longest credible submitted work-state chain</div>
                               </div>
                               <span className="text-sm font-extrabold text-violet-700">View Path →</span>
                             </div>
-                            {clPathIntelligence?.longestPath && <div className="text-xs font-medium text-slate-700 mt-3 leading-relaxed">{neutralFindingText(clPathIntelligence.longestPath.connectionNote)}</div>}
+                            {clPathIntelligence?.longestPath && <div className="text-xs font-medium text-slate-700 mt-3 leading-relaxed">{clPathIntelligence.longestPath.connectionNote}</div>}
                           </button>
                         </div>
                       </>
@@ -450,12 +450,12 @@ export default function ControlLensAnalysisPage() {
                 {/* CL CRITICAL PATH — detail only when selected */}
                 {scheduleFilter === 'cl-critical' && (
                   <div>
-                    <button onClick={() => setScheduleFilter('cl-summary')} className="text-xs font-bold text-blue-700 mb-4">← Back to CPM Analysis Summary</button>
+                    <button onClick={() => setScheduleFilter('cl-summary')} className="text-xs font-bold text-blue-700 mb-4">← Back to Approval Summary</button>
                     <div className="border-2 border-blue-200 rounded-xl p-5 bg-white">
                       <div className="flex items-start gap-3 mb-3">
                         <span className="text-2xl">🎯</span>
                         <div className="flex-1">
-                          <div className="text-xl font-extrabold text-slate-950">Critical Path Analysis</div>
+                          <div className="text-xl font-extrabold text-slate-950">CPMr Critical Path</div>
                           <div className="text-xs uppercase tracking-wider font-extrabold text-slate-500 mt-1">Nature-of-work / readiness path</div>
                         </div>
                         {clPathIntelligence?.criticalPath && (
@@ -468,11 +468,11 @@ export default function ControlLensAnalysisPage() {
                         <>
                           <p className="text-sm font-semibold text-slate-700 leading-relaxed mb-3">{clPathIntelligence.criticalPath.basis}</p>
                           <div className={`text-sm font-bold rounded-lg px-4 py-3 mb-4 ${clPathIntelligence.criticalPath.connectionToTarget === 'SUBMITTED' ? 'bg-emerald-50 border border-emerald-200 text-emerald-900' : 'bg-amber-50 border border-amber-200 text-amber-900'}`}>
-                            {neutralFindingText(clPathIntelligence.criticalPath.connectionNote)}
+                            {clPathIntelligence.criticalPath.connectionNote}
                           </div>
                           <PathActivityTable activities={clPathIntelligence.criticalPath.activities} showRemaining />
                         </>
-                      ) : <div className="text-sm text-slate-400 py-6">CPM analysis could not establish a credible readiness endpoint for the selected completion target.</div>}
+                      ) : <div className="text-sm text-slate-400 py-6">A credible readiness endpoint could not be established for the selected completion target.</div>}
                     </div>
                   </div>
                 )}
@@ -480,12 +480,12 @@ export default function ControlLensAnalysisPage() {
                 {/* CL LONGEST PATH — detail only when selected */}
                 {scheduleFilter === 'cl-longest' && (
                   <div>
-                    <button onClick={() => setScheduleFilter('cl-summary')} className="text-xs font-bold text-blue-700 mb-4">← Back to CPM Analysis Summary</button>
+                    <button onClick={() => setScheduleFilter('cl-summary')} className="text-xs font-bold text-blue-700 mb-4">← Back to Approval Summary</button>
                     <div className="border-2 border-violet-200 rounded-xl p-5 bg-white">
                       <div className="flex items-start gap-3 mb-3">
                         <span className="text-2xl">📏</span>
                         <div className="flex-1">
-                          <div className="text-xl font-extrabold text-slate-950">Longest Path Analysis</div>
+                          <div className="text-xl font-extrabold text-slate-950">CPMr Longest Path</div>
                           <div className="text-xs uppercase tracking-wider font-extrabold text-slate-500 mt-1">Longest credible submitted work-state chain</div>
                         </div>
                       </div>
@@ -493,7 +493,7 @@ export default function ControlLensAnalysisPage() {
                         <>
                           <p className="text-sm font-semibold text-slate-700 leading-relaxed mb-3">{clPathIntelligence.longestPath.basis}</p>
                           <div className={`text-sm font-bold rounded-lg px-4 py-3 mb-4 ${clPathIntelligence.longestPath.connectionToTarget === 'SUBMITTED' ? 'bg-emerald-50 border border-emerald-200 text-emerald-900' : 'bg-amber-50 border border-amber-200 text-amber-900'}`}>
-                            {neutralFindingText(clPathIntelligence.longestPath.connectionNote)}
+                            {clPathIntelligence.longestPath.connectionNote}
                           </div>
                           <PathActivityTable activities={clPathIntelligence.longestPath.activities} showRemaining />
                         </>
@@ -769,7 +769,7 @@ function scheduleDateMs(value?: string | null): number | null {
 }
 
 // =============================================================================
-// PathActivityTable — P6/XER path truth. No CPM Analysis Interpretation here.
+// PathActivityTable — P6/XER path truth. No Control Lens interpretation here.
 // =============================================================================
 function PathActivityTable({ activities, showRemaining = false }: { activities: any[]; showRemaining?: boolean }) {
   const ordered = sortPathActivitiesByFinish(activities || [])
@@ -826,7 +826,7 @@ function PathCredibilityPanel({ result, title, compact = false }: { result: Path
       </div>
       {result.findings.length === 0 ? (
         <div className="text-[11px] text-slate-600 leading-relaxed">
-          CPM analysis checked the reported path against the currently authored construction-sequence rules and did not identify a path-level conflict. This does not replace project-specific reviewer judgment.
+          The reported path was checked against the current construction-sequence rules and no path-level conflict was identified. This does not replace project-specific reviewer judgment.
         </div>
       ) : (
         <div className="space-y-2">
@@ -834,10 +834,10 @@ function PathCredibilityPanel({ result, title, compact = false }: { result: Path
             <div key={f.id} className="bg-white/80 border border-white rounded p-2.5">
               <div className="flex items-center gap-2">
                 <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${f.level === 'CONFLICT' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{f.level}</span>
-                <span className="text-[11px] font-bold text-slate-800">{neutralFindingText(f.title)}</span>
+                <span className="text-[11px] font-bold text-slate-800">{f.title}</span>
                 <span className="text-[9px] text-slate-400 uppercase">{f.confidence} confidence</span>
               </div>
-              <div className="text-[11px] text-slate-600 mt-1 leading-relaxed">{neutralFindingText(f.detail)}</div>
+              <div className="text-[11px] text-slate-600 mt-1 leading-relaxed">{f.detail}</div>
               {f.evidence.length > 0 && (
                 <div className="text-[10px] text-slate-500 mt-1.5"><span className="font-semibold">Evidence:</span> {f.evidence.join(' · ')}</div>
               )}

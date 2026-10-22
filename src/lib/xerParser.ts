@@ -61,8 +61,6 @@ export interface TaskActivityCode {
 // derived here — the Step 2 engine infers scope live from wbsPath + activity
 // text + codes, so scope inference can improve without a re-upload.
 export interface TraceTask {
-  /** Raw physical progress; absent in older stored analyses. */
-  phys_complete_pct?: string
   task_id: string
   task_code: string
   task_name: string
@@ -105,6 +103,7 @@ export interface ParsedXER {
   projectName: string
   dataDate: string
   contractEnd: string
+  administrativeTermDate?: string
   projectedEnd: string
   tasks: Record<string, Task>
   relationships: Relationship[]
@@ -150,6 +149,7 @@ export interface XERAnalysis {
   healthScore: number
   condition: string
   delayDays: number
+  administrativeTermDate?: string
   dataDate?: string
   projectStartDate?: string
   projectStartSource?: string
@@ -252,6 +252,7 @@ export function parseXER(content: string): ParsedXER {
   let projectName = ''
   let dataDate = ''
   let contractEnd = ''
+  let administrativeTermDate = ''
   let projectedEnd = ''
   for (const rawLine of lines) {
     const line = rawLine.trim()
@@ -268,7 +269,10 @@ export function parseXER(content: string): ParsedXER {
         projectSettings = row
         projectName = row.proj_short_name || ''
         dataDate = row.last_recalc_date || ''
-        contractEnd = row.plan_end_date || ''
+        // PROJECT.plan_end_date is a P6 administrative/planned project term.
+        // It is not evidence of the governing contractual completion date.
+        administrativeTermDate = row.plan_end_date || ''
+        contractEnd = administrativeTermDate // legacy field retained for stored-analysis compatibility
         projectedEnd = row.scd_end_date || ''
       } else if (currentTable === 'SCHEDOPTIONS') {
         const row: Record<string, string> = {}
@@ -334,7 +338,7 @@ export function parseXER(content: string): ParsedXER {
   }
   return {
     sourceFormat: 'PRIMAVERA_XER', sourceLabel: 'Primavera P6 XER',
-    projectName, dataDate, contractEnd, projectedEnd,
+    projectName, dataDate, contractEnd, administrativeTermDate, projectedEnd,
     tasks, relationships, predMap, succMap, calendars, wbsNodes,
     projectSettings, scheduleOptions, activityCodeTypes, taskActivityCodes,
   }
@@ -883,7 +887,6 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   for (const t of taskArr) {
     const wnode = t.wbs_id ? wbsNodes[t.wbs_id] : undefined
     traceTasks[t.task_id] = {
-      phys_complete_pct: t.phys_complete_pct,
       task_id: t.task_id,
       task_code: t.task_code,
       task_name: t.task_name,
@@ -947,7 +950,7 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     scheduleOptions: parsed.scheduleOptions,
     activityCodeTypes: parsed.activityCodeTypes,
     taskActivityCodes: parsed.taskActivityCodes,
-    healthScore, condition, delayDays,
+    healthScore, condition, delayDays, administrativeTermDate: parsed.administrativeTermDate || parsed.contractEnd,
     dataDate: parsed.dataDate,
     projectStartDate, projectStartSource,
     substantialCompletionDate: substantialDate,

@@ -9,6 +9,7 @@ import {
   setActiveProjectId, setActiveVersionId, getLatestVersion, getVisibleVersions,
   migrateLegacyData, Project, ScheduleVersion, ContractDates, ContractMilestone
 } from '@/lib/projectStore'
+import { analysisWithProjectBasis } from '@/lib/projectReviewBasis'
 
 export default function ProjectsPage() {
   const router = useRouter()
@@ -46,8 +47,8 @@ export default function ProjectsPage() {
     setConfirmDelete(null)
   }
 
-  async function handleDeleteVersion(projectId: string, versionId: string) {
-    const result = await deleteVersion(projectId, versionId)
+  function handleDeleteVersion(projectId: string, versionId: string) {
+    const result = deleteVersion(projectId, versionId)
     if (!result.ok) {
       window.alert(result.error || 'Unable to delete this version.')
       return
@@ -242,7 +243,7 @@ export default function ProjectsPage() {
           {projects.map(p => {
             const visibleVersions = getVisibleVersions(p)
             const latest = getLatestVersion(p)
-            const analysis = latest?.analysis
+            const analysis = latest?.analysis ? analysisWithProjectBasis(latest.analysis, p) : null
             const cond = conditionStyle(analysis?.condition)
             const isExpanded = expandedId === p.id
             const isEditing = editingId === p.id

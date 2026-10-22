@@ -87,6 +87,7 @@ export interface ContractMilestone {
 export interface ContractDates {
   ntp?: string                          // ISO date (YYYY-MM-DD)
   originalContractCompletion?: string   // ISO date (YYYY-MM-DD)
+  administrativeTermDate?: string       // P6/administrative term; never used to calculate contractual delay
   // NEW (Day 5, v2) — manual Substantial Completion date.
   // Displayed on the dashboard alongside the XER-detected Substantial
   // Completion milestone, so PMs can compare what the contract says
@@ -133,6 +134,11 @@ export interface ScheduleRequirementsBasis {
   narrativeRequired: boolean
   maxActivityDurationDays?: number
   longLeadThresholdDays?: number
+  reviewApprovalDuration?: number
+  reviewApprovalDurationBasis?: 'NOT_SET' | 'CALENDAR_DAYS' | 'WORKING_DAYS'
+  saturdayWorkPolicy?: 'NOT_SET' | 'PROHIBITED' | 'ALLOWED'
+  weatherCalendarPolicy?: 'NOT_SET' | 'REQUIRED' | 'NOT_REQUIRED'
+  procurementCalendarBasis?: 'NOT_SET' | 'SEVEN_DAY' | 'PROJECT_SPECIFIC'
   notes?: string
 }
 
@@ -228,7 +234,6 @@ export interface ProjectControlBasis {
 }
 
 export interface ScheduleVersion {
-  parentVersionId?: string
   id: string
   uploadedAt: string
   dataDate?: string
@@ -243,6 +248,11 @@ export interface ScheduleVersion {
   analysisState?: 'summary' | 'loading' | 'loaded' | 'error' | 'unavailable'
   analysisError?: string
   versionDates?: VersionDates           // NEW — per-version manual entries
+
+  // TIA lineage — a fragnet must identify the exact un-impacted version from
+  // which it was copied. Stored with the version so the pair cannot silently
+  // drift when newer project updates are uploaded later.
+  parentVersionId?: string
 
   // NEW (Day 6, v14) — structured version labeling.
   // scheduleType drives label format: BL-NTP-NN for baseline/rebaseline,
@@ -1514,7 +1524,7 @@ export function permanentlyDeleteProject(id: string) {
  * Refuses if this is the only non-deleted version on the project — UI also
  * blocks this but we enforce here too (defense in depth).
  */
-export async function deleteVersion(projectId: string, versionId: string): Promise<{ ok: boolean; error?: string }> {
+export function deleteVersion(projectId: string, versionId: string): { ok: boolean; error?: string } {
   const idx = _projects.findIndex(p => p.id === projectId)
   if (idx === -1) return { ok: false, error: 'Project not found' }
 
@@ -1522,17 +1532,6 @@ export async function deleteVersion(projectId: string, versionId: string): Promi
   const activeVersions = project.versions.filter(v => !v.deletedAt)
   if (activeVersions.length <= 1 && activeVersions.some(v => v.id === versionId)) {
     return { ok: false, error: 'Cannot delete the only version on this project. Upload a new version first.' }
-  }
-
-  // Persist in Supabase before changing the local mirror. Previously this was
-  // fire-and-forget, so a failed/locked cloud write could be overwritten by a
-  // later cloud hydration and make the deleted version reappear.
-  try {
-    const cloudOk = await softDeleteVersionInSupabase(projectId, versionId)
-    if (!cloudOk) return { ok: false, error: 'The version could not be deleted from the cloud. Please try again.' }
-  } catch (err) {
-    console.error('[ControlLens] deleteVersion: Supabase soft-delete failed:', err)
-    return { ok: false, error: 'The version could not be deleted from the cloud. Please try again.' }
   }
 
   const updated: Project = {
@@ -1544,16 +1543,16 @@ export async function deleteVersion(projectId: string, versionId: string): Promi
   }
   _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
   notifyListeners()
-  try {
-    await idbPutProject(updated)
-  } catch (err) {
+  idbPutProject(updated).catch(err => {
     console.error('[ControlLens] deleteVersion: IndexedDB persist failed:', err)
-  }
+  })
+  // v15 / Day 10 — mark as soft-deleted in Supabase (deletedAt field).
+  // We do NOT delete the row; Owner/Admin can permanently delete later.
+  softDeleteVersionInSupabase(projectId, versionId).catch(err => {
+    console.error('[ControlLens] deleteVersion: Supabase soft-delete failed:', err)
+  })
   if (getActiveVersionId() === versionId) {
-    const fallback = updated.versions
-      .filter(v => !v.deletedAt)
-      .sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''))[0]
-    setActiveVersionId(fallback?.id || null)
+    setActiveVersionId(null)
   }
   return { ok: true }
 }
@@ -1589,17 +1588,9 @@ export function restoreVersion(projectId: string, versionId: string): { ok: bool
  * permanentlyDeleteVersion — Day 10. Owner/Admin only. Removes the version
  * row entirely from local + Supabase. No recovery.
  */
-export async function permanentlyDeleteVersion(projectId: string, versionId: string): Promise<{ ok: boolean; error?: string }> {
+export function permanentlyDeleteVersion(projectId: string, versionId: string): { ok: boolean; error?: string } {
   const idx = _projects.findIndex(p => p.id === projectId)
   if (idx === -1) return { ok: false, error: 'Project not found' }
-
-  try {
-    const cloudOk = await deleteVersionFromSupabase(projectId, versionId)
-    if (!cloudOk) return { ok: false, error: 'The version could not be permanently deleted from the cloud.' }
-  } catch (err) {
-    console.error('[ControlLens] permanentlyDeleteVersion: Supabase failed:', err)
-    return { ok: false, error: 'The version could not be permanently deleted from the cloud.' }
-  }
 
   const updated: Project = {
     ..._projects[idx],
@@ -1608,11 +1599,12 @@ export async function permanentlyDeleteVersion(projectId: string, versionId: str
   }
   _projects = [..._projects.slice(0, idx), updated, ..._projects.slice(idx + 1)]
   notifyListeners()
-  try {
-    await idbPutProject(updated)
-  } catch (err) {
+  idbPutProject(updated).catch(err => {
     console.error('[ControlLens] permanentlyDeleteVersion: IndexedDB persist failed:', err)
-  }
+  })
+  deleteVersionFromSupabase(projectId, versionId).catch(err => {
+    console.error('[ControlLens] permanentlyDeleteVersion: Supabase failed:', err)
+  })
   if (getActiveVersionId() === versionId) {
     setActiveVersionId(null)
   }
