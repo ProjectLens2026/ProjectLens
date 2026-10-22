@@ -1522,6 +1522,10 @@ function ApprovalReport({ result, mode, kind, project, sourceFileName, reviewSna
   const reportRecommendations = result.findings.filter(f => approvalKind(f) === 'RECOMMENDATION')
   const actionGroups = buildActionGroups(result)
   const reportSignals = (reviewSnapshot?.technicalSignals || []).filter(signal => reportSignalIds.includes(signal.id))
+  const formalReviewComments = reviewComments
+    .filter(comment => !['DRAFT', 'VOID', 'WITHDRAWN'].includes(comment.status))
+    .sort((a, b) => a.sequence - b.sequence)
+  const showFormalReviewComments = mode === 'REVIEWER' || formalReviewComments.length > 0
 
   return (
     <div className="ar-print-root flex flex-col h-full">
@@ -1606,10 +1610,14 @@ function ApprovalReport({ result, mode, kind, project, sourceFileName, reviewSna
             </div>
           </div>
 
-          {kind === 'executive' && reviewComments.length > 0 && <>
-            <SectionBar>Formal Review Comment Register</SectionBar>
+          {showFormalReviewComments && <>
+            <SectionBar>{mode === 'REVIEWER' ? "Owner's Review Comments" : 'Formal Review Comment Register'}</SectionBar>
+            <div className="text-[10px] text-slate-500 mb-3">
+              Permanent comment numbers and dispositions from the formal review register for this project.
+            </div>
             <div className="mb-5 space-y-2">
-              {[...reviewComments].sort((a, b) => a.sequence - b.sequence).map(comment => <div key={comment.id} className="rounded-lg border border-slate-200 p-3 print:break-inside-avoid">
+              {formalReviewComments.length === 0 && <div className="rounded-lg border border-dashed border-slate-300 p-4 text-[10.5px] text-slate-500 italic">No owner review comments have been issued.</div>}
+              {formalReviewComments.map(comment => <div key={comment.id} className="rounded-lg border border-slate-200 p-3 print:break-inside-avoid">
                 <div className="flex items-start gap-2">
                   <span className="rounded bg-slate-900 px-2 py-1 font-mono text-[9px] font-bold text-white">{comment.commentNumber}</span>
                   <div className="flex-1">

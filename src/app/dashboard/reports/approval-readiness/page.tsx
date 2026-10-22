@@ -8,17 +8,30 @@ import { printReport } from '@/lib/printReport'
 import { reportNumber } from '@/lib/reports'
 import ReviewerReportHeader from '@/components/reports/ReviewerReportHeader'
 import NeutralReportFooter from '@/components/reports/NeutralReportFooter'
+import { loadReviewWorkspaceFromSupabase } from '@/lib/supabase/reviews'
+import type { ReviewComment } from '@/lib/reviewWorkspace'
 
 export default function ApprovalReadinessReportPage() {
   const [project, setProject] = useState<any>(null)
   const [version, setVersion] = useState<any>(null)
+  const [reviewComments, setReviewComments] = useState<ReviewComment[]>([])
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    const p = getActiveProject()
-    setProject(p)
-    setVersion(getActiveVersion(p))
-    setReady(true)
+    let current = true
+    async function loadReport() {
+      const p = getActiveProject()
+      if (!current) return
+      setProject(p)
+      setVersion(getActiveVersion(p))
+      if (p?.id) {
+        const loaded = await loadReviewWorkspaceFromSupabase(p.id)
+        if (current && loaded.ok && loaded.data) setReviewComments(loaded.data.comments || [])
+      }
+      if (current) setReady(true)
+    }
+    void loadReport()
+    return () => { current = false }
   }, [])
 
   if (!ready) return <div className="p-6 text-sm text-slate-500">Loading report…</div>
@@ -41,6 +54,9 @@ export default function ApprovalReadinessReportPage() {
   const reportNo = reportNumber(project.projectId || project.name, 'APP')
   const findings = result.findings.filter(f => f.kind !== 'RECOMMENDATION')
   const recommendations = result.findings.filter(f => f.kind === 'RECOMMENDATION')
+  const ownerComments = reviewComments
+    .filter(comment => !['DRAFT', 'VOID', 'WITHDRAWN'].includes(comment.status))
+    .sort((a, b) => a.sequence - b.sequence)
 
   return (
     <div className="h-full min-h-0 overflow-y-auto overscroll-contain bg-slate-50 print:h-auto print:overflow-visible print:bg-white">
@@ -84,7 +100,18 @@ export default function ApprovalReadinessReportPage() {
           ))}
         </div>
 
-        <SectionBar tag="OBS" title="Schedule Review Comments" right={`${findings.length} findings`} />
+        {result.mode === 'REVIEWER' ? (
+          <>
+            <SectionBar tag="OWN" title="Owner's Review Comments" right={`${ownerComments.length} issued`} />
+            <div className="space-y-3 mb-6">
+              {ownerComments.length
+                ? ownerComments.map(comment => <OwnerCommentCard key={comment.id} comment={comment} />)
+                : <Empty text="No owner review comments have been issued." />}
+            </div>
+          </>
+        ) : null}
+
+        <SectionBar tag="OBS" title="Technical Review Findings" right={`${findings.length} findings`} />
         {findings.length ? (
           <div className="space-y-3 mb-6">
             {findings.map((f, i) => <FindingCard key={f.id} finding={f} displayId={`C-${String(i + 1).padStart(3, '0')}`} />)}
@@ -103,6 +130,29 @@ export default function ApprovalReadinessReportPage() {
         <NeutralReportFooter reportNo={reportNo} />
       </div>
       </div>
+    </div>
+  )
+}
+
+function OwnerCommentCard({ comment }: { comment: ReviewComment }) {
+  const required = comment.classification === 'REQUIRED'
+  const gate = required && comment.approvalImpact === 'BLOCKS_APPROVAL'
+  const latestResponse = comment.responses?.[comment.responses.length - 1]
+  return (
+    <div className="rounded-xl border border-slate-200 overflow-hidden print:break-inside-avoid">
+      <div className="flex flex-wrap items-center gap-2 bg-slate-50 border-b border-slate-200 px-4 py-2.5">
+        <span className="rounded bg-slate-900 px-2 py-1 font-mono text-[9px] font-bold text-white">{comment.commentNumber}</span>
+        <span className="text-[11px] font-extrabold text-slate-900 flex-1">{comment.title}</span>
+        <RequirementBadge strength={comment.classification} gate={gate} />
+        <span className="text-[8px] font-extrabold uppercase tracking-wide text-slate-500">{comment.status.replaceAll('_', ' ')}</span>
+      </div>
+      <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <TextBlock label="Owner Concern" text={comment.concern} />
+        <TextBlock label="Required Correction / Response" text={comment.requiredCorrection || 'Reviewer clarification requested.'} />
+        <TextBlock label="Approval Impact" text={comment.approvalImpact.replaceAll('_', ' ')} />
+        <TextBlock label="Requirement / Basis" text={comment.requirementReference || 'Project review basis'} />
+      </div>
+      {latestResponse ? <div className="border-t border-slate-100 px-4 py-3 text-[10px] text-slate-700"><span className="font-bold">Latest contractor response:</span> {latestResponse.response}</div> : null}
     </div>
   )
 }
