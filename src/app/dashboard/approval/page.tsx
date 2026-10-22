@@ -20,6 +20,7 @@ import { discoverUSProject, type USProjectDiscoveryResult, type DiscoveryEvidenc
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { getActiveProject, getActiveVersion, loadVersionAnalysis, subscribeToProjects, updateVersionApprovalResult } from '@/lib/projectStore'
+import { formatCalendarDate } from '@/lib/calendarDate'
 import {
   buildScheduleReviewSnapshot,
   reviewFindingSourceKey,
@@ -34,6 +35,8 @@ import {
   addContractorResponseInSupabase,
   createReviewCommentInSupabase,
   loadReviewWorkspaceFromSupabase,
+  loadScheduleReviewResultFromSupabase,
+  saveScheduleReviewResultInSupabase,
   updateReviewCommentStatusInSupabase,
   upsertScheduleNarrativeInSupabase,
   type ReviewWorkspaceCloudData,
@@ -97,10 +100,7 @@ function readinessColor(status?: string): string {
 }
 
 function shortDate(value?: string): string {
-  if (!value) return '—'
-  const d = new Date(value.replace(' ', 'T'))
-  if (Number.isNaN(d.getTime())) return value.slice(0, 10)
-  return d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
+  return formatCalendarDate(value, 'short')
 }
 
 interface TechnicalEvidenceRow {
@@ -446,6 +446,7 @@ export default function ApprovalReadinessPage() {
   const [reviewData, setReviewData] = useState<ReviewWorkspaceCloudData>({ comments: [], narratives: {} })
   const [reviewDataLoading, setReviewDataLoading] = useState(false)
   const [reviewDataError, setReviewDataError] = useState<string | null>(null)
+  const [reviewPersistenceError, setReviewPersistenceError] = useState<string | null>(null)
   const [reviewMutation, setReviewMutation] = useState(false)
   const [showAddComment, setShowAddComment] = useState(false)
   const activeSelectionRef = useRef<string | null>(null)
@@ -531,6 +532,27 @@ export default function ApprovalReadinessPage() {
     reloadReviewWorkspace()
   }, [reloadReviewWorkspace])
 
+  // A completed review belongs to the schedule version, not the browser that
+  // ran it. Load the canonical saved payload so a second computer sees the
+  // same decision and report without recalculating it first.
+  useEffect(() => {
+    if (!version?.id) return
+    let current = true
+    async function loadSavedReview() {
+      const loaded = await loadScheduleReviewResultFromSupabase(version.id)
+      if (!current || !loaded.ok || !loaded.data) return
+      setResult(loaded.data.result)
+      setReviewSnapshot(loaded.data.snapshot || null)
+      setMode(loaded.data.mode)
+      if (REVIEW_PURPOSES.some(item => item.value === loaded.data!.reviewPurpose)) {
+        setReviewPurpose(loaded.data.reviewPurpose as ReviewPurpose)
+      }
+      setReportSignalIds(loaded.data.snapshot?.technicalSignals.map(signal => signal.id) || [])
+    }
+    void loadSavedReview()
+    return () => { current = false }
+  }, [version?.id])
+
   useEffect(() => {
     if ((activeTab !== 'narrative' && activeTab !== 'changes') || !project || !version) return
     const versions = [...project.versions]
@@ -543,7 +565,7 @@ export default function ApprovalReadinessPage() {
     }
   }, [activeTab, project, version])
 
-  function runCheck() {
+  async function runCheck() {
     if (!analysis) return
     if (reviewPurpose === 'VERSION_COMPARISON') {
       router.push('/dashboard/changes')
@@ -554,6 +576,7 @@ export default function ApprovalReadinessPage() {
       return
     }
     setRunning(true)
+    setReviewPersistenceError(null)
     try {
       const snapshot = buildScheduleReviewSnapshot(analysisWithProjectBasis(analysis, project), {
         versionId: version?.id,
@@ -566,7 +589,18 @@ export default function ApprovalReadinessPage() {
       setReportSignalIds(snapshot?.technicalSignals.map(signal => signal.id) || [])
       // persist so it survives leaving the page
       if (res && project?.id && version?.id) {
-        try { updateVersionApprovalResult(project.id, version.id, res) } catch {}
+        updateVersionApprovalResult(project.id, version.id, res)
+        const saved = await saveScheduleReviewResultInSupabase({
+          projectId: project.id,
+          versionId: version.id,
+          sourceFileName: version.fileName || '',
+          reviewPurpose,
+          result: res,
+          snapshot,
+        })
+        if (!saved.ok) {
+          setReviewPersistenceError(`Review recalculated, but the shared result was not saved: ${saved.error || 'Unknown persistence error'}`)
+        }
       }
     } catch (e) {
       console.error('[approval] evaluation failed:', e)
@@ -921,6 +955,7 @@ export default function ApprovalReadinessPage() {
       </div>
 
       {reviewDataError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4 text-[11px] text-red-800">{reviewDataError}</div>}
+      {reviewPersistenceError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4 text-[11px] font-semibold text-red-800">{reviewPersistenceError}</div>}
 
       {activeTab === 'comments' && result && <ReviewDecisionHero
         result={result}

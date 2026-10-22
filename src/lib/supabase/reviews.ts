@@ -19,6 +19,8 @@ import type {
   ScheduleNarrative,
 } from '../reviewWorkspace'
 import { statusFromVerification } from '../reviewWorkspace'
+import type { ApprovalReadinessResult } from '../approval-readiness/types'
+import type { ScheduleReviewSnapshot } from '../scheduleReviewSnapshot'
 
 export interface ReviewWorkspaceCloudData {
   comments: ReviewComment[]
@@ -29,6 +31,95 @@ export interface ReviewWriteResult<T = undefined> {
   ok: boolean
   data?: T
   error?: string
+}
+
+export interface SavedScheduleReviewResult {
+  versionId: string
+  sourceFileName: string
+  reviewPurpose: string
+  mode: 'PRE_SUBMISSION' | 'REVIEWER'
+  result: ApprovalReadinessResult
+  snapshot?: ScheduleReviewSnapshot
+  generatedAt: string
+}
+
+export async function saveScheduleReviewResultInSupabase(input: {
+  projectId: string
+  versionId: string
+  sourceFileName: string
+  reviewPurpose: string
+  result: ApprovalReadinessResult
+  snapshot?: ScheduleReviewSnapshot | null
+}): Promise<ReviewWriteResult<SavedScheduleReviewResult>> {
+  const cloudProjectId = toCloudId(input.projectId)
+  const cloudVersionId = toCloudId(input.versionId)
+  if (!cloudProjectId || !cloudVersionId) return { ok: false, error: 'Project or schedule version is not mapped to Supabase.' }
+
+  const generatedAt = new Date().toISOString()
+  const row = {
+    version_id: cloudVersionId,
+    project_id: cloudProjectId,
+    // The database trigger verifies these values from schedule_versions.
+    org_id: '00000000-0000-0000-0000-000000000000',
+    source_file_name: input.sourceFileName || 'schedule',
+    review_purpose: input.reviewPurpose,
+    mode: input.result.mode,
+    readiness_status: input.result.readinessStatus || null,
+    readiness_label: input.result.readinessLabel || input.result.recommendation || null,
+    total_score: Number.isFinite(Number(input.result.totalScore)) ? Number(input.result.totalScore) : null,
+    grade: input.result.grade || null,
+    critical_gates_passed: input.result.criticalGates?.passed ?? null,
+    counts: input.result.counts || {},
+    result: input.result,
+    snapshot: input.snapshot || null,
+    generated_at: generatedAt,
+  }
+
+  const supabase = createClient()
+  const { error } = await supabase
+    .from('schedule_review_results')
+    .upsert(row, { onConflict: 'version_id' })
+  if (error) return { ok: false, error: message(error) }
+
+  return {
+    ok: true,
+    data: {
+      versionId: input.versionId,
+      sourceFileName: input.sourceFileName,
+      reviewPurpose: input.reviewPurpose,
+      mode: input.result.mode,
+      result: input.result,
+      snapshot: input.snapshot || undefined,
+      generatedAt,
+    },
+  }
+}
+
+export async function loadScheduleReviewResultFromSupabase(
+  versionId: string,
+): Promise<ReviewWriteResult<SavedScheduleReviewResult | null>> {
+  const cloudVersionId = toCloudId(versionId)
+  if (!cloudVersionId) return { ok: false, error: 'Schedule version is not mapped to Supabase.' }
+  const supabase = createClient()
+  const { data, error } = await supabase
+    .from('schedule_review_results')
+    .select('version_id, source_file_name, review_purpose, mode, result, snapshot, generated_at')
+    .eq('version_id', cloudVersionId)
+    .maybeSingle()
+  if (error) return { ok: false, error: message(error) }
+  if (!data) return { ok: true, data: null }
+  return {
+    ok: true,
+    data: {
+      versionId,
+      sourceFileName: data.source_file_name,
+      reviewPurpose: data.review_purpose,
+      mode: data.mode,
+      result: data.result as ApprovalReadinessResult,
+      snapshot: (data.snapshot || undefined) as ScheduleReviewSnapshot | undefined,
+      generatedAt: data.generated_at,
+    },
+  }
 }
 
 export interface ContractorResponseInput {

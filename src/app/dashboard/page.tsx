@@ -12,6 +12,7 @@ import {
 } from '@/lib/projectStore'
 import { countRiskCategories } from '@/lib/riskDetector'
 import { analysisWithProjectBasis } from '@/lib/projectReviewBasis'
+import { calendarDayDifference, formatCalendarDate } from '@/lib/calendarDate'
 
 // =============================================================================
 // Executive Dashboard — main /dashboard page.
@@ -204,13 +205,8 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   // industry convention where NTP day counts as day 1.
   // ============================================================================
   const daysBetween = (start?: string, end?: string): number | undefined => {
-    if (!start || !end) return undefined
-    const s = new Date(start)
-    const e = new Date(end)
-    if (isNaN(s.getTime()) || isNaN(e.getTime())) return undefined
-    const sUTC = Date.UTC(s.getFullYear(), s.getMonth(), s.getDate())
-    const eUTC = Date.UTC(e.getFullYear(), e.getMonth(), e.getDate())
-    return Math.max(0, Math.round((eUTC - sUTC) / (1000 * 60 * 60 * 24))) + 1
+    const difference = calendarDayDifference(start, end)
+    return difference === null ? undefined : Math.max(0, difference) + 1
   }
 
   // Original Duration = NTP → Original Contract Completion
@@ -243,13 +239,8 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   // Days Behind = Projected End - Revised Contract Completion (if forecast is past contract)
   let daysBehind: number | undefined
   if (revisedContractCompletion && projectedEnd) {
-    const cD = new Date(revisedContractCompletion)
-    const pD = new Date(projectedEnd)
-    if (!isNaN(cD.getTime()) && !isNaN(pD.getTime())) {
-      const cUTC = Date.UTC(cD.getFullYear(), cD.getMonth(), cD.getDate())
-      const pUTC = Date.UTC(pD.getFullYear(), pD.getMonth(), pD.getDate())
-      daysBehind = Math.round((pUTC - cUTC) / (1000 * 60 * 60 * 24))
-    }
+    const difference = calendarDayDifference(revisedContractCompletion, projectedEnd)
+    if (difference !== null) daysBehind = difference
   }
   const daysBehindNum = daysBehind ?? 0
   const hasDaysBehind = daysBehind !== undefined
@@ -988,15 +979,7 @@ function numOrUndefAtTop(v: any): number | undefined {
 }
 
 function fmtDate(d?: string): string {
-  if (!d) return '—'
-  try {
-    const dt = new Date(d)
-    if (isNaN(dt.getTime())) return String(d)
-    const mm = String(dt.getMonth() + 1).padStart(2, '0')
-    const dd = String(dt.getDate()).padStart(2, '0')
-    const yyyy = dt.getFullYear()
-    return `${mm}/${dd}/${yyyy}`
-  } catch { return String(d) }
+  return formatCalendarDate(d, 'numeric')
 }
 
 function formatLastUpdated(iso?: string): string {

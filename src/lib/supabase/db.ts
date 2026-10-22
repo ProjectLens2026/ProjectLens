@@ -193,11 +193,28 @@ export async function loadProjectsFromSupabase(): Promise<Project[] | null> {
   const orgId = await ensureUserHasOrg()
   if (!orgId) return null  // Not signed in or org bootstrap failed
 
-  const { data: rows, error } = await supabase
+  // Load only the compact review summary with the project list. The complete
+  // findings/snapshot remain in schedule_review_results and are fetched only
+  // when Review Schedule or a report is opened.
+  let { data: rows, error } = await supabase
     .from('projects')
-    .select('*, schedule_versions(*)')
+    .select('*, schedule_versions(*, schedule_review_results(version_id, mode, readiness_status, readiness_label, total_score, grade, critical_gates_passed, counts, generated_at))')
     .eq('org_id', orgId)
     .order('updated_at', { ascending: false })
+
+  // Safe deployment order: if application code reaches production before the
+  // migration is applied, project loading still works. Reviews remain local
+  // until the schedule_review_results migration is installed.
+  if (error) {
+    console.warn('[db.loadProjects] review summary join unavailable; falling back:', error.message)
+    const fallback = await supabase
+      .from('projects')
+      .select('*, schedule_versions(*)')
+      .eq('org_id', orgId)
+      .order('updated_at', { ascending: false })
+    rows = fallback.data
+    error = fallback.error
+  }
 
   if (error) {
     console.error('[db.loadProjects] failed:', error.message)
@@ -341,6 +358,24 @@ function rowToProject(row: any): Project {
 
 function rowToVersion(row: any): ScheduleVersion {
   const context = row.context || {}
+  const embeddedReview = Array.isArray(row.schedule_review_results)
+    ? row.schedule_review_results[0]
+    : row.schedule_review_results
+  const approvalSummary = embeddedReview ? {
+    mode: embeddedReview.mode,
+    readinessStatus: embeddedReview.readiness_status,
+    readinessLabel: embeddedReview.readiness_label,
+    recommendation: embeddedReview.readiness_label,
+    totalScore: Number(embeddedReview.total_score || 0),
+    grade: embeddedReview.grade || '—',
+    counts: embeddedReview.counts || {},
+    criticalGates: {
+      passed: embeddedReview.critical_gates_passed !== false,
+      failed: [],
+    },
+    generatedAt: embeddedReview.generated_at,
+    summaryOnly: true,
+  } : undefined
   const isMicrosoftProjectXml = String(row.file_name || '').toLowerCase().endsWith('.xml')
   // v15 — full analysis lives in Storage (loaded async by loadProjectsFromSupabase).
   // For the initial row mapping, build a stub from the flat columns so the
@@ -371,6 +406,7 @@ function rowToVersion(row: any): ScheduleVersion {
     sequenceNumber: row.sequence_number ?? undefined,
     snapshot: row.snapshot || undefined,
     aiNarrative: row.ai_narrative || undefined,
+    approvalResult: approvalSummary,
     context: context.projectContext || {},
     versionDates: context.versionDates || undefined,
     parentVersionId: context.parentVersionId || undefined,

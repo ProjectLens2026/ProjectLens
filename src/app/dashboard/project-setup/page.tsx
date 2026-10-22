@@ -19,6 +19,7 @@ import {
   updateProjectControlBasis,
   whenHydrated,
 } from '@/lib/projectStore'
+import { formatCalendarDate } from '@/lib/calendarDate'
 import {
   deleteProjectSourceDocumentFile,
   getProjectSourceDocumentSignedUrl,
@@ -117,9 +118,8 @@ const UFGS_P6_SETTINGS: P6SettingsBasis = {
 
 function formatDate(value?: string) {
   if (!value) return 'Not recorded'
-  const date = new Date(`${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
+  const formatted = formatCalendarDate(value, 'short')
+  return formatted === '—' ? value : formatted
 }
 
 function formatFileSize(bytes?: number) {

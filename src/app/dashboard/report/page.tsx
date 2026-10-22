@@ -26,6 +26,7 @@ import ReportHeader from '@/components/ReportHeader'
 import PrintButton from '@/components/PrintButton'
 import WordButton from '@/components/WordButton'
 import { analysisWithProjectBasis } from '@/lib/projectReviewBasis'
+import { calendarDayDifference, formatCalendarDate } from '@/lib/calendarDate'
 
 const COLORS = {
   ink: '#13202e',
@@ -133,13 +134,8 @@ function ReportContent({ project, version, orgName }: { project: Project; versio
 
   let daysBehind = 0
   if (revisedComp && projectedEnd) {
-    const cd = new Date(revisedComp)
-    const pd = new Date(projectedEnd)
-    if (!isNaN(cd.getTime()) && !isNaN(pd.getTime())) {
-      const cu = Date.UTC(cd.getFullYear(), cd.getMonth(), cd.getDate())
-      const pu = Date.UTC(pd.getFullYear(), pd.getMonth(), pd.getDate())
-      daysBehind = Math.round((pu - cu) / 86_400_000)
-    }
+    const difference = calendarDayDifference(revisedComp, projectedEnd)
+    if (difference !== null) daysBehind = difference
   }
 
   const workComplete = num(a.workCompletePct, 0)
@@ -618,12 +614,7 @@ function arr<T = any>(v: any): T[] {
   return Array.isArray(v) ? v : []
 }
 function shortDate(d?: string): string {
-  if (!d) return '—'
-  try {
-    const dt = new Date(d.replace(' ', 'T'))
-    if (isNaN(dt.getTime())) return '—'
-    return dt.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' })
-  } catch { return '—' }
+  return formatCalendarDate(d, 'numeric-2')
 }
 function trunc(s: string | undefined, max: number): string {
   if (!s) return '—'

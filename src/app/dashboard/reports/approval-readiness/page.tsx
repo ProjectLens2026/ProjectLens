@@ -8,13 +8,15 @@ import { printReport } from '@/lib/printReport'
 import { reportNumber } from '@/lib/reports'
 import ReviewerReportHeader from '@/components/reports/ReviewerReportHeader'
 import NeutralReportFooter from '@/components/reports/NeutralReportFooter'
-import { loadReviewWorkspaceFromSupabase } from '@/lib/supabase/reviews'
+import { loadReviewWorkspaceFromSupabase, loadScheduleReviewResultFromSupabase } from '@/lib/supabase/reviews'
 import type { ReviewComment } from '@/lib/reviewWorkspace'
 
 export default function ApprovalReadinessReportPage() {
   const [project, setProject] = useState<any>(null)
   const [version, setVersion] = useState<any>(null)
   const [reviewComments, setReviewComments] = useState<ReviewComment[]>([])
+  const [savedResult, setSavedResult] = useState<ApprovalReadinessResult | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
@@ -23,10 +25,16 @@ export default function ApprovalReadinessReportPage() {
       const p = getActiveProject()
       if (!current) return
       setProject(p)
-      setVersion(getActiveVersion(p))
-      if (p?.id) {
-        const loaded = await loadReviewWorkspaceFromSupabase(p.id)
-        if (current && loaded.ok && loaded.data) setReviewComments(loaded.data.comments || [])
+      const v = getActiveVersion(p)
+      setVersion(v)
+      if (p?.id && v?.id) {
+        const [workspace, review] = await Promise.all([
+          loadReviewWorkspaceFromSupabase(p.id),
+          loadScheduleReviewResultFromSupabase(v.id),
+        ])
+        if (current && workspace.ok && workspace.data) setReviewComments(workspace.data.comments || [])
+        if (current && review.ok && review.data) setSavedResult(review.data.result)
+        if (current && !review.ok) setLoadError(review.error || 'The saved readiness report could not be loaded.')
       }
       if (current) setReady(true)
     }
@@ -37,14 +45,15 @@ export default function ApprovalReadinessReportPage() {
   if (!ready) return <div className="p-6 text-sm text-slate-500">Loading report…</div>
   if (!project || !version) return <Missing />
 
-  const result = version.approvalResult as ApprovalReadinessResult | undefined
-  if (!result) {
+  const result = savedResult || (version.approvalResult as ApprovalReadinessResult | undefined)
+  const hasCompleteResult = Boolean(result && Array.isArray(result.findings) && Array.isArray(result.domains))
+  if (!result || !hasCompleteResult) {
     return (
       <div className="p-6 max-w-xl mx-auto">
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
           <div className="text-2xl mb-2">✓</div>
-          <div className="text-sm font-bold text-slate-900">Approval Readiness has not been run for this version</div>
-          <div className="text-xs text-slate-500 mt-1">Run the working review first, then return here to package the result as a report.</div>
+          <div className="text-sm font-bold text-slate-900">{loadError ? 'Saved readiness report unavailable' : 'Approval Readiness has not been run for this version'}</div>
+          <div className="text-xs text-slate-500 mt-1">{loadError || 'Run the working review first, then return here to package the result as a report.'}</div>
           <Link href="/dashboard/approval" className="inline-flex mt-4 rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white">Open Approval Readiness</Link>
         </div>
       </div>
