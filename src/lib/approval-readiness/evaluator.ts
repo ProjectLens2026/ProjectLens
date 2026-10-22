@@ -383,7 +383,7 @@ export function evaluateApprovalReadiness(
   }
 
   // -------------------------------------------------------------------------
-  // U.S. building / federal CPM quality benchmark. These rules use direct XER
+  // Project-basis-aware CPM quality review. These rules use direct XER
   // evidence (network ends, relationship types/lags, durations, procurement
   // risk and WBS assignment). They deliberately do not infer delay ownership,
   // entitlement, excusability, or project-specific contractual applicability.

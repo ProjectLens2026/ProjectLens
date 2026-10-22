@@ -311,9 +311,9 @@ const ACTION_COPY: Record<string, Pick<ActionGroup, 'title' | 'why' | 'action' |
   },
   WBS_ASSIGNMENT: {
     title: 'Correct WBS, activity IDs, and project coding',
-    why: 'Incomplete schedule structure prevents reliable filtering, reconciliation, reporting, and transfer into the required federal control systems.',
+    why: 'Incomplete schedule structure prevents reliable filtering, reconciliation, reporting, and transfer into the project control systems.',
     action: 'Complete WBS assignment, correct overlength IDs, and establish the required project-level activity-code dictionary and assignments.',
-    acceptance: 'Activities follow the approved ID convention, WBS, and applicable project-level SDEF coding structure.',
+    acceptance: 'Activities follow the approved ID convention, WBS, and applicable project-level coding structure.',
   },
 }
 

@@ -1,4 +1,4 @@
-import type { ContractDates, Project, ScheduleRequirementsBasis } from './projectStore'
+import type { ContractDates, P6SettingsBasis, Project, ScheduleRequirementsBasis } from './projectStore'
 import { detectFinalCompletionTarget } from './completionBoundary'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -31,6 +31,7 @@ export function analysisWithProjectBasis(analysis: any, project?: Project | null
   if (!analysis) return analysis
   const contractDates = project?.contractDates
   const scheduleRequirements = project?.controlBasis?.scheduleRequirements
+  const p6Settings = project?.controlBasis?.p6Settings
   const authorizedCompletion = authorizedContractCompletion(contractDates)
   const completionTarget = detectFinalCompletionTarget(Object.values(analysis.traceTasks || {}))
   const completionForecast = completionTarget?.date
@@ -73,6 +74,8 @@ export function analysisWithProjectBasis(analysis: any, project?: Project | null
     reviewBasis: {
       contractDates,
       scheduleRequirements: scheduleRequirements as ScheduleRequirementsBasis | undefined,
+      p6Settings: p6Settings as P6SettingsBasis | undefined,
+      governingStandard: project?.controlBasis?.governingStandard,
     },
   }
 }

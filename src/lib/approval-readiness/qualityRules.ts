@@ -1,15 +1,15 @@
 // =============================================================================
-// Deterministic schedule-quality benchmark for U.S. building schedules.
+// Deterministic, project-basis-aware schedule-quality review.
 //
 // Rules in this file use only facts present in the submitted XER. They do not
 // infer entitlement, responsibility, excusability, or contract compliance.
-// The benchmark is aligned to the core network-quality requirements in UFGS
-// 01 32 01.00 10; the governing project specification still controls.
+// UFGS citations and UFGS-only gates apply only when that profile is selected.
+// Otherwise the governing project-specific or owner requirements control.
 // =============================================================================
 
 import type { ApprovalFinding, RuleStrength } from './types'
 import { computeDeduction } from './framework'
-import type { ContractDates, ScheduleRequirementsBasis } from '../projectStore'
+import type { ContractDates, P6SettingsBasis, ScheduleRequirementsBasis } from '../projectStore'
 import {
   detectFinalCompletionTarget,
   isAdministrativeTermMilestone,
@@ -34,6 +34,8 @@ interface QualityAnalysis {
   reviewBasis?: {
     contractDates?: ContractDates
     scheduleRequirements?: ScheduleRequirementsBasis
+    p6Settings?: P6SettingsBasis
+    governingStandard?: string
   }
   [key: string]: unknown
 }
@@ -195,7 +197,22 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
   const isPrimavera = analysis.sourceFormat !== 'MS_PROJECT_XML'
   const basisDates = analysis.reviewBasis?.contractDates
   const requirements = analysis.reviewBasis?.scheduleRequirements
+  const p6Settings = analysis.reviewBasis?.p6Settings
+  const governingStandard = String(analysis.reviewBasis?.governingStandard || '').trim()
   const authorizedDates = contractualDates(basisDates)
+  const requirementsAreUfgs = requirements?.profile === 'UFGS_01_32_01_00_10'
+  const p6SettingsAreUfgs = p6Settings?.profile === 'UFGS_2026'
+  const p6SettingsConfigured = Boolean(p6Settings?.profile && p6Settings.profile !== 'NOT_SET')
+  const projectBasisReference = requirements?.specificationSection
+    ? `Project specification ${requirements.specificationSection}${requirements.specificationEdition ? ` (${requirements.specificationEdition})` : ''}.`
+    : governingStandard
+      ? `${governingStandard}.`
+      : 'Project-specific schedule requirements and approved project control basis.'
+  const requirementReference = (ufgs: string, neutral: string) => requirementsAreUfgs ? ufgs : `${projectBasisReference} ${neutral}`
+  // The Requirements Profile controls report citations. A user may apply the
+  // UFGS P6 defaults as a convenient settings template under a custom project,
+  // but that must not make UFGS appear to be the governing contract basis.
+  const p6Reference = (ufgs: string, neutral: string) => requirementsAreUfgs ? ufgs : `${projectBasisReference} ${neutral}`
 
   const finalCompletionTarget = detectFinalCompletionTarget(tasks)
   if (!finalCompletionTarget?.task || !finalCompletionTarget.date) findings.push(finding({
@@ -377,7 +394,8 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
   const progressOverride = scheduleOptions.sched_progress_override
   const retainedLogicDisabled = retainedLogic !== undefined && retainedLogic !== '' && isDisabled(retainedLogic)
   const progressOverrideEnabled = progressOverride !== undefined && progressOverride !== '' && isEnabled(progressOverride)
-  if (retainedLogicDisabled || progressOverrideEnabled) findings.push(finding({
+  const retainedLogicRequired = p6SettingsAreUfgs || p6Settings?.progressedActivities === 'RETAINED_LOGIC'
+  if (retainedLogicRequired && (retainedLogicDisabled || progressOverrideEnabled)) findings.push(finding({
     primaryDomain: 'AR-07',
     crossReferencedDomains: ['AR-03', 'AR-02'],
     ruleStrength: 'REQUIRED',
@@ -390,13 +408,17 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     whyItMatters: 'Progress Override can ignore unfinished predecessor work when calculating successor dates, disconnecting the update from the approved remaining network.',
     reviewerCheck: 'Set the project scheduling calculation method to Retained Logic, reschedule the project, and review every resulting out-of-sequence condition and date change.',
     preSubmissionNote: 'Recalculate the schedule using Retained Logic and explain legitimate out-of-sequence work in the update narrative.',
-    referenceRequirement: 'UFGS 01 32 01.00 10, 3.3.17 and 3.12(g) — use Retained Logic; Progress Override is not permitted for the federal benchmark.',
+    referenceRequirement: p6Reference(
+      'UFGS 01 32 01.00 10, 3.3.17 and 3.12(g) - use Retained Logic; Progress Override is not permitted.',
+      'The selected P6 settings require Retained Logic.',
+    ),
     affectedActivities: [],
   }))
 
   const projectSettings = analysis.projectSettings || {}
   const criticalPathType = String(projectSettings.critical_path_type || '')
-  const criticalDefinitionIsNotLongest = isPrimavera && Boolean(criticalPathType && !/LONG/i.test(criticalPathType))
+  const longestPathRequired = p6SettingsAreUfgs || p6Settings?.criticalActivities === 'LONGEST_PATH'
+  const criticalDefinitionIsNotLongest = isPrimavera && longestPathRequired && Boolean(criticalPathType && !/LONG/i.test(criticalPathType))
   if (criticalDefinitionIsNotLongest) findings.push(finding({
     primaryDomain: 'AR-02',
     crossReferencedDomains: ['AR-07'],
@@ -407,13 +429,16 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     whyItMatters: 'A float-threshold definition can label many activities critical without identifying the continuous driving chain to contract completion.',
     reviewerCheck: 'Set Define Critical Activities as Longest Path, reschedule, and trace the resulting chain to the governing completion milestone.',
     preSubmissionNote: 'Change the P6 critical activity definition to Longest Path and export a recalculated XER.',
-    referenceRequirement: 'UFGS 01 32 01.00 10, 3.12(f) — define critical activities as the longest path.',
+    referenceRequirement: p6Reference(
+      'UFGS 01 32 01.00 10, 3.12(f) - define critical activities as the longest path.',
+      'The selected P6 settings require critical activities to be defined by Longest Path.',
+    ),
     affectedActivities: [],
   }))
 
   const incompleteDetailed = tasks.filter(task => task?.status_code !== 'TK_Complete' && isDetailedWorkActivity(task))
   const p6LongestPathFlags = tasks.filter(task => isEnabled(task?.driving_path_flag))
-  if (isPrimavera && !criticalDefinitionIsNotLongest && incompleteDetailed.length && !p6LongestPathFlags.length) findings.push(finding({
+  if (isPrimavera && longestPathRequired && !criticalDefinitionIsNotLongest && incompleteDetailed.length && !p6LongestPathFlags.length) findings.push(finding({
     primaryDomain: 'AR-02',
     crossReferencedDomains: ['AR-07'],
     ruleStrength: 'REQUIRED',
@@ -424,7 +449,10 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     whyItMatters: 'Without a calculated longest path, the reviewer cannot reliably trace the continuous chain controlling the completion target.',
     reviewerCheck: 'Confirm that Define Critical Activities as Longest Path is enabled, reschedule, and verify that the controlling chain reaches the contract completion milestone.',
     preSubmissionNote: 'Enable and recalculate the P6 longest path, then export a new XER for review.',
-    referenceRequirement: 'UFGS 01 32 01.00 10, 3.12(f) — define critical activities as the longest path.',
+    referenceRequirement: p6Reference(
+      'UFGS 01 32 01.00 10, 3.12(f) - define critical activities as the longest path.',
+      'The selected P6 settings require a calculated Longest Path.',
+    ),
     affectedActivities: [],
   }))
 
@@ -452,7 +480,10 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     whyItMatters: 'Invalid status records corrupt progress, remaining work, relationship calculations, and the credibility of the update data date.',
     reviewerCheck: 'Reconcile each activity against daily reports and approved update records. Preserve truthful actual dates and correct the status or remaining duration.',
     preSubmissionNote: 'Correct the listed status/date inconsistencies before rescheduling and submission.',
-    referenceRequirement: 'UFGS 01 32 01.00 10, update/statusing requirements — actual dates and remaining work must represent status through the update data date.',
+    referenceRequirement: requirementReference(
+      'UFGS 01 32 01.00 10, update/statusing requirements - actual dates and remaining work must represent status through the update data date.',
+      'Schedule status and actual dates must be internally consistent through the data date.',
+    ),
     affectedActivities: affected(statusDateConflicts, 'Status/date inconsistency'),
   }))
 
@@ -467,7 +498,10 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     whyItMatters: 'Open network ends allow work to float independently of the controlling path and can make dates and total float unreliable.',
     reviewerCheck: 'Identify whether each item is a legitimate approved endpoint. Connect every other activity to the network and rerun the schedule.',
     preSubmissionNote: 'Connect the listed activities to valid predecessor and successor logic, or document the approved endpoint exception.',
-    referenceRequirement: 'UFGS 01 32 01.00 10, 3.3.11 — only the recognized project start and project finish may remain open ended under the federal benchmark.',
+    referenceRequirement: requirementReference(
+      'UFGS 01 32 01.00 10, 3.3.11 - only the recognized project start and project finish may remain open ended.',
+      'The CPM network should have no unexplained open ends other than approved project endpoints.',
+    ),
     affectedActivities: affected(openEnds, 'Unauthorized network open end'),
   }))
 
@@ -483,13 +517,21 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     whyItMatters: 'Unresolved out-of-sequence progress can disconnect the statused schedule from the logic used to calculate remaining dates and float.',
     reviewerCheck: 'Preserve truthful actual dates. Correct the remaining logic or provide the case-specific justification and narrative required by the reviewer.',
     preSubmissionNote: 'Reconcile every out-of-sequence condition and explain retained exceptions in the update narrative.',
-    referenceRequirement: 'UFGS 01 32 01.00 10, 3.3.13 and 3.3.17 — out-of-sequence progress requires case-specific approval and retained logic.',
+    referenceRequirement: requirementReference(
+      'UFGS 01 32 01.00 10, 3.3.13 and 3.3.17 - out-of-sequence progress requires case-specific approval and retained logic.',
+      'Out-of-sequence progress must be reconciled and any retained exception documented.',
+    ),
     affectedActivities: affected(outOfSequence.map(item => item?.task || item), 'Out-of-sequence progress'),
   }))
 
   const negativeLags = relationships.filter(rel => Number(rel?.lag_hr_cnt || 0) < 0)
   const startToFinish = relationships.filter(rel => /(^|_)SF$/i.test(String(rel?.pred_type || '')))
-  const prohibitedRelationships = [...negativeLags, ...startToFinish]
+  const prohibitNegativeLags = p6SettingsAreUfgs || (p6SettingsConfigured && p6Settings?.negativeLagsAllowed === false)
+  const prohibitStartToFinish = p6SettingsAreUfgs || (p6SettingsConfigured && p6Settings?.startToFinishAllowed === false)
+  const prohibitedRelationships = [
+    ...(prohibitNegativeLags ? negativeLags : []),
+    ...(prohibitStartToFinish ? startToFinish : []),
+  ]
   if (prohibitedRelationships.length) {
     const byId = new Map(tasks.map(task => [taskId(task), task]))
     const related = prohibitedRelationships.flatMap(rel => [byId.get(String(rel?.pred_task_id)), byId.get(String(rel?.task_id))]).filter(Boolean)
@@ -499,11 +541,14 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
       ruleStrength: 'REQUIRED',
       severity: 4,
       title: 'Prohibited leads or Start-to-Finish relationships detected',
-      whatFound: `${negativeLags.length} negative lag${negativeLags.length === 1 ? '' : 's'} and ${startToFinish.length} Start-to-Finish relationship${startToFinish.length === 1 ? '' : 's'} were detected.`,
+      whatFound: `${prohibitNegativeLags ? negativeLags.length : 0} prohibited negative lag${negativeLags.length === 1 ? '' : 's'} and ${prohibitStartToFinish ? startToFinish.length : 0} prohibited Start-to-Finish relationship${startToFinish.length === 1 ? '' : 's'} were detected.`,
       whyItMatters: 'Leads and Start-to-Finish relationships can obscure the real work sequence and distort float.',
       reviewerCheck: 'Replace each prohibited relationship with explicit activities and conventional logic that represents the actual execution sequence.',
       preSubmissionNote: 'Remove negative lags and Start-to-Finish relationships before submission.',
-      referenceRequirement: 'UFGS 01 32 01.00 10, 3.3.16 — leads (negative lags) and Start-to-Finish relationships are prohibited.',
+      referenceRequirement: p6Reference(
+        'UFGS 01 32 01.00 10, 3.3.16 - leads (negative lags) and Start-to-Finish relationships are prohibited.',
+        'The selected P6 settings prohibit the identified relationship types.',
+      ),
       affectedActivities: affected(related, 'Connected to prohibited relationship'),
     }))
   }
@@ -528,7 +573,8 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     affectedActivities: affected(unauthorizedConstraints, 'Constraint is not supported by the project contract basis'),
   }))
 
-  const wrongDurationType = isPrimavera ? tasks.filter(task => {
+  const fixedDurationRequired = p6SettingsAreUfgs || p6Settings?.durationType === 'FIXED_DURATION_AND_UNITS'
+  const wrongDurationType = isPrimavera && fixedDurationRequired ? tasks.filter(task => {
     const value = String(task?.duration_type || '').toUpperCase()
     if (!value) return false
     const compact = value.replace(/[^A-Z0-9]/g, '')
@@ -540,18 +586,22 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     ruleStrength: 'REQUIRED',
     severity: 4,
     title: 'Activity duration type differs from Fixed Duration & Units',
-    whatFound: `${wrongDurationType.length} activit${wrongDurationType.length === 1 ? 'y uses' : 'ies use'} a duration type other than the federal P6 benchmark setting.`,
+    whatFound: `${wrongDurationType.length} activit${wrongDurationType.length === 1 ? 'y uses' : 'ies use'} a duration type other than the selected P6 setting.`,
     whyItMatters: 'Inconsistent duration types can cause remaining duration, resource changes, and dates to react differently across the schedule.',
     reviewerCheck: 'Set the applicable activities to Fixed Duration & Units or document the governing approved exception.',
     preSubmissionNote: 'Correct activity duration types before submission.',
-    referenceRequirement: 'UFGS 01 32 01.00 10, 3.12(c) — Activity Duration Types must be Fixed Duration & Units.',
+    referenceRequirement: p6Reference(
+      'UFGS 01 32 01.00 10, 3.12(c) - Activity Duration Types must be Fixed Duration & Units.',
+      'The selected P6 settings require Fixed Duration & Units.',
+    ),
     affectedActivities: affected(wrongDurationType, 'Noncompliant duration type'),
   }))
 
-  const wrongPercentType = tasks.filter(task => {
+  const physicalPercentRequired = p6SettingsAreUfgs || p6Settings?.percentCompleteType === 'PHYSICAL'
+  const wrongPercentType = physicalPercentRequired ? tasks.filter(task => {
     const value = String(task?.complete_pct_type || '').toUpperCase()
     return value && !/PHYS/.test(value)
-  })
+  }) : []
   if (wrongPercentType.length) findings.push(finding({
     primaryDomain: 'AR-07',
     ruleStrength: 'REQUIRED',
@@ -561,7 +611,10 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     whyItMatters: 'A non-physical percent-complete method can report progress based on time or resource consumption rather than verified installed work.',
     reviewerCheck: 'Set activity Percent Complete Type to Physical and validate progress against the supporting update records.',
     preSubmissionNote: 'Correct Percent Complete Type and revalidate the submitted progress.',
-    referenceRequirement: 'UFGS 01 32 01.00 10, 3.12(d) — Percent Complete Types must be Physical.',
+    referenceRequirement: p6Reference(
+      'UFGS 01 32 01.00 10, 3.12(d) - Percent Complete Types must be Physical.',
+      'The selected P6 settings require Physical Percent Complete.',
+    ),
     affectedActivities: affected(wrongPercentType, 'Percent complete type is not Physical'),
   }))
 
@@ -584,7 +637,7 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     whyItMatters: 'Calendar compliance cannot be judged without knowing the permitted workweek, weather-calendar requirement, and procurement time basis.',
     reviewerCheck: 'Complete the project calendar requirements and rerun the schedule review.',
     preSubmissionNote: 'Record the governing calendar policies before approval review.',
-    referenceRequirement: requirements?.specificationSection || 'Project-specific work-calendar requirements govern.',
+    referenceRequirement: projectBasisReference,
     affectedActivities: [],
   }))
 
@@ -656,7 +709,8 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     const type = String(calendar?.clndr_type || '').toUpperCase()
     return type && !/PROJECT|CA_PROJECT/.test(type)
   })
-  if (nonProjectCalendars.length) findings.push(finding({
+  const projectCalendarsRequired = p6SettingsAreUfgs || p6Settings?.calendarsProjectLevel === true
+  if (projectCalendarsRequired && nonProjectCalendars.length) findings.push(finding({
     primaryDomain: 'AR-07',
     ruleStrength: 'REQUIRED',
     severity: 4,
@@ -665,23 +719,30 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     whyItMatters: 'Global or resource calendar changes can alter dates outside the controlled project schedule and undermine repeatability of the submitted XER.',
     reviewerCheck: 'Convert the used calendars to Project-level calendars and confirm holidays, workweeks, seasonal restrictions, cure periods, and acceptance calendars.',
     preSubmissionNote: 'Use Project-level calendars for submitted schedule activities.',
-    referenceRequirement: 'UFGS 01 32 01.00 10, 3.12(b) — calendars must be Project Level, not Global or Resource level.',
+    referenceRequirement: p6Reference(
+      'UFGS 01 32 01.00 10, 3.12(b) - calendars must be Project Level, not Global or Resource level.',
+      'The selected P6 settings require Project-level calendars.',
+    ),
     affectedActivities: nonProjectCalendars.map((calendar: any) => ({ id: String(calendar.clndr_id), code: String(calendar.clndr_id), name: String(calendar.clndr_name || 'Unnamed calendar'), note: String(calendar.clndr_type || 'Non-project calendar') })),
   }))
 
-  const nonEightHourCalendars = calendars.filter(calendar =>
-    usedCalendars.has(String(calendar?.clndr_id || '')) && Number(calendar?.day_hr_cnt || 0) !== 8,
-  )
+  const requiredHoursPerDay = p6SettingsAreUfgs ? 8 : Number(p6Settings?.hoursPerDay || 0)
+  const nonEightHourCalendars = requiredHoursPerDay > 0 ? calendars.filter(calendar =>
+    usedCalendars.has(String(calendar?.clndr_id || '')) && Number(calendar?.day_hr_cnt || 0) !== requiredHoursPerDay,
+  ) : []
   if (nonEightHourCalendars.length) findings.push(finding({
     primaryDomain: 'AR-07',
     ruleStrength: 'REQUIRED',
     severity: 4,
-    title: 'Used calendars do not use the required 8-hour day',
-    whatFound: `${nonEightHourCalendars.length} used calendar${nonEightHourCalendars.length === 1 ? ' has' : 's have'} Hours/Day set to a value other than 8.0.`,
-    whyItMatters: 'Nonstandard Hours/Day settings alter displayed durations and conversions and prevent consistent review against the federal time-period basis.',
-    reviewerCheck: 'Set Calendar Work Hours/Day to 8.0 and verify the associated work periods before recalculating the schedule.',
+    title: `Used calendars do not use the required ${requiredHoursPerDay}-hour day`,
+    whatFound: `${nonEightHourCalendars.length} used calendar${nonEightHourCalendars.length === 1 ? ' has' : 's have'} Hours/Day set to a value other than ${requiredHoursPerDay}.`,
+    whyItMatters: 'Inconsistent Hours/Day settings alter displayed durations and conversions and prevent consistent review against the selected project time-period basis.',
+    reviewerCheck: `Set Calendar Work Hours/Day to ${requiredHoursPerDay} and verify the associated work periods before recalculating the schedule.`,
     preSubmissionNote: 'Correct the calendar Hours/Day setting and revalidate durations and dates.',
-    referenceRequirement: 'UFGS 01 32 01.00 10, 3.12(e) — retain the default time-period preferences and set Calendar Work Hours/Day to 8.0.',
+    referenceRequirement: p6Reference(
+      'UFGS 01 32 01.00 10, 3.12(e) - retain the default time-period preferences and set Calendar Work Hours/Day to 8.0.',
+      `The selected P6 settings require ${requiredHoursPerDay} Calendar Work Hours/Day.`,
+    ),
     affectedActivities: nonEightHourCalendars.map((calendar: any) => ({ id: String(calendar.clndr_id), code: String(calendar.clndr_id), name: String(calendar.clndr_name || 'Unnamed calendar'), note: `${calendar.day_hr_cnt || '—'} hours/day` })),
   }))
 
@@ -695,7 +756,10 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     whyItMatters: 'Without an assigned work calendar, planned dates and durations cannot be reproduced or checked against project working-time requirements.',
     reviewerCheck: 'Assign an approved project calendar to every detailed activity and recalculate the schedule.',
     preSubmissionNote: 'Complete calendar assignments before submission.',
-    referenceRequirement: 'UFGS 01 32 01.00 10, 3.3.10 and 3.12(b) — project calendars must represent the work and be assigned at project level.',
+    referenceRequirement: requirementReference(
+      'UFGS 01 32 01.00 10, 3.3.10 and 3.12(b) - project calendars must represent the work and be assigned at project level.',
+      'Every detailed activity must have an approved work calendar.',
+    ),
     affectedActivities: affected(missingCalendar, 'Missing activity calendar'),
   }))
 
@@ -713,29 +777,36 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
       whyItMatters: 'Long lags can hide curing, review, delivery, access, or waiting work that should be visible and statusable as activities.',
       reviewerCheck: 'Confirm the basis for each lag. Replace hidden work with named activities where progress must be measured or controlled.',
       preSubmissionNote: 'Replace unjustified long lags with explicit activities and explain any retained lag in the narrative.',
-      referenceRequirement: 'UFGS 01 32 01.00 10, 3.3.16 — lags must be reasonable and may not replace realistic durations or proper logic.',
+      referenceRequirement: requirementReference(
+        'UFGS 01 32 01.00 10, 3.3.16 - lags must be reasonable and may not replace realistic durations or proper logic.',
+        'Long lags should be justified and must not conceal measurable work or waiting periods.',
+      ),
       affectedActivities: affected(related, 'Connected by long positive lag'),
     }))
   }
 
-  const excessiveDurations = tasks.filter(task => {
+  const maxActivityDuration = Number(requirements?.maxActivityDurationDays || (requirementsAreUfgs ? 20 : 0))
+  const excessiveDurations = maxActivityDuration > 0 ? tasks.filter(task => {
     if (!isDetailedWorkActivity(task) || isProcurement(task)) return false
     const calendar = (analysis.calendars || {})[String(task?.clndr_id || '')]
     const hoursPerDay = Math.max(1, Number(calendar?.day_hr_cnt || 8))
-    return Number(task?.target_drtn_hr_cnt || 0) / hoursPerDay > 20
-  })
+    return Number(task?.target_drtn_hr_cnt || 0) / hoursPerDay > maxActivityDuration
+  }) : []
   if (excessiveDurations.length) findings.push(finding({
     primaryDomain: 'AR-07',
     crossReferencedDomains: ['AR-09'],
     ruleStrength: 'EXPECTED',
     severity: excessiveDurations.length >= 20 ? 4 : 3,
     title: 'Non-procurement activities exceed the reviewable duration benchmark',
-    whatFound: `${excessiveDurations.length} non-procurement activit${excessiveDurations.length === 1 ? 'y exceeds' : 'ies exceed'} 20 working days based on the submitted original duration.`,
+    whatFound: `${excessiveDurations.length} non-procurement activit${excessiveDurations.length === 1 ? 'y exceeds' : 'ies exceed'} ${maxActivityDuration} working days based on the submitted original duration.`,
     whyItMatters: 'Overly broad activities conceal progress, delay causes, workfront handoffs, and near-term accountability between updates.',
     reviewerCheck: 'Break the listed work into measurable, logic-connected activities or provide the project-specific basis for retaining the duration.',
     preSubmissionNote: 'Subdivide excessive durations into measurable work packages unless the governing specification permits the longer activity.',
-    referenceRequirement: 'UFGS 01 32 01.00 10, 3.3.2 — non-procurement original durations are not to exceed 20 workdays or 30 calendar days.',
-    affectedActivities: affected(excessiveDurations, 'Original duration exceeds 20 workdays'),
+    referenceRequirement: requirementReference(
+      'UFGS 01 32 01.00 10, 3.3.2 - non-procurement original durations are not to exceed 20 workdays or 30 calendar days.',
+      `The selected project requirements set a maximum activity duration of ${maxActivityDuration} working days.`,
+    ),
+    affectedActivities: affected(excessiveDurations, `Original duration exceeds ${maxActivityDuration} working days`),
   }))
 
   const zeroDurationWork = tasks.filter(task =>
@@ -751,23 +822,33 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     whyItMatters: 'Zero-duration work behaves like a milestone and cannot represent measurable production, progress, or remaining work.',
     reviewerCheck: 'Convert true events to properly named milestones and assign realistic original durations to executable work activities.',
     preSubmissionNote: 'Correct zero-duration detailed activities before submission.',
-    referenceRequirement: 'UFGS 01 32 01.00 10, activity-definition and duration requirements — detailed work must be measurable and duration-supported.',
+    referenceRequirement: requirementReference(
+      'UFGS 01 32 01.00 10, activity-definition and duration requirements - detailed work must be measurable and duration-supported.',
+      'Detailed work should be measurable and supported by a realistic duration.',
+    ),
     affectedActivities: affected(zeroDurationWork, 'Zero-duration detailed work'),
   }))
 
   const longLeadRisk = (analysis.longLeadItems || []).filter((item: any) =>
     item?.status_code !== 'TK_Complete' && Number(item?.phys_complete_pct || 0) < 100 && Number(item?.floatDays) <= 14,
   )
+  const longLeadThreshold = Number(requirements?.longLeadThresholdDays || (requirementsAreUfgs ? 90 : 0))
+  const longLeadDefinitionCount = longLeadThreshold > 0
+    ? longLeadRisk.filter((item: any) => Number(item?.durationDays || 0) > longLeadThreshold).length
+    : 0
   if (longLeadRisk.length) findings.push(finding({
     primaryDomain: 'AR-05',
     ruleStrength: 'EXPECTED',
     severity: 3,
     title: 'Procurement items require near-term recovery or confirmation',
-    whatFound: `${longLeadRisk.length} incomplete procurement item${longLeadRisk.length === 1 ? ' has' : 's have'} 14 calendar days of float or less. ${longLeadRisk.filter((item: any) => Number(item?.durationDays || 0) > 90).length} exceed the UFGS 90-calendar-day long-lead definition.`,
+    whatFound: `${longLeadRisk.length} incomplete procurement item${longLeadRisk.length === 1 ? ' has' : 's have'} 14 calendar days of float or less.${longLeadThreshold > 0 ? ` ${longLeadDefinitionCount} exceed the selected ${longLeadThreshold}-calendar-day long-lead threshold.` : ''}`,
     whyItMatters: 'Procurement with little or negative float can become a controlling condition before fabrication, delivery, installation, and testing are visible to management.',
     reviewerCheck: 'Confirm submittal approval, release, fabrication, delivery, required-on-site date, installation successor, and supplier recovery information for each item.',
     preSubmissionNote: 'Update the procurement chain and narrative with current vendor dates, required-on-site dates, downstream installation, and mitigation.',
-    referenceRequirement: 'UFGS 01 32 01.00 10, 3.3.4 — critical submittal, approval, procurement, fabrication, and delivery activities must be represented; long lead is defined as more than 90 calendar days. The 14-day float threshold is an early-warning review parameter.',
+    referenceRequirement: requirementReference(
+      'UFGS 01 32 01.00 10, 3.3.4 - critical submittal, approval, procurement, fabrication, and delivery activities must be represented; long lead is defined as more than 90 calendar days. The 14-day float threshold is an early-warning review parameter.',
+      `${longLeadThreshold > 0 ? `The selected project requirements define long lead as more than ${longLeadThreshold} calendar days. ` : ''}The 14-day float threshold is a CPMReview early-warning review parameter, not a contractual limit.`,
+    ),
     affectedActivities: affected(longLeadRisk, 'Long-lead item at risk'),
   }))
 
@@ -781,22 +862,26 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     whyItMatters: 'Without a dependable WBS, the schedule cannot be filtered and reconciled consistently by project phase, area, system, or responsibility.',
     reviewerCheck: 'Assign the affected activities to the approved project WBS and confirm the hierarchy matches the control and reporting structure.',
     preSubmissionNote: 'Complete the WBS assignment before submission.',
-    referenceRequirement: 'U.S. project-control benchmark — the activity network must be organized at a level that supports planning, execution, and review; project-specific coding requirements govern.',
+    referenceRequirement: `${projectBasisReference} The activity network should support consistent planning, execution, filtering, and review.`,
     affectedActivities: affected(missingWbs, 'Missing usable WBS assignment'),
   }))
 
-  const overlengthIds = tasks.filter(task => taskCode(task).length > 10)
+  const maxActivityIdLength = Number(p6Settings?.maxActivityIdLength || (p6SettingsAreUfgs ? 10 : 0))
+  const overlengthIds = maxActivityIdLength > 0 ? tasks.filter(task => taskCode(task).length > maxActivityIdLength) : []
   if (overlengthIds.length) findings.push(finding({
     primaryDomain: 'AR-09',
     ruleStrength: 'REQUIRED',
     severity: 4,
-    title: 'Activity IDs exceed the 10-character federal limit',
-    whatFound: `${overlengthIds.length} activity ID${overlengthIds.length === 1 ? ' exceeds' : 's exceed'} 10 characters.`,
-    whyItMatters: 'Overlength identifiers are incompatible with the required federal schedule data structure and can prevent clean transfer into downstream systems.',
-    reviewerCheck: 'Revise the listed Activity IDs to 10 characters or fewer using the approved project naming convention.',
+    title: `Activity IDs exceed the ${maxActivityIdLength}-character project limit`,
+    whatFound: `${overlengthIds.length} activity ID${overlengthIds.length === 1 ? ' exceeds' : 's exceed'} ${maxActivityIdLength} characters.`,
+    whyItMatters: 'Overlength identifiers are incompatible with the selected project naming standard and may prevent clean transfer into downstream systems.',
+    reviewerCheck: `Revise the listed Activity IDs to ${maxActivityIdLength} characters or fewer using the approved project naming convention.`,
     preSubmissionNote: 'Correct overlength Activity IDs before submission and document approved ID changes in an update review.',
-    referenceRequirement: 'UFGS 01 32 01.00 10, 3.12(i) — Activity IDs must not exceed 10 characters.',
-    affectedActivities: affected(overlengthIds, 'Activity ID exceeds 10 characters'),
+    referenceRequirement: p6Reference(
+      'UFGS 01 32 01.00 10, 3.12(i) - Activity IDs must not exceed 10 characters.',
+      `The selected P6 settings limit Activity IDs to ${maxActivityIdLength} characters.`,
+    ),
+    affectedActivities: affected(overlengthIds, `Activity ID exceeds ${maxActivityIdLength} characters`),
   }))
 
   const activityCodeTypes = Object.values(analysis.activityCodeTypes || {})
@@ -813,7 +898,7 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     ]
     const presentText = activityCodeTypes.map(type => normalized(type?.actv_code_type)).join(' | ')
     const missingGroups = requiredCodeGroups.filter(group => !group.match.test(presentText)).map(group => group.key)
-    if (missingGroups.length) findings.push(finding({
+    if (requirements?.sdefRequired && missingGroups.length) findings.push(finding({
       primaryDomain: 'AR-09',
       ruleStrength: 'REQUIRED',
       severity: 4,
@@ -821,8 +906,11 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
       whatFound: `The submitted activity-code dictionary does not evidence these standard groups: ${missingGroups.join(', ')}.`,
       whyItMatters: 'Missing standard codes prevent consistent filtering, responsibility assignment, CLIN reconciliation, phase reporting, and definable-feature-of-work control.',
       reviewerCheck: 'Establish the project-level SDEF code dictionary and assign the applicable codes to schedule activities.',
-      preSubmissionNote: 'Complete the federal activity-code structure before submission.',
-      referenceRequirement: 'UFGS 01 32 01.00 10, 3.3.7 and 3.12(a) — use the mandatory SDEF coding structure and keep Activity Codes at Project level.',
+      preSubmissionNote: 'Complete the required activity-code structure before submission.',
+      referenceRequirement: requirementReference(
+        'UFGS 01 32 01.00 10, 3.3.7 and 3.12(a) - use the mandatory SDEF coding structure and keep Activity Codes at Project level.',
+        'The selected project requirements mandate the SDEF activity-code structure.',
+      ),
       affectedActivities: [],
     }))
 
@@ -830,7 +918,8 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
       const scope = String(type?.actv_code_type_scope || '').toUpperCase()
       return scope && scope !== 'AS_PROJECT'
     })
-    if (nonProjectCodeTypes.length) findings.push(finding({
+    const projectActivityCodesRequired = p6SettingsAreUfgs || p6Settings?.activityCodesProjectLevel === true
+    if (projectActivityCodesRequired && nonProjectCodeTypes.length) findings.push(finding({
       primaryDomain: 'AR-09',
       ruleStrength: 'REQUIRED',
       severity: 4,
@@ -839,7 +928,10 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
       whyItMatters: 'Non-project activity codes are not controlled within the submitted project and can change or map inconsistently across systems.',
       reviewerCheck: 'Recreate the affected activity-code types at Project level and verify all assignments.',
       preSubmissionNote: 'Use Project-level activity codes before submission.',
-      referenceRequirement: 'UFGS 01 32 01.00 10, 3.12(a) — Activity Codes must be Project Level, not Global or EPS level.',
+      referenceRequirement: p6Reference(
+        'UFGS 01 32 01.00 10, 3.12(a) - Activity Codes must be Project Level, not Global or EPS level.',
+        'The selected P6 settings require Project-level Activity Codes.',
+      ),
       affectedActivities: nonProjectCodeTypes.map((type: any) => ({ id: String(type.actv_code_type_id), code: String(type.actv_code_type_id), name: String(type.actv_code_type || 'Unnamed code type'), note: String(type.actv_code_type_scope || 'Non-project scope') })),
     }))
   }
