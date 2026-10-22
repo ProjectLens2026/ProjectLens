@@ -95,6 +95,15 @@ async function readScheduleFileAsText(file: File): Promise<string> {
 export default function UploadPage() {
   const router = useRouter()
   const perms = usePermissions()
+  const uploadRequest = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search)
+    : null
+  const requestedMode = uploadRequest?.get('mode') === 'new'
+    ? 'new'
+    : uploadRequest?.get('mode') === 'existing'
+      ? 'existing'
+      : null
+  const requestedProjectId = uploadRequest?.get('project') || ''
   const [step, setStep] = useState<Step>('upload')
   const [file, setFile] = useState<File | null>(null)
   const [uploadError, setUploadError] = useState('')
@@ -132,6 +141,27 @@ export default function UploadPage() {
     const all = loadProjects()
     setExistingProjects(all)
     const activeId = getActiveProjectId()
+    // Explicit routes keep the two workflows separate:
+    //   ?mode=new                         creates a new project
+    //   ?mode=existing&project=<uuid>     adds a version to that project
+    // This prevents an "Upload New Version" action from opening in the
+    // create-project state and asking the user to choose the intent again.
+    if (requestedMode === 'existing') {
+      setProjectMode('existing')
+      if (requestedProjectId && all.some(p => p.id === requestedProjectId)) {
+        setSelectedProjectId(requestedProjectId)
+      } else if (activeId && all.some(p => p.id === activeId)) {
+        setSelectedProjectId(activeId)
+      } else if (all.length > 0) {
+        setSelectedProjectId(all[0].id)
+      }
+      return
+    }
+    if (requestedMode === 'new' && perms.can.createProject && !(planInfo?.atLimit || planInfo?.trialExpired)) {
+      setProjectMode('new')
+      setSelectedProjectId('')
+      return
+    }
     // Phase 3D — PMs can NEVER create new projects via upload. Force them
     // into existing-project mode regardless of what's selected.
     if (!perms.loading && !perms.can.createProject) {
@@ -727,8 +757,14 @@ export default function UploadPage() {
               </div>
             </div>
             {file?.name.toLowerCase().endsWith('.xml') && <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4 text-xs leading-relaxed text-blue-900"><b>Microsoft Project XML:</b> tasks, WBS/summary structure, calendars, status date, progress, constraints, total slack and predecessor relationships will use the same CPM and formal review workflow. P6-only settings checks and the current XER-only TIA comparator are not applied.</div>}
-            <h2 className="text-xl font-extrabold text-slate-900 mb-1">Tell us about your project</h2>
-            <p className="text-slate-500 text-sm mb-5">Project ID and Name lock once set. Contract dates feed into the dashboard. On future uploads, fields auto-fill — edit only what changed.</p>
+            <h2 className="text-xl font-extrabold text-slate-900 mb-1">
+              {requestedMode === 'existing' ? 'Upload a new project version' : requestedMode === 'new' ? 'Create a new project' : 'Tell us about your project'}
+            </h2>
+            <p className="text-slate-500 text-sm mb-5">
+              {requestedMode === 'existing'
+                ? 'The selected project is preserved. Choose the schedule type and upload this file as its next version.'
+                : 'Project ID and Name lock once set. Contract dates feed into the dashboard. On future uploads, fields auto-fill — edit only what changed.'}
+            </p>
 
             {/* Phase A.2 + B.1 — Trial expired banner (red, hard block).
                 Shown when subscription_status='trial' AND trial_ends_at < now.
@@ -821,13 +857,15 @@ export default function UploadPage() {
 
             {/* Project assignment */}
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5">
-              <div className="text-xs font-bold text-blue-900 uppercase tracking-wider mb-3">Assign this schedule to:</div>
-              <div className={perms.can.createProject ? 'grid grid-cols-2 gap-3 mb-3' : 'mb-3'}>
+              <div className="text-xs font-bold text-blue-900 uppercase tracking-wider mb-3">
+                {requestedMode === 'existing' ? 'Upload version to:' : requestedMode === 'new' ? 'Create project:' : 'Assign this schedule to:'}
+              </div>
+              <div className={perms.can.createProject && !requestedMode ? 'grid grid-cols-2 gap-3 mb-3' : 'mb-3'}>
                 {/* Day 10 — "Create new project" is Owner/Admin only.
                     PMs upload to existing assigned projects, full stop.
                     Hiding the button (rather than disabling) makes the UX
                     cleaner — no temptation, no "why can't I click this?". */}
-                {perms.can.createProject && (
+                {perms.can.createProject && requestedMode !== 'existing' && (
                   <button
                     type="button"
                     onClick={() => { if (!(planInfo?.atLimit || planInfo?.trialExpired)) setProjectMode('new') }}
@@ -863,7 +901,7 @@ export default function UploadPage() {
                     </div>
                   </button>
                 )}
-                <button
+                {requestedMode !== 'new' && <button
                   type="button"
                   onClick={() => setProjectMode('existing')}
                   disabled={existingProjects.length === 0}
@@ -881,7 +919,7 @@ export default function UploadPage() {
                       ? (perms.can.createProject ? 'No projects yet' : 'No projects assigned — ask your admin')
                       : `Add as new version to one of your ${existingProjects.length} project${existingProjects.length > 1 ? 's' : ''}`}
                   </div>
-                </button>
+                </button>}
               </div>
               {!perms.can.createProject && (
                 <div className="bg-white border border-blue-200 rounded-lg p-2.5 mb-3 text-[11px] text-blue-900">

@@ -222,7 +222,7 @@ export default function ControlLensAnalysisPage() {
           >
             🖨 Print / Save PDF
           </button>
-          <Link href="/dashboard/upload" className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400 hover:text-blue-600 font-semibold">
+          <Link href={`/dashboard/upload?mode=existing&project=${encodeURIComponent(project.id)}`} className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:border-blue-400 hover:text-blue-600 font-semibold">
             ⬆ Upload New Version
           </Link>
         </div>
