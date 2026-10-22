@@ -1,4 +1,6 @@
 'use client'
+
+import { SELF_SERVICE_CHECKOUT_ENABLED, PILOT_CONTACT_HREF } from '@/lib/launchPolicy'
 // =============================================================================
 // Settings page — Phase 3C / Day 9.
 //
@@ -131,15 +133,15 @@ function WorkspaceTab({ perms }: { perms: ReturnType<typeof usePermissions> }) {
         </Link>
       </Card>
 
-      <SectionHeader title="Help & Support" subtitle="Reach the CPMReview team — we usually respond within 24 hours" />
+      <SectionHeader title="Help & Support" subtitle="Reach the CPMreview team — we usually respond within 24 hours" />
       <Card>
         <div className="space-y-3">
           <div className="flex items-start gap-3">
             <span className="text-xl">📧</span>
             <div className="flex-1">
               <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Support Email</div>
-              <a href="mailto:support@cpmreview.com" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
-                support@cpmreview.com
+              <a href="mailto:support@control-lens.com" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
+                support@control-lens.com
               </a>
               <div className="text-xs text-slate-500 mt-0.5">
                 Technical issues, bug reports, account problems, or anything that's not working
@@ -150,8 +152,8 @@ function WorkspaceTab({ perms }: { perms: ReturnType<typeof usePermissions> }) {
             <span className="text-xl">💼</span>
             <div className="flex-1">
               <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Sales & General Inquiries</div>
-              <a href="mailto:info@cpmreview.com" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
-                info@cpmreview.com
+              <a href="mailto:info@control-lens.com" className="text-sm font-semibold text-blue-600 hover:text-blue-700">
+                info@control-lens.com
               </a>
               <div className="text-xs text-slate-500 mt-0.5">
                 Pricing, demos, partnership opportunities, custom features
@@ -751,6 +753,8 @@ function BillingTab({ perms }: { perms: ReturnType<typeof usePermissions> }) {
     )
   }
 
+  if (!SELF_SERVICE_CHECKOUT_ENABLED) return <div className="rounded-xl border border-slate-200 bg-white p-6"><h3 className="text-lg font-bold text-slate-900">Company pilot & billing</h3><p className="mt-2 text-sm text-slate-600">New self-service subscriptions are paused. Pilot scope and commercial terms are agreed directly with each company.</p><p className="mt-3 text-xs text-slate-500">Current account status: {plan.subscriptionStatus.replaceAll('_', ' ')}</p><div className="mt-5 flex flex-wrap gap-3"><a href={PILOT_CONTACT_HREF} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white">Contact the pilot team</a>{plan.stripeCustomerId && <button onClick={openPortal} disabled={portalLoading} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold">{portalLoading ? 'Opening…' : 'Manage existing billing'}</button>}</div>{plan.stripeCustomerId && <p className="mt-4 text-xs text-slate-500">Existing subscription terms and scheduled charges remain in effect unless changed through billing management.</p>}{error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}</div>
+
   // Status badge
   const statusBadge = (() => {
     switch (plan.subscriptionStatus) {
@@ -777,7 +781,7 @@ function BillingTab({ perms }: { perms: ReturnType<typeof usePermissions> }) {
       <div className="bg-white border border-slate-200 rounded-xl p-6">
         <div className="flex items-start justify-between mb-4">
           <div>
-            <h3 className="text-base font-bold text-slate-900">ControlLens Pro</h3>
+            <h3 className="text-base font-bold text-slate-900">CPMreview Pro</h3>
             <p className="text-xs text-slate-500 mt-0.5">
               5 active projects · Up to 56 users · TIA, Trend, EVM
             </p>
@@ -861,7 +865,7 @@ function BillingTab({ perms }: { perms: ReturnType<typeof usePermissions> }) {
           <li>• Month 3 onwards: <strong>$99/month</strong></li>
           <li>• No pro-rating. Each month billed in full.</li>
           <li>• Cancel anytime. You keep access until your paid period ends.</li>
-          <li>• Need more than 5 projects? <a href="mailto:sales@cpmreview.com" className="text-blue-600 hover:underline">Contact sales</a></li>
+          <li>• Need more than 5 projects? <a href="mailto:sales@control-lens.com" className="text-blue-600 hover:underline">Contact sales</a></li>
         </ul>
       </div>
     </div>

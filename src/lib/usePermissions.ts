@@ -220,7 +220,7 @@ export function usePermissions(): Permissions {
         // confirming via the new email).
         const PLATFORM_OWNER_EMAILS = [
           'support@nobelpm.org',
-          'support@cpmreview.com',
+          'support@control-lens.com',
         ]
         const isPlatformOwner = PLATFORM_OWNER_EMAILS.includes(
           (current.email || '').toLowerCase()

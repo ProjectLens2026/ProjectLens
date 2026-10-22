@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
       : 'not set'
 
     const { html, text } = notificationTemplate({
-      headline: 'New CPMReview signup',
+      headline: 'New ControlLens signup',
       intro: `${userName} just created an account and started a 15-day free trial.`,
       rows: [
         { label: 'Name', value: userName },
@@ -107,11 +107,11 @@ export async function POST(req: NextRequest) {
       ],
       ctaText: 'View in Supabase',
       ctaUrl: `https://supabase.com/dashboard/project/khqwfeaubmnlndqltniw/editor`,
-      footer: 'Reach out within 24 hours to welcome them and learn what they\'re hoping to use CPMReview for.',
+      footer: 'Reach out within 24 hours to welcome them and learn what they\'re hoping to use ControlLens for.',
     })
 
     await sendOwnerNotification({
-      subject: `[CPMReview] New signup: ${user.email || userName}`,
+      subject: `[ControlLens] New signup: ${user.email || userName}`,
       html,
       text,
     })

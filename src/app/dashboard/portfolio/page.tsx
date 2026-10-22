@@ -2,7 +2,7 @@
 // =============================================================================
 // Portfolio page — Day 10. Platform-owner only.
 //
-// Lets Jawid (and backup support@cpmreview.com) see all customer
+// Lets Jawid (and backup support@control-lens.com) see all customer
 // organizations registered on ControlLens. Per-org stats: member counts by
 // role, project counts, primary admin contact. Click a row to drill into
 // the org's members + projects.

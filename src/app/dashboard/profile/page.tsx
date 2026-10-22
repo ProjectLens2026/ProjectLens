@@ -256,7 +256,7 @@ export default function ProfilePage() {
             <div className="flex-1">
               <div className="text-sm font-bold text-slate-900 mb-0.5">Show "Ask ControlLens" chat widget</div>
               <div className="text-xs text-slate-500 leading-relaxed">
-                The floating chat bubble at the bottom-right of every page. Turn off if you want a cleaner UI - you can still get help by emailing support@cpmreview.com.
+                The floating chat bubble at the bottom-right of every page. Turn off if you want a cleaner UI - you can still get help by emailing support@control-lens.com.
               </div>
             </div>
             <button

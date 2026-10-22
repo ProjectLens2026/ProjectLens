@@ -823,7 +823,7 @@ export default function UploadPage() {
                     {' '}Upgrade to ControlLens Pro to keep new projects, TIA, Trend, and EVM after day 16.
                   </div>
                   <a
-                    href={`mailto:sales@cpmreview.com?subject=Upgrade%20to%20CPMReview%20Pro&body=Hi%2C%20we%27d%20like%20to%20upgrade%20to%20CPMReview%20Pro%20before%20our%20trial%20ends.%0A%0AOrg%20ID%3A%20${planInfo.orgId}%0ADays%20left%3A%20${planInfo.daysLeftInTrial}%0A%0AThanks.`}
+                    href={`mailto:sales@control-lens.com?subject=Upgrade%20to%20ControlLens%20Pro&body=Hi%2C%20we%27d%20like%20to%20upgrade%20to%20ControlLens%20Pro%20before%20our%20trial%20ends.%0A%0AOrg%20ID%3A%20${planInfo.orgId}%0ADays%20left%3A%20${planInfo.daysLeftInTrial}%0A%0AThanks.`}
                     className="flex-shrink-0 inline-block bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg transition-colors">
                     Upgrade →
                   </a>
@@ -846,7 +846,7 @@ export default function UploadPage() {
                       Your Pro plan covers up to {planInfo.projectLimit} active projects. You can keep uploading new versions to existing projects, but creating a new project is locked until you upgrade.
                     </div>
                     <a
-                      href={`mailto:sales@cpmreview.com?subject=Upgrade%20request%20-%20more%20than%20${planInfo.projectLimit}%20projects&body=Hi%2C%20we%27ve%20reached%20our%20${planInfo.projectLimit}-project%20limit%20on%20CPMReview%20Pro.%20Please%20upgrade%20us%20to%20a%20higher%20tier.%0A%0AOrg%20ID%3A%20${planInfo.orgId}%0ACurrent%20projects%3A%20${planInfo.currentCount}%0A%0AThanks.`}
+                      href={`mailto:sales@control-lens.com?subject=Upgrade%20request%20-%20more%20than%20${planInfo.projectLimit}%20projects&body=Hi%2C%20we%27ve%20reached%20our%20${planInfo.projectLimit}-project%20limit%20on%20ControlLens%20Pro.%20Please%20upgrade%20us%20to%20a%20higher%20tier.%0A%0AOrg%20ID%3A%20${planInfo.orgId}%0ACurrent%20projects%3A%20${planInfo.currentCount}%0A%0AThanks.`}
                       className="inline-block bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors">
                       📧 Email sales to upgrade →
                     </a>

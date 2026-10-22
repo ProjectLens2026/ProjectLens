@@ -6,7 +6,7 @@
 //
 // Env vars used:
 //   RESEND_API_KEY       — the re_... value from resend.com
-//   NOTIFY_FROM_EMAIL    — e.g. "CPMReview <notifications@cpmreview.com>"
+//   NOTIFY_FROM_EMAIL    — e.g. "ControlLens <notifications@control-lens.com>"
 //   NOTIFY_OWNER_EMAILS  — comma-separated, e.g. "a@x.com,b@y.com"
 //
 // All calls are wrapped in try/catch and never throw — a Resend outage must
@@ -23,12 +23,12 @@ interface SendOwnerNotificationArgs {
 export async function sendOwnerNotification(args: SendOwnerNotificationArgs): Promise<boolean> {
   const apiKey = process.env.RESEND_API_KEY
   const from = process.env.NOTIFY_FROM_EMAIL
-    || 'CPMReview <notifications@cpmreview.com>'
+    || 'ControlLens <notifications@control-lens.com>'
   const toList = (process.env.NOTIFY_OWNER_EMAILS || '')
     .split(',')
     .map(s => s.trim())
     .filter(Boolean)
-  const replyTo = args.replyTo || 'support@cpmreview.com'
+  const replyTo = args.replyTo || 'support@control-lens.com'
 
   if (!apiKey) {
     console.warn('[notify] RESEND_API_KEY not set — skipping email:', args.subject)
@@ -102,7 +102,7 @@ export function notificationTemplate(opts: {
 <html><body style="margin:0;padding:0;background:#F1F5F9;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
   <div style="max-width:560px;margin:0 auto;padding:24px;">
     <div style="background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:28px;">
-      <div style="font-size:20px;font-weight:700;color:#1E40AF;margin-bottom:8px;">CPMReview</div>
+      <div style="font-size:20px;font-weight:700;color:#1E40AF;margin-bottom:8px;">ControlLens</div>
       <div style="font-size:22px;font-weight:700;color:#1F2937;margin-bottom:12px;">${escapeHtml(opts.headline)}</div>
       <div style="font-size:14px;color:#4B5563;line-height:1.55;margin-bottom:18px;">${escapeHtml(opts.intro)}</div>
       <table cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;border-top:1px solid #E2E8F0;padding-top:8px;">
@@ -112,14 +112,14 @@ export function notificationTemplate(opts: {
       ${opts.footer ? `<div style="margin-top:24px;font-size:12px;color:#9CA3AF;line-height:1.5;">${escapeHtml(opts.footer)}</div>` : ''}
     </div>
     <div style="text-align:center;font-size:11px;color:#9CA3AF;margin-top:16px;">
-      Sent by CPMReview · Nobel Project Management Services, LLC
+      Sent by ControlLens · Nobel Project Management Services, LLC
     </div>
   </div>
 </body></html>`
 
   // Plain-text fallback (for email clients that block HTML)
   const text = [
-    `CPMReview — ${opts.headline}`,
+    `ControlLens — ${opts.headline}`,
     '',
     opts.intro,
     '',

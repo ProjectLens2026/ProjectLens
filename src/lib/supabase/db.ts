@@ -1823,7 +1823,7 @@ export async function loadPortfolio(): Promise<PortfolioOrg[]> {
   if (!user?.email) return []
 
   // Client-side whitelist guard. The DB function double-checks via SECURITY DEFINER.
-  const PLATFORM_OWNER_EMAILS = ['support@nobelpm.org', 'support@cpmreview.com']
+  const PLATFORM_OWNER_EMAILS = ['support@nobelpm.org', 'support@control-lens.com']
   if (!PLATFORM_OWNER_EMAILS.includes(user.email.toLowerCase())) {
     console.warn('[db.loadPortfolio] caller is not a platform owner')
     return []
@@ -1853,7 +1853,7 @@ export async function loadOrgMembersForPlatformOwner(orgId: string): Promise<Por
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user?.email) return []
-  const PLATFORM_OWNER_EMAILS = ['support@nobelpm.org', 'support@cpmreview.com']
+  const PLATFORM_OWNER_EMAILS = ['support@nobelpm.org', 'support@control-lens.com']
   if (!PLATFORM_OWNER_EMAILS.includes(user.email.toLowerCase())) return []
 
   const { data, error } = await supabase.rpc('platform_org_members', { p_org_id: orgId })
@@ -1882,7 +1882,7 @@ export async function loadOrgProjectsForPlatformOwner(orgId: string): Promise<Po
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user?.email) return []
-  const PLATFORM_OWNER_EMAILS = ['support@nobelpm.org', 'support@cpmreview.com']
+  const PLATFORM_OWNER_EMAILS = ['support@nobelpm.org', 'support@control-lens.com']
   if (!PLATFORM_OWNER_EMAILS.includes(user.email.toLowerCase())) return []
 
   const { data, error } = await supabase.rpc('platform_org_projects', { p_org_id: orgId })
@@ -1916,7 +1916,7 @@ export async function createCompanyAsPlatformOwner(opts: {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user?.email) return { ok: false, error: 'Not signed in' }
 
-  const PLATFORM_OWNER_EMAILS = ['support@nobelpm.org', 'support@cpmreview.com']
+  const PLATFORM_OWNER_EMAILS = ['support@nobelpm.org', 'support@control-lens.com']
   if (!PLATFORM_OWNER_EMAILS.includes(user.email.toLowerCase())) {
     return { ok: false, error: 'Platform owners only' }
   }
@@ -1983,7 +1983,7 @@ export async function deleteCompanyAsPlatformOwner(orgId: string): Promise<{
   const { data: { user } } = await supabase.auth.getUser()
   if (!user?.email) return { ok: false, error: 'Not signed in' }
 
-  const PLATFORM_OWNER_EMAILS = ['support@nobelpm.org', 'support@cpmreview.com']
+  const PLATFORM_OWNER_EMAILS = ['support@nobelpm.org', 'support@control-lens.com']
   if (!PLATFORM_OWNER_EMAILS.includes(user.email.toLowerCase())) {
     return { ok: false, error: 'Platform owners only' }
   }
