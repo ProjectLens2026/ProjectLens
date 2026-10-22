@@ -1,4 +1,5 @@
 import type { ContractDates, Project, ScheduleRequirementsBasis } from './projectStore'
+import { detectFinalCompletionTarget } from './completionBoundary'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -31,7 +32,12 @@ export function analysisWithProjectBasis(analysis: any, project?: Project | null
   const contractDates = project?.contractDates
   const scheduleRequirements = project?.controlBasis?.scheduleRequirements
   const authorizedCompletion = authorizedContractCompletion(contractDates)
-  const delay = contractualDelayDays(analysis.projectedEnd, contractDates)
+  const completionTarget = detectFinalCompletionTarget(Object.values(analysis.traceTasks || {}))
+  const completionForecast = completionTarget?.date
+    || analysis.finalCompletionForecast
+    || analysis.finalCompletionDate
+    || undefined
+  const delay = contractualDelayDays(completionForecast, contractDates)
   const totalActivities = Math.max(1, Number(analysis.totalActivities || Object.keys(analysis.traceTasks || {}).length || 1))
   const negativeFloat = Number(analysis.negativeFloat || 0)
   const outOfSequence = Array.isArray(analysis.outOfSequence) ? analysis.outOfSequence.length : Number(analysis.outOfSequenceCount || 0)
@@ -55,6 +61,10 @@ export function analysisWithProjectBasis(analysis: any, project?: Project | null
       || analysis.administrativeTermDate
       || analysis.contractEnd
       || undefined,
+    projectScheduledEnd: analysis.projectScheduledEnd || analysis.projectedEnd || undefined,
+    projectedEnd: completionForecast,
+    finalCompletionDate: completionForecast,
+    finalCompletionMilestone: completionTarget?.task?.task_code || analysis.finalCompletionMilestone,
     contractEnd: authorizedCompletion,
     delayDays: delay === null ? 0 : delay,
     contractDelayAvailable: delay !== null,

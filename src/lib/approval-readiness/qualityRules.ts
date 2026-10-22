@@ -10,6 +10,13 @@
 import type { ApprovalFinding, RuleStrength } from './types'
 import { computeDeduction } from './framework'
 import type { ContractDates, ScheduleRequirementsBasis } from '../projectStore'
+import {
+  detectFinalCompletionTarget,
+  isAdministrativeTermMilestone,
+  isPostCompletionAdministrativeWork,
+  taskFinishDate,
+  taskIdentity,
+} from '../completionBoundary'
 
 type QualityFinding = Omit<ApprovalFinding, 'id' | 'status'>
 
@@ -189,6 +196,106 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
   const basisDates = analysis.reviewBasis?.contractDates
   const requirements = analysis.reviewBasis?.scheduleRequirements
   const authorizedDates = contractualDates(basisDates)
+
+  const finalCompletionTarget = detectFinalCompletionTarget(tasks)
+  if (!finalCompletionTarget?.task || !finalCompletionTarget.date) findings.push(finding({
+    primaryDomain: 'AR-01',
+    crossReferencedDomains: ['AR-02', 'AR-03'],
+    ruleStrength: 'REQUIRED',
+    severity: 5,
+    criticalGate: true,
+    title: 'Final Completion / End Project milestone is not identified',
+    whatFound: 'The submitted schedule does not contain a dated finish milestone clearly identified as Final Completion, End Project, Project Completion, Contract Completion, or Final Acceptance.',
+    whyItMatters: 'A project-level administrative term or latest activity date cannot define the construction completion forecast. Without an explicit completion milestone, delay and controlling-path conclusions are not reliable.',
+    reviewerCheck: 'Add or correctly identify the milestone that closes the construction CPM network, tie the controlling completion work into it, and recalculate the schedule.',
+    preSubmissionNote: 'Establish the explicit Final Completion / End Project milestone before submission.',
+    referenceRequirement: 'Project-specific final completion requirement and approved CPM completion network.',
+    affectedActivities: [],
+  }))
+
+  if (finalCompletionTarget?.task && finalCompletionTarget.date) {
+    const finalDate = dateOnly(finalCompletionTarget.date)
+    const finalId = taskIdentity(finalCompletionTarget.task)
+    const postFinal = tasks.filter(task => {
+      if (taskIdentity(task) === finalId) return false
+      const finish = dateOnly(taskFinishDate(task))
+      return Boolean(finish && finalDate && finish > finalDate)
+    })
+    const administrative = postFinal.filter(isPostCompletionAdministrativeWork)
+    const operational = postFinal.filter(task => !isPostCompletionAdministrativeWork(task))
+
+    if (operational.length) findings.push(finding({
+      primaryDomain: 'AR-01',
+      crossReferencedDomains: ['AR-02', 'AR-03'],
+      ruleStrength: 'REQUIRED',
+      severity: 5,
+      criticalGate: true,
+      title: 'Project work is scheduled after Final Completion',
+      whatFound: `${operational.length} non-administrative activit${operational.length === 1 ? 'y finishes' : 'ies finish'} after ${taskCode(finalCompletionTarget.task)} — ${taskName(finalCompletionTarget.task)}.`,
+      whyItMatters: 'Final Completion must close the project delivery network. Operational work after that milestone means the completion milestone is misplaced, mislabeled, or not logically tied to all remaining project scope.',
+      reviewerCheck: 'Move Final Completion to the true end of project work or correct the remaining-work logic. Do not use an administrative term date as the project completion forecast.',
+      preSubmissionNote: 'Resolve every non-administrative activity scheduled beyond Final Completion.',
+      referenceRequirement: 'Project-specific final completion requirement and approved CPM completion network.',
+      affectedActivities: affected(operational, 'Finishes after the Final Completion / End Project milestone'),
+    }))
+
+    if (administrative.length) {
+      const adminMilestones = tasks.filter(isAdministrativeTermMilestone)
+      const adminMilestoneIds = new Set(adminMilestones.map(taskIdentity))
+      const successors = new Map<string, string[]>()
+      for (const rel of relationships) {
+        const predecessor = String(rel?.pred_task_id || '')
+        const successor = String(rel?.task_id || '')
+        if (!predecessor || !successor) continue
+        successors.set(predecessor, [...(successors.get(predecessor) || []), successor])
+      }
+      const reachesAdminTerm = (start: string): boolean => {
+        const queue = [start]
+        const visited = new Set<string>()
+        while (queue.length) {
+          const current = queue.shift()!
+          if (visited.has(current)) continue
+          visited.add(current)
+          if (current !== start && adminMilestoneIds.has(current)) return true
+          queue.push(...(successors.get(current) || []))
+        }
+        return false
+      }
+      const unconnected = administrative.filter(task => {
+        const id = taskIdentity(task)
+        return !adminMilestoneIds.has(id) && !reachesAdminTerm(id)
+      })
+
+      if (!adminMilestones.length || unconnected.length) findings.push(finding({
+        primaryDomain: 'AR-01',
+        crossReferencedDomains: ['AR-03', 'AR-07'],
+        ruleStrength: 'REQUIRED',
+        severity: 4,
+        title: 'Post-completion administrative closeout is not tied to an administrative-term milestone',
+        whatFound: !adminMilestones.length
+          ? `${administrative.length} final-payment, retainage, or closeout-document activit${administrative.length === 1 ? 'y is' : 'ies are'} scheduled after Final Completion, but no Administrative Term milestone is identified.`
+          : `${unconnected.length} post-completion administrative activit${unconnected.length === 1 ? 'y does' : 'ies do'} not drive the identified Administrative Term milestone.`,
+        whyItMatters: 'Final invoice, retainage release, and closeout-document review may remain after Final Completion, but they belong to a separate administrative closeout chain and must not extend the project completion forecast.',
+        reviewerCheck: 'Tie the applicable administrative closeout activities to a clearly labeled Administrative Term milestone, or remove the administrative term if the contract does not require it.',
+        preSubmissionNote: 'Separate administrative closeout from the Final Completion network and complete its logic.',
+        referenceRequirement: 'Project-specific administrative closeout, final payment, retainage, and document-acceptance provisions.',
+        affectedActivities: affected(unconnected.length ? unconnected : administrative, 'Post-completion administrative closeout requires a separate administrative-term chain'),
+      }))
+      else findings.push(finding({
+        primaryDomain: 'AR-01',
+        crossReferencedDomains: ['AR-03'],
+        ruleStrength: 'EXPECTED',
+        severity: 2,
+        title: 'Administrative closeout continues after Final Completion',
+        whatFound: `${administrative.length} final-payment, retainage, or closeout-document activit${administrative.length === 1 ? 'y is' : 'ies are'} scheduled after Final Completion and tied to the separate Administrative Term milestone.`,
+        whyItMatters: 'These activities are visible for administrative control but are excluded from the project completion forecast and contractual delay calculation.',
+        reviewerCheck: 'Confirm that these are administrative closeout obligations only and that no remaining construction or commissioning scope is hidden in this chain.',
+        preSubmissionNote: 'Confirm the post-completion administrative chain and retain it separately from the Final Completion network.',
+        referenceRequirement: 'Project-specific administrative closeout, final payment, retainage, and document-acceptance provisions.',
+        affectedActivities: affected(administrative, 'Administrative closeout after Final Completion; excluded from project delay'),
+      }))
+    }
+  }
 
   if (!basisDates?.originalContractCompletion) findings.push(finding({
     primaryDomain: 'AR-01',

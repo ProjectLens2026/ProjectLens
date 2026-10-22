@@ -1,4 +1,5 @@
 import { discoverUSProject, type USProjectDiscoveryResult } from './construction/projectDiscovery'
+import { detectFinalCompletionTarget } from './completionBoundary'
 
 export interface Task {
   task_id: string
@@ -104,6 +105,7 @@ export interface ParsedXER {
   dataDate: string
   contractEnd: string
   administrativeTermDate?: string
+  projectScheduledEnd?: string
   projectedEnd: string
   tasks: Record<string, Task>
   relationships: Relationship[]
@@ -150,6 +152,8 @@ export interface XERAnalysis {
   condition: string
   delayDays: number
   administrativeTermDate?: string
+  projectScheduledEnd?: string
+  projectedEnd?: string
   dataDate?: string
   projectStartDate?: string
   projectStartSource?: string
@@ -336,9 +340,12 @@ export function parseXER(content: string): ParsedXER {
     if (!succMap[r.pred_task_id]) succMap[r.pred_task_id] = []
     succMap[r.pred_task_id].push(r.task_id)
   }
+  const projectScheduledEnd = projectedEnd
+  const finalCompletionTarget = detectFinalCompletionTarget(Object.values(tasks))
+  projectedEnd = finalCompletionTarget?.date || ''
   return {
     sourceFormat: 'PRIMAVERA_XER', sourceLabel: 'Primavera P6 XER',
-    projectName, dataDate, contractEnd, administrativeTermDate, projectedEnd,
+    projectName, dataDate, contractEnd, administrativeTermDate, projectScheduledEnd, projectedEnd,
     tasks, relationships, predMap, succMap, calendars, wbsNodes,
     projectSettings, scheduleOptions, activityCodeTypes, taskActivityCodes,
   }
@@ -688,25 +695,11 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   })
 
   // ==========================================================================
-  // DELAY DAYS — Day 7 documentation
-  //
-  // Formula: delayDays = scd_end_date − plan_end_date (calendar days).
-  //   - plan_end_date: P6's planned project finish (PROJECT.plan_end_date)
-  //   - scd_end_date:  P6's currently scheduled finish (PROJECT.scd_end_date)
-  //
-  // CAVEAT: plan_end_date may not equal your CONTRACT end date. P6 sets it
-  // when the project is created or via Project Properties; if a PM updates
-  // P6's plan_end_date during the project, this delay number drifts away
-  // from the true contract delay. For an authoritative "days behind contract"
-  // number, the dashboard uses the manual Original Contract Completion the
-  // PM enters on upload, NOT this delayDays field.
+  // Contract delay is calculated later from the project control basis and the
+  // explicit Final Completion / End Project milestone. PROJECT plan/scd dates
+  // are metadata and must never create a contractual delay signal.
   // ==========================================================================
   let delayDays = 0
-  if (parsed.contractEnd && parsed.projectedEnd) {
-    const ce = new Date(parsed.contractEnd.replace(' ', 'T'))
-    const pe = new Date(parsed.projectedEnd.replace(' ', 'T'))
-    delayDays = Math.round((pe.getTime() - ce.getTime()) / (1000 * 60 * 60 * 24))
-  }
 
   // Health score
   let healthScore = 100
@@ -740,8 +733,9 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   const projectStartSource = ntpMilestone ? `NTP Milestone (${ntpMilestone.task_code})` : 'Earliest Activity'
   const substMilestone = findMilestoneByKeywords(['SUBSTANTIAL', 'BENEFICIAL', 'BOD', 'BENEFICIAL OCCUPANCY'])
   const substantialDate = substMilestone?.early_end_date || substMilestone?.target_end_date
-  const finalMilestone = findMilestoneByKeywords(['FINAL COMPLETION', 'PROJECT COMPLETE', 'TURNOVER', 'CLOSEOUT COMPLETE', 'FINAL ACCEPTANCE'])
-  const finalDate = finalMilestone?.early_end_date || finalMilestone?.target_end_date
+  const finalCompletionTarget = detectFinalCompletionTarget(taskArr)
+  const finalMilestone = finalCompletionTarget?.task as Task | undefined
+  const finalDate = finalCompletionTarget?.date
   const calcCalendarDays = (start: string | undefined, end: string | undefined): number => {
     if (!start || !end) return 0
     const s = new Date(start.replace(' ', 'T'))
@@ -751,7 +745,7 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   }
   const planStart = projectStartDate
   const planEnd = parsed.contractEnd
-  const forecastEnd = parsed.projectedEnd || parsed.contractEnd
+  const forecastEnd = finalDate || ''
   const dataDateStr = parsed.dataDate
   const originalDurationDays = calcCalendarDays(planStart, planEnd)
   const actualDurationDays = calcCalendarDays(planStart, dataDateStr)
@@ -950,7 +944,10 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     scheduleOptions: parsed.scheduleOptions,
     activityCodeTypes: parsed.activityCodeTypes,
     taskActivityCodes: parsed.taskActivityCodes,
-    healthScore, condition, delayDays, administrativeTermDate: parsed.administrativeTermDate || parsed.contractEnd,
+    healthScore, condition, delayDays,
+    administrativeTermDate: parsed.administrativeTermDate || parsed.contractEnd,
+    projectScheduledEnd: parsed.projectScheduledEnd || parsed.projectedEnd,
+    projectedEnd: finalDate,
     dataDate: parsed.dataDate,
     projectStartDate, projectStartSource,
     substantialCompletionDate: substantialDate,

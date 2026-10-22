@@ -13,6 +13,7 @@ import type {
   Task,
   WbsNode,
 } from './xerParser'
+import { detectFinalCompletionTarget } from './completionBoundary'
 
 const childElements = (parent: Element, name: string): Element[] =>
   Array.from(parent.children).filter(child => child.localName === name)
@@ -237,13 +238,16 @@ export function parseMSProjectXML(content: string): ParsedXER {
 
   const baselineFinishes = taskElements.map(item => baselineDates(item).finish).filter(Boolean).sort()
   const currentFinishes = Object.values(tasks).map(task => task.early_end_date || task.target_end_date).filter(Boolean).sort()
-  const projectedEnd = projectFinish || currentFinishes[currentFinishes.length - 1] || ''
+  const projectScheduledEnd = projectFinish || currentFinishes[currentFinishes.length - 1] || ''
+  const completionTarget = detectFinalCompletionTarget(Object.values(tasks))
+  const projectedEnd = completionTarget?.date || ''
   return {
     sourceFormat: 'MS_PROJECT_XML',
     sourceLabel: 'Microsoft Project XML',
     projectName,
     dataDate,
-    contractEnd: baselineFinishes[baselineFinishes.length - 1] || projectedEnd,
+    contractEnd: baselineFinishes[baselineFinishes.length - 1] || '',
+    projectScheduledEnd,
     projectedEnd,
     tasks,
     relationships,

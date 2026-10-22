@@ -187,7 +187,6 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
   // contract completion date, because that would manufacture an on-time
   // forecast when the schedule provides no usable projected finish.
   const projectedEnd = a.projectedEnd || a.projected_end || a.forecastFinish || a.forecast_finish || a.projectedFinish
-  const administrativeTermDate = project.contractDates?.administrativeTermDate || a.administrativeTermDate
   const finalCompletion = a.finalCompletion || a.final_completion || a.projectFinish || a.project_finish || a.finalComp || findMilestoneDate(finalMilestoneObj) || projectedEnd
   const substantialCompletion = a.substantialCompletion || a.substantial_completion || a.substComp || a.subComp || a.substantialComp || a.substCompletion || findMilestoneDate(substMilestoneObj)
 
@@ -542,7 +541,6 @@ function DashboardContent({ project, version }: { project: Project; version: Sch
             <div className="space-y-3 text-xs">
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-2"><span className="text-slate-500">Version</span><span className="font-bold text-slate-900 text-right">{version.versionLabel || xerFile}</span></div>
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-2"><span className="text-slate-500">Data date</span><span className="font-bold text-slate-900">{fmtDate(dataDate)}</span></div>
-              <div className="flex justify-between gap-4 border-b border-slate-100 pb-2"><span className="text-slate-500">Administrative term date</span><span className="font-bold text-slate-900">{fmtDate(administrativeTermDate)}</span></div>
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-2"><span className="text-slate-500">Activities</span><span className="font-bold text-slate-900">{totalActivities > 0 ? totalActivities.toLocaleString() : '—'}</span></div>
               <div className="flex justify-between gap-4"><span className="text-slate-500">Uploaded</span><span className="font-bold text-slate-900">{lastUpdated}</span></div>
             </div>

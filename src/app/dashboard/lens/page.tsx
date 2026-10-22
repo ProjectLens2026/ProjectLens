@@ -239,7 +239,6 @@ export default function ControlLensAnalysisPage() {
             <div className="text-right">
               <div className="text-xs text-slate-500">Authorized contract completion</div>
               <div className="text-sm font-bold text-red-600">{fmtDate(a.contractEnd) || 'N/A'} <span className="text-xs font-normal text-slate-500">· Projected {fmtDate(a.projectedEnd) || 'N/A'}</span></div>
-              {a.administrativeTermDate && <div className="text-[10px] text-slate-400 mt-0.5">Administrative term: {fmtDate(a.administrativeTermDate)}</div>}
             </div>
           </div>
         </div>

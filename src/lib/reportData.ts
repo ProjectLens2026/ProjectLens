@@ -15,14 +15,15 @@ export function workCompletePct(a: any): number {
 }
 
 export function projectedEnd(a: any): string | undefined {
-  return a?.projectedEnd
+  return a?.finalCompletionForecast
+    || a?.finalCompletionDate
+    || a?.finalCompletion
+    || a?.final_completion
+    || a?.projectedEnd
     || a?.projected_end
     || a?.forecastFinish
     || a?.forecast_finish
     || a?.projectedFinish
-    || a?.finalCompletionDate
-    || a?.finalCompletion
-    || a?.final_completion
     || a?.substantialCompletionDate
     || undefined
 }
