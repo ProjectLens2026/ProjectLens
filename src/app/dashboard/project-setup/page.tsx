@@ -20,6 +20,7 @@ import {
   whenHydrated,
 } from '@/lib/projectStore'
 import { formatCalendarDate } from '@/lib/calendarDate'
+import { inferMilestoneAcronym, milestoneDisplayName } from '@/lib/milestoneVocabulary'
 import {
   deleteProjectSourceDocumentFile,
   getProjectSourceDocumentSignedUrl,
@@ -114,6 +115,31 @@ const UFGS_P6_SETTINGS: P6SettingsBasis = {
   maxActivityIdLength: 10,
   verbNounActivityNames: true,
   commonCalendarEndTime: true,
+}
+
+const OWNER_DATA_CENTER_P6_SETTINGS: P6SettingsBasis = {
+  profile: 'OWNER_DATA_CENTER_013200',
+  activityCodesProjectLevel: true,
+  calendarsProjectLevel: true,
+  durationType: 'FIXED_DURATION_AND_UNITS',
+  percentCompleteType: 'PHYSICAL',
+  hoursPerDay: 8,
+  hoursPerWeek: 40,
+  hoursPerMonth: 168,
+  hoursPerYear: 2016,
+  criticalActivities: 'TOTAL_FLOAT',
+  progressedActivities: 'RETAINED_LOGIC',
+  negativeLagsAllowed: false,
+  startToFinishAllowed: false,
+  finishToStartLagsAllowed: false,
+  maxPositiveLagDays: 10,
+  hardConstraintsAllowed: false,
+  nonContractConstraintsAllowed: false,
+  externalRelationshipsAllowed: false,
+  expectedFinishDatesRequired: true,
+  floatBasedOnProjectFinish: true,
+  verbNounActivityNames: true,
+  commonCalendarEndTime: false,
 }
 
 function formatDate(value?: string) {
@@ -330,6 +356,8 @@ export default function ProjectControlBasisPage() {
     const normalizedMilestones = milestones.map(milestone => ({
       ...milestone,
       name: milestone.name.trim(),
+      acronym: milestone.acronym?.trim().toUpperCase() || undefined,
+      aliases: (milestone.aliases || []).map(alias => alias.trim()).filter(Boolean),
       phaseOrArea: milestone.phaseOrArea?.trim(),
       sourceReference: milestone.sourceReference?.trim(),
     }))
@@ -384,6 +412,7 @@ export default function ProjectControlBasisPage() {
     updateProjectControlBasis(project.id, {
       contractor: basis.contractor?.trim(),
       governingStandard: basis.governingStandard?.trim(),
+      scheduleProjectIds: (basis.scheduleProjectIds || []).map(value => value.trim()).filter(Boolean),
       scheduleRequirements: requirements,
     })
     setSavedSection('requirements')
@@ -767,8 +796,18 @@ export default function ProjectControlBasisPage() {
                         <TextField
                           label="Milestone name"
                           value={milestone.name}
-                          placeholder="Contract milestone"
-                          onChange={value => setMilestones(current => current.map(item => item.id === milestone.id ? { ...item, name: value } : item))}
+                          placeholder="Network Early Access"
+                          onChange={value => setMilestones(current => current.map(item => {
+                            if (item.id !== milestone.id) return item
+                            const inferred = item.acronym || inferMilestoneAcronym(value, requirements.profile)
+                            return { ...item, name: value, acronym: inferred || undefined }
+                          }))}
+                        />
+                        <TextField
+                          label="Acronym"
+                          value={milestone.acronym || ''}
+                          placeholder="NEA"
+                          onChange={value => setMilestones(current => current.map(item => item.id === milestone.id ? { ...item, acronym: value.toUpperCase() } : item))}
                         />
                         <SelectField
                           label="Milestone type"
@@ -798,6 +837,14 @@ export default function ProjectControlBasisPage() {
                         />
                         <div className="lg:col-span-2">
                           <TextField
+                            label="Accepted schedule aliases"
+                            value={(milestone.aliases || []).join(', ')}
+                            placeholder="Alternate XER names, separated by commas"
+                            onChange={value => setMilestones(current => current.map(item => item.id === milestone.id ? { ...item, aliases: value.split(',').map(alias => alias.trim()).filter(Boolean) } : item))}
+                          />
+                        </div>
+                        <div className="lg:col-span-2">
+                          <TextField
                             label="Authorized source reference"
                             value={milestone.sourceReference || ''}
                             placeholder="Contract clause, modification, NTP, or directive"
@@ -811,6 +858,9 @@ export default function ProjectControlBasisPage() {
                         />
                         <div className="flex items-end">
                           <button type="button" onClick={() => setMilestones(current => current.filter(item => item.id !== milestone.id))} className="w-full rounded-lg border border-red-200 bg-white px-3 py-2.5 text-xs font-bold text-red-600 hover:bg-red-50">Remove milestone</button>
+                        </div>
+                        <div className="lg:col-span-4 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] text-blue-800">
+                          Report label: <span className="font-bold">{milestoneDisplayName(milestone) || 'Enter the full milestone name and acronym'}</span>
                         </div>
                       </div>
                     </div>
@@ -828,6 +878,7 @@ export default function ProjectControlBasisPage() {
               <div className="mt-5 grid gap-4 sm:grid-cols-2">
                 <TextField label="Contractor" value={basis.contractor || ''} onChange={value => { setBasis(current => ({ ...current, contractor: value })); clearMessages() }} placeholder="Prime contractor" />
                 <TextField label="Governing standard / specification" value={basis.governingStandard || ''} onChange={value => { setBasis(current => ({ ...current, governingStandard: value })); clearMessages() }} placeholder="Contract-specific requirement" />
+                <TextField label="Accepted schedule project IDs" value={(basis.scheduleProjectIds || []).join(', ')} onChange={value => { setBasis(current => ({ ...current, scheduleProjectIds: value.split(',').map(item => item.trim()).filter(Boolean) })); clearMessages() }} placeholder="Example: IAD290, IAD290-004.04-PR" />
                 <SelectField label="Requirements profile" value={requirements.profile} onChange={value => applyRequirementsProfile(value as ScheduleRequirementsBasis['profile'])}
                   options={[['NOT_SET', 'Select profile'], ['UFGS_01_32_01_00_10', 'UFGS 01 32 01.00 10'], ['OWNER_DATA_CENTER', 'Owner / data center'], ['CUSTOM', 'Custom / project-specific']]} />
                 <SelectField label="Delivery method" value={requirements.deliveryMethod || 'NOT_SET'} onChange={value => { setRequirements(current => ({ ...current, deliveryMethod: value as ScheduleRequirementsBasis['deliveryMethod'] })); clearMessages() }}
@@ -885,7 +936,10 @@ export default function ProjectControlBasisPage() {
                   <div className="text-xs font-bold text-slate-900">Settings profile</div>
                   <div className="mt-1 text-[11px] text-slate-500">Use the contract specification if it differs from the standard profile.</div>
                 </div>
-                <button type="button" onClick={() => { setP6Settings({ ...UFGS_P6_SETTINGS }); clearMessages() }} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50">Apply UFGS 08/2026 defaults</button>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => { setP6Settings({ ...OWNER_DATA_CENTER_P6_SETTINGS }); clearMessages() }} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50">Apply owner data-center 01 32 00 defaults</button>
+                  <button type="button" onClick={() => { setP6Settings({ ...UFGS_P6_SETTINGS }); clearMessages() }} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50">Apply UFGS 08/2026 defaults</button>
+                </div>
               </div>
               <div className="mt-5 grid gap-4 sm:grid-cols-2">
                 <SelectField label="Duration type" value={p6Settings.durationType} onChange={value => setP6Settings(current => ({ ...current, profile: 'PROJECT_SPECIFIC', durationType: value as P6SettingsBasis['durationType'] }))}
@@ -905,6 +959,10 @@ export default function ProjectControlBasisPage() {
                 <Toggle label="Verb-noun activity names" checked={p6Settings.verbNounActivityNames} onChange={checked => setP6Settings(current => ({ ...current, verbNounActivityNames: checked }))} />
                 <Toggle label="Allow negative lags" checked={p6Settings.negativeLagsAllowed} onChange={checked => setP6Settings(current => ({ ...current, negativeLagsAllowed: checked }))} warning={p6Settings.negativeLagsAllowed} />
                 <Toggle label="Allow Start-to-Finish logic" checked={p6Settings.startToFinishAllowed} onChange={checked => setP6Settings(current => ({ ...current, startToFinishAllowed: checked }))} warning={p6Settings.startToFinishAllowed} />
+                <Toggle label="Allow Finish-to-Start lags" checked={p6Settings.finishToStartLagsAllowed !== false} onChange={checked => setP6Settings(current => ({ ...current, finishToStartLagsAllowed: checked }))} warning={p6Settings.finishToStartLagsAllowed !== false} />
+                <Toggle label="Allow hard constraints" checked={Boolean(p6Settings.hardConstraintsAllowed)} onChange={checked => setP6Settings(current => ({ ...current, hardConstraintsAllowed: checked }))} warning={Boolean(p6Settings.hardConstraintsAllowed)} />
+                <Toggle label="Allow non-contract constraints" checked={Boolean(p6Settings.nonContractConstraintsAllowed)} onChange={checked => setP6Settings(current => ({ ...current, nonContractConstraintsAllowed: checked }))} warning={Boolean(p6Settings.nonContractConstraintsAllowed)} />
+                <Toggle label="Allow external relationships" checked={p6Settings.externalRelationshipsAllowed !== false} onChange={checked => setP6Settings(current => ({ ...current, externalRelationshipsAllowed: checked }))} warning={p6Settings.externalRelationshipsAllowed !== false} />
               </div>
               <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
                 <NumberField label="Hours / day" value={p6Settings.hoursPerDay} onChange={value => setP6Settings(current => ({ ...current, hoursPerDay: value }))} />
@@ -912,6 +970,7 @@ export default function ProjectControlBasisPage() {
                 <NumberField label="Hours / month" value={p6Settings.hoursPerMonth} onChange={value => setP6Settings(current => ({ ...current, hoursPerMonth: value }))} />
                 <NumberField label="Hours / year" value={p6Settings.hoursPerYear} onChange={value => setP6Settings(current => ({ ...current, hoursPerYear: value }))} />
                 <NumberField label="Max Activity ID" value={p6Settings.maxActivityIdLength} suffix="chars" onChange={value => setP6Settings(current => ({ ...current, maxActivityIdLength: value }))} />
+                <NumberField label="Max positive lag" value={p6Settings.maxPositiveLagDays} suffix="days" onChange={value => setP6Settings(current => ({ ...current, maxPositiveLagDays: value }))} />
               </div>
               <TextArea label="Project-specific P6 settings / exceptions" value={p6Settings.notes || ''} onChange={value => setP6Settings(current => ({ ...current, notes: value }))} />
               <SaveMessage error={error} saved={savedSection === 'p6-settings'} label="Required P6 settings saved at the project level." />

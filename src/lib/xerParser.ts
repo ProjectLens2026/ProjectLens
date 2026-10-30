@@ -9,12 +9,20 @@ export interface Task {
   task_type: string
   phys_complete_pct: string
   total_float_hr_cnt: string
+  free_float_hr_cnt?: string
   remain_drtn_hr_cnt: string
   target_drtn_hr_cnt: string
   act_drtn_hr_cnt?: string
   driving_path_flag: string
   early_start_date: string
   early_end_date: string
+  late_start_date?: string
+  late_end_date?: string
+  rem_late_start_date?: string
+  rem_late_end_date?: string
+  restart_date?: string
+  reend_date?: string
+  expect_end_date?: string
   act_start_date: string
   act_end_date: string
   target_start_date: string
@@ -27,6 +35,13 @@ export interface Task {
   cstr_date2?: string
   duration_type?: string
   complete_pct_type?: string
+  suspend_date?: string
+  resume_date?: string
+  float_path?: string
+  float_path_order?: string
+  priority_type?: string
+  create_date?: string
+  update_date?: string
 }
 export interface Calendar {
   clndr_id: string
@@ -34,12 +49,24 @@ export interface Calendar {
   clndr_type: string
   day_hr_cnt: string
   week_hr_cnt: string
+  month_hr_cnt?: string
+  year_hr_cnt?: string
+  proj_id?: string
+  base_clndr_id?: string
+  default_flag?: string
+  clndr_data?: string
 }
 export interface Relationship {
+  proj_id?: string
+  pred_proj_id?: string
   task_id: string
   pred_task_id: string
   pred_type: string
   lag_hr_cnt: string
+  comments?: string
+  float_path?: string
+  aref?: string
+  arls?: string
 }
 export interface ActivityCodeType {
   actv_code_type_id: string
@@ -52,6 +79,47 @@ export interface TaskActivityCode {
   actv_code_type_id: string
   actv_code_id: string
   proj_id: string
+}
+export interface ActivityCodeValue {
+  actv_code_id: string
+  parent_actv_code_id?: string
+  actv_code_type_id: string
+  actv_code_name: string
+  short_name: string
+  seq_num?: string
+  total_assignments?: string
+}
+export interface UserDefinedFieldType {
+  udf_type_id: string
+  table_name: string
+  udf_type_name: string
+  udf_type_label: string
+  logical_data_type: string
+}
+export interface UserDefinedFieldValue {
+  udf_type_id: string
+  fk_id: string
+  proj_id?: string
+  udf_date?: string
+  udf_number?: string
+  udf_text?: string
+  udf_code_id?: string
+}
+export interface ProjectCategoryType {
+  proj_catg_type_id: string
+  proj_catg_type: string
+  [key: string]: string
+}
+export interface ProjectCategoryValue {
+  proj_catg_id: string
+  proj_catg_type_id: string
+  proj_catg_name: string
+  [key: string]: string
+}
+export interface ProjectCategoryAssignment {
+  proj_id: string
+  proj_catg_type_id: string
+  proj_catg_id: string
 }
 // Day 15 — Trace Logic: lightweight task shape stored for every activity so
 // the Trace Logic view can walk predecessor/successor chains without needing
@@ -84,6 +152,18 @@ export interface TraceTask {
   cstr_date2?: string
   duration_type?: string
   complete_pct_type?: string
+  free_float_hr_cnt?: string
+  late_start_date?: string
+  late_end_date?: string
+  rem_late_start_date?: string
+  rem_late_end_date?: string
+  restart_date?: string
+  reend_date?: string
+  expect_end_date?: string
+  suspend_date?: string
+  resume_date?: string
+  float_path?: string
+  float_path_order?: string
   // raw WBS — source truth, no inference
   wbs_id?: string
   wbs_name?: string
@@ -116,11 +196,20 @@ export interface ParsedXER {
   projectSettings: Record<string, string>   // Raw PROJECT row used for auditable P6 defaults
   scheduleOptions: Record<string, string>   // Raw SCHEDOPTIONS row used for calculation-integrity review
   activityCodeTypes: Record<string, ActivityCodeType>
+  activityCodeValues: Record<string, ActivityCodeValue>
   taskActivityCodes: TaskActivityCode[]
+  userDefinedFieldTypes: Record<string, UserDefinedFieldType>
+  userDefinedFieldValues: UserDefinedFieldValue[]
+  projectCategoryTypes: Record<string, ProjectCategoryType>
+  projectCategoryValues: Record<string, ProjectCategoryValue>
+  projectCategoryAssignments: ProjectCategoryAssignment[]
+  nonWorkPeriods: Record<string, string>[]
+  tablesPresent: string[]
 }
 export interface XERAnalysis {
   sourceFormat?: 'PRIMAVERA_XER' | 'MS_PROJECT_XML'
   sourceLabel?: string
+  projectName?: string
   totalActivities: number
   complete: number
   inProgress: number
@@ -148,6 +237,14 @@ export interface XERAnalysis {
   scheduleOptions?: Record<string, string> // Raw P6 scheduling options from the submitted XER
   activityCodeTypes?: Record<string, ActivityCodeType> // P6 code dictionaries and scope
   taskActivityCodes?: TaskActivityCode[]              // Activity-code assignments
+  activityCodeValues?: Record<string, ActivityCodeValue> // Code names and hierarchy
+  userDefinedFieldTypes?: Record<string, UserDefinedFieldType>
+  userDefinedFieldValues?: UserDefinedFieldValue[]
+  projectCategoryTypes?: Record<string, ProjectCategoryType>
+  projectCategoryValues?: Record<string, ProjectCategoryValue>
+  projectCategoryAssignments?: ProjectCategoryAssignment[]
+  nonWorkPeriods?: Record<string, string>[]
+  tablesPresent?: string[]
   healthScore: number
   condition: string
   delayDays: number
@@ -243,6 +340,7 @@ export function hoursToDays(hours: string | number, calendar?: Calendar): number
 }
 export function parseXER(content: string): ParsedXER {
   const lines = content.split(/\r?\n/)
+  const tablesPresent = new Set<string>()
   let currentTable: string | null = null
   let currentFields: string[] = []
   const tasks: Record<string, Task> = {}
@@ -252,7 +350,14 @@ export function parseXER(content: string): ParsedXER {
   let projectSettings: Record<string, string> = {}
   let scheduleOptions: Record<string, string> = {}
   const activityCodeTypes: Record<string, ActivityCodeType> = {}
+  const activityCodeValues: Record<string, ActivityCodeValue> = {}
   const taskActivityCodes: TaskActivityCode[] = []
+  const userDefinedFieldTypes: Record<string, UserDefinedFieldType> = {}
+  const userDefinedFieldValues: UserDefinedFieldValue[] = []
+  const projectCategoryTypes: Record<string, ProjectCategoryType> = {}
+  const projectCategoryValues: Record<string, ProjectCategoryValue> = {}
+  const projectCategoryAssignments: ProjectCategoryAssignment[] = []
+  const nonWorkPeriods: Record<string, string>[] = []
   let projectName = ''
   let dataDate = ''
   let contractEnd = ''
@@ -262,6 +367,7 @@ export function parseXER(content: string): ParsedXER {
     const line = rawLine.trim()
     if (line.startsWith('%T')) {
       currentTable = line.split('\t')[1] || ''
+      if (currentTable) tablesPresent.add(currentTable)
       currentFields = []
     } else if (line.startsWith('%F')) {
       currentFields = line.split('\t').slice(1)
@@ -286,10 +392,42 @@ export function parseXER(content: string): ParsedXER {
         const row: Record<string, string> = {}
         currentFields.forEach((f, i) => row[f] = values[i] || '')
         if (row.actv_code_type_id) activityCodeTypes[row.actv_code_type_id] = row as unknown as ActivityCodeType
+      } else if (currentTable === 'ACTVCODE') {
+        const row: Record<string, string> = {}
+        currentFields.forEach((f, i) => row[f] = values[i] || '')
+        if (row.actv_code_id) activityCodeValues[row.actv_code_id] = row as unknown as ActivityCodeValue
       } else if (currentTable === 'TASKACTV') {
         const row: Record<string, string> = {}
         currentFields.forEach((f, i) => row[f] = values[i] || '')
         if (row.task_id && row.actv_code_type_id) taskActivityCodes.push(row as unknown as TaskActivityCode)
+      } else if (currentTable === 'UDFTYPE') {
+        const row: Record<string, string> = {}
+        currentFields.forEach((f, i) => row[f] = values[i] || '')
+        if (row.udf_type_id) userDefinedFieldTypes[row.udf_type_id] = row as unknown as UserDefinedFieldType
+      } else if (currentTable === 'UDFVALUE') {
+        const row: Record<string, string> = {}
+        currentFields.forEach((f, i) => row[f] = values[i] || '')
+        if (row.udf_type_id && row.fk_id && [row.udf_date, row.udf_number, row.udf_text, row.udf_code_id].some(Boolean)) {
+          userDefinedFieldValues.push(row as unknown as UserDefinedFieldValue)
+        }
+      } else if (currentTable === 'PCATTYPE') {
+        const row: Record<string, string> = {}
+        currentFields.forEach((f, i) => row[f] = values[i] || '')
+        const id = row.proj_catg_type_id || row.pcat_type_id
+        if (id) projectCategoryTypes[id] = row as unknown as ProjectCategoryType
+      } else if (currentTable === 'PCATVAL') {
+        const row: Record<string, string> = {}
+        currentFields.forEach((f, i) => row[f] = values[i] || '')
+        const id = row.proj_catg_id || row.pcat_val_id
+        if (id) projectCategoryValues[id] = row as unknown as ProjectCategoryValue
+      } else if (currentTable === 'PROJPCAT') {
+        const row: Record<string, string> = {}
+        currentFields.forEach((f, i) => row[f] = values[i] || '')
+        if (row.proj_id) projectCategoryAssignments.push(row as unknown as ProjectCategoryAssignment)
+      } else if (currentTable === 'NONWORK') {
+        const row: Record<string, string> = {}
+        currentFields.forEach((f, i) => row[f] = values[i] || '')
+        nonWorkPeriods.push(row)
       } else if (currentTable === 'CALENDAR') {
         const cal: any = {}
         currentFields.forEach((f, i) => cal[f] = values[i] || '')
@@ -347,7 +485,10 @@ export function parseXER(content: string): ParsedXER {
     sourceFormat: 'PRIMAVERA_XER', sourceLabel: 'Primavera P6 XER',
     projectName, dataDate, contractEnd, administrativeTermDate, projectScheduledEnd, projectedEnd,
     tasks, relationships, predMap, succMap, calendars, wbsNodes,
-    projectSettings, scheduleOptions, activityCodeTypes, taskActivityCodes,
+    projectSettings, scheduleOptions, activityCodeTypes, activityCodeValues, taskActivityCodes,
+    userDefinedFieldTypes, userDefinedFieldValues,
+    projectCategoryTypes, projectCategoryValues, projectCategoryAssignments, nonWorkPeriods,
+    tablesPresent: Array.from(tablesPresent),
   }
 }
 export function analyzeXER(parsed: ParsedXER): XERAnalysis {
@@ -869,6 +1010,18 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       cstr_date2: t.cstr_date2,
       duration_type: t.duration_type,
       complete_pct_type: t.complete_pct_type,
+      free_float_hr_cnt: t.free_float_hr_cnt,
+      late_start_date: t.late_start_date,
+      late_end_date: t.late_end_date,
+      rem_late_start_date: t.rem_late_start_date,
+      rem_late_end_date: t.rem_late_end_date,
+      restart_date: t.restart_date,
+      reend_date: t.reend_date,
+      expect_end_date: t.expect_end_date,
+      suspend_date: t.suspend_date,
+      resume_date: t.resume_date,
+      float_path: t.float_path,
+      float_path_order: t.float_path_order,
       act_start_date: t.act_start_date,
       act_end_date: t.act_end_date,
     }))
@@ -924,6 +1077,7 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
   return {
     sourceFormat: parsed.sourceFormat || 'PRIMAVERA_XER',
     sourceLabel: parsed.sourceLabel || 'Primavera P6 XER',
+    projectName: parsed.projectName,
     totalActivities: taskArr.length,
     complete, inProgress, notStarted, negativeFloat,
     outOfSequence, noTies,
@@ -943,7 +1097,15 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
     projectSettings: parsed.projectSettings,
     scheduleOptions: parsed.scheduleOptions,
     activityCodeTypes: parsed.activityCodeTypes,
+    activityCodeValues: parsed.activityCodeValues,
     taskActivityCodes: parsed.taskActivityCodes,
+    userDefinedFieldTypes: parsed.userDefinedFieldTypes,
+    userDefinedFieldValues: parsed.userDefinedFieldValues,
+    projectCategoryTypes: parsed.projectCategoryTypes,
+    projectCategoryValues: parsed.projectCategoryValues,
+    projectCategoryAssignments: parsed.projectCategoryAssignments,
+    nonWorkPeriods: parsed.nonWorkPeriods,
+    tablesPresent: parsed.tablesPresent,
     healthScore, condition, delayDays,
     administrativeTermDate: parsed.administrativeTermDate || parsed.contractEnd,
     projectScheduledEnd: parsed.projectScheduledEnd || parsed.projectedEnd,

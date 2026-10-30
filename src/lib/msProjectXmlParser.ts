@@ -262,6 +262,14 @@ export function parseMSProjectXML(content: string): ParsedXER {
     },
     scheduleOptions: {},
     activityCodeTypes: {},
+    activityCodeValues: {},
     taskActivityCodes: [],
+    userDefinedFieldTypes: {},
+    userDefinedFieldValues: [],
+    projectCategoryTypes: {},
+    projectCategoryValues: {},
+    projectCategoryAssignments: [],
+    nonWorkPeriods: [],
+    tablesPresent: ['PROJECT', 'CALENDAR', 'PROJWBS', 'TASK', 'TASKPRED'],
   }
 }

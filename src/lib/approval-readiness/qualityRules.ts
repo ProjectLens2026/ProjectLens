@@ -11,6 +11,11 @@ import type { ApprovalFinding, RuleStrength } from './types'
 import { computeDeduction } from './framework'
 import type { ContractDates, P6SettingsBasis, ScheduleRequirementsBasis } from '../projectStore'
 import {
+  milestoneDisplayName,
+  projectIdentityMatches,
+  taskMatchesContractMilestone,
+} from '../milestoneVocabulary'
+import {
   detectFinalCompletionTarget,
   isAdministrativeTermMilestone,
   isPostCompletionAdministrativeWork,
@@ -28,10 +33,16 @@ interface QualityAnalysis {
   scheduleOptions?: Record<string, string>
   activityCodeTypes?: Record<string, any>
   taskActivityCodes?: any[]
+  tablesPresent?: string[]
   noTies?: any[]
   outOfSequence?: any[]
   longLeadItems?: any[]
   reviewBasis?: {
+    projectId?: string
+    projectName?: string
+    scheduleProjectIds?: string[]
+    submittedProjectId?: string
+    sourceFileName?: string
     contractDates?: ContractDates
     scheduleRequirements?: ScheduleRequirementsBasis
     p6Settings?: P6SettingsBasis
@@ -190,6 +201,10 @@ function constraintDates(task: any): string[] {
   return [task?.cstr_date, task?.cstr_date2].map(dateOnly).filter(Boolean)
 }
 
+function taskForecastDate(task: any): string {
+  return dateOnly(task?.reend_date || task?.early_end_date || task?.target_end_date || task?.act_end_date)
+}
+
 export function buildScheduleQualityFindings(analysis: QualityAnalysis): QualityFinding[] {
   const findings: QualityFinding[] = []
   const tasks = Object.values(analysis.traceTasks || {})
@@ -203,6 +218,13 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
   const requirementsAreUfgs = requirements?.profile === 'UFGS_01_32_01_00_10'
   const p6SettingsAreUfgs = p6Settings?.profile === 'UFGS_2026'
   const p6SettingsConfigured = Boolean(p6Settings?.profile && p6Settings.profile !== 'NOT_SET')
+  const submittedProjectId = String(analysis.reviewBasis?.submittedProjectId || analysis.projectName || '').trim()
+  // Identity enforcement is explicit. The application project number may be
+  // an internal portfolio code, so only accepted schedule IDs recorded in the
+  // project basis are used to block a review.
+  const expectedProjectIds = Array.from(new Set(
+    (analysis.reviewBasis?.scheduleProjectIds || []).map(value => String(value || '').trim()).filter(Boolean),
+  ))
   const projectBasisReference = requirements?.specificationSection
     ? `Project specification ${requirements.specificationSection}${requirements.specificationEdition ? ` (${requirements.specificationEdition})` : ''}.`
     : governingStandard
@@ -213,6 +235,71 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
   // UFGS P6 defaults as a convenient settings template under a custom project,
   // but that must not make UFGS appear to be the governing contract basis.
   const p6Reference = (ufgs: string, neutral: string) => requirementsAreUfgs ? ufgs : `${projectBasisReference} ${neutral}`
+
+  const identityMatches: boolean | null = expectedProjectIds.length > 0 && Boolean(submittedProjectId)
+    ? expectedProjectIds.some(expected => projectIdentityMatches(expected, submittedProjectId) === true)
+    : null
+  if (identityMatches === false) findings.push(finding({
+    primaryDomain: 'AR-01',
+    crossReferencedDomains: ['AR-07'],
+    ruleStrength: 'REQUIRED',
+    severity: 5,
+    criticalGate: true,
+    title: 'Submitted schedule does not match the project control basis',
+    whatFound: `The project basis identifies "${expectedProjectIds.join('" or "')}", while the submitted XER identifies "${submittedProjectId}".${analysis.reviewBasis?.sourceFileName ? ` Source file: ${analysis.reviewBasis.sourceFileName}.` : ''}`,
+    whyItMatters: 'Applying another project’s contract dates, milestone requirements, calendars, or approval gates can create materially false review comments and an incorrect approval decision.',
+    reviewerCheck: 'Select the correct project basis or upload the schedule that belongs to this project. Do not continue the contractual review until the identity is resolved.',
+    preSubmissionNote: 'Correct the project/schedule association before issuing the review.',
+    referenceRequirement: 'The submitted schedule must be evaluated against its own authorized project and contract basis.',
+    affectedActivities: [],
+  }))
+
+  const contractualMilestones = basisDates?.contractMilestones || []
+  for (const milestone of contractualMilestones) {
+    const label = milestoneDisplayName(milestone)
+    const candidates = tasks.filter(task => isMilestone(task)
+      && taskMatchesContractMilestone(task, milestone, requirements?.profile))
+    if (!candidates.length) {
+      findings.push(finding({
+        primaryDomain: 'AR-01',
+        crossReferencedDomains: ['AR-02', 'AR-08'],
+        ruleStrength: 'REQUIRED',
+        severity: milestone.isApprovalGate ? 5 : 4,
+        criticalGate: Boolean(milestone.isApprovalGate),
+        title: `${label} is not identified in the submitted schedule`,
+        whatFound: `No schedule milestone matches the authorized ${label}${milestone.phaseOrArea ? ` for ${milestone.phaseOrArea}` : ''}. Accepted project aliases: ${(milestone.aliases || []).join(', ') || 'none recorded'}.`,
+        whyItMatters: 'A contractual milestone cannot be monitored, forecast, or traced to its prerequisite work unless it is explicitly represented and mapped in the CPM network.',
+        reviewerCheck: 'Add the contractual milestone or map the equivalent submitted milestone by recording its accepted project alias, then verify its predecessor path and forecast date.',
+        preSubmissionNote: `Represent and logically connect ${label} before submission.`,
+        referenceRequirement: milestone.sourceReference || projectBasisReference,
+        affectedActivities: [],
+      }))
+      continue
+    }
+
+    const requiredDate = dateOnly(milestone.currentDate || milestone.date)
+    const forecastCandidates = candidates
+      .map(task => ({ task, date: taskForecastDate(task) }))
+      .filter(item => item.date)
+      .sort((a, b) => a.date.localeCompare(b.date))
+    const selected = forecastCandidates[forecastCandidates.length - 1]
+    if (selected && requiredDate && selected.date > requiredDate) {
+      findings.push(finding({
+        primaryDomain: 'AR-01',
+        crossReferencedDomains: ['AR-02'],
+        ruleStrength: 'REQUIRED',
+        severity: milestone.isApprovalGate ? 5 : 4,
+        criticalGate: Boolean(milestone.isApprovalGate),
+        title: `${label} is forecast after its authorized date`,
+        whatFound: `${taskCode(selected.task)} — ${taskName(selected.task)} is forecast for ${selected.date}; the authorized date is ${requiredDate}.`,
+        whyItMatters: 'A late contractual milestone requires transparent recovery planning, impact evaluation, or an authorized time modification; the schedule forecast cannot silently replace the contract date.',
+        reviewerCheck: 'Confirm the controlling path, quantify the variance in the update narrative, and provide the required recovery or authorized time-modification basis.',
+        preSubmissionNote: `Address the forecast variance to ${label} before submission.`,
+        referenceRequirement: milestone.sourceReference || projectBasisReference,
+        affectedActivities: affected([selected.task], `Forecast ${selected.date}; authorized ${requiredDate}`),
+      }))
+    }
+  }
 
   const finalCompletionTarget = detectFinalCompletionTarget(tasks)
   if (!finalCompletionTarget?.task || !finalCompletionTarget.date) findings.push(finding({
@@ -415,6 +502,36 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     affectedActivities: [],
   }))
 
+  const expectedFinishRequired = p6SettingsConfigured && p6Settings?.expectedFinishDatesRequired === true
+  if (expectedFinishRequired && !isEnabled(scheduleOptions.sched_use_expect_end_flag)) findings.push(finding({
+    primaryDomain: 'AR-07',
+    crossReferencedDomains: ['AR-03'],
+    ruleStrength: 'REQUIRED',
+    severity: 4,
+    title: 'Required Expected Finish calculation is not enabled',
+    whatFound: 'The submitted SCHEDOPTIONS record does not show Use Expected Finish Dates enabled.',
+    whyItMatters: 'The schedule calculation does not match the project-required P6 settings and may calculate progressed activity forecasts differently from the accepted control basis.',
+    reviewerCheck: 'Enable Use Expected Finish Dates, recalculate, and review the resulting date and float changes.',
+    preSubmissionNote: 'Recalculate the schedule with the required Expected Finish setting.',
+    referenceRequirement: projectBasisReference,
+    affectedActivities: [],
+  }))
+
+  const projectFinishFloatRequired = p6SettingsConfigured && p6Settings?.floatBasedOnProjectFinish === true
+  if (projectFinishFloatRequired && !isEnabled(scheduleOptions.sched_use_project_end_date_for_float)) findings.push(finding({
+    primaryDomain: 'AR-07',
+    crossReferencedDomains: ['AR-02'],
+    ruleStrength: 'REQUIRED',
+    severity: 4,
+    title: 'Float is not calculated from the required project finish basis',
+    whatFound: 'The submitted SCHEDOPTIONS record does not show float calculated from each project finish date.',
+    whyItMatters: 'A different float basis can change which activities appear critical or near-critical and can obscure milestone exposure.',
+    reviewerCheck: 'Apply the project-required float calculation basis, recalculate, and regenerate the schedule review.',
+    preSubmissionNote: 'Correct the float calculation basis before submission.',
+    referenceRequirement: projectBasisReference,
+    affectedActivities: [],
+  }))
+
   const projectSettings = analysis.projectSettings || {}
   const criticalPathType = String(projectSettings.critical_path_type || '')
   const longestPathRequired = p6SettingsAreUfgs || p6Settings?.criticalActivities === 'LONGEST_PATH'
@@ -433,6 +550,21 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
       'UFGS 01 32 01.00 10, 3.12(f) - define critical activities as the longest path.',
       'The selected P6 settings require critical activities to be defined by Longest Path.',
     ),
+    affectedActivities: [],
+  }))
+
+  const totalFloatRequired = p6SettingsConfigured && p6Settings?.criticalActivities === 'TOTAL_FLOAT'
+  if (isPrimavera && totalFloatRequired && criticalPathType && !/TOT.?FLOAT|CT_TOTFLOAT/i.test(criticalPathType)) findings.push(finding({
+    primaryDomain: 'AR-02',
+    crossReferencedDomains: ['AR-07'],
+    ruleStrength: 'REQUIRED',
+    severity: 4,
+    title: 'P6 critical activity definition is not the required Total Float basis',
+    whatFound: `The submitted PROJECT record defines critical activities using "${criticalPathType}" rather than the project-required Total Float threshold.`,
+    whyItMatters: 'The critical population and review results will not align with the contract-defined calculation method.',
+    reviewerCheck: 'Set the required Total Float critical threshold, recalculate, and regenerate the review.',
+    preSubmissionNote: 'Correct the critical activity definition before submission.',
+    referenceRequirement: projectBasisReference,
     affectedActivities: [],
   }))
 
@@ -526,6 +658,7 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
 
   const negativeLags = relationships.filter(rel => Number(rel?.lag_hr_cnt || 0) < 0)
   const startToFinish = relationships.filter(rel => /(^|_)SF$/i.test(String(rel?.pred_type || '')))
+  const finishToStartWithLag = relationships.filter(rel => /(^|_)FS$/i.test(String(rel?.pred_type || '')) && Number(rel?.lag_hr_cnt || 0) !== 0)
   const prohibitNegativeLags = p6SettingsAreUfgs || (p6SettingsConfigured && p6Settings?.negativeLagsAllowed === false)
   const prohibitStartToFinish = p6SettingsAreUfgs || (p6SettingsConfigured && p6Settings?.startToFinishAllowed === false)
   const prohibitedRelationships = [
@@ -553,7 +686,80 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     }))
   }
 
+  if (p6SettingsConfigured && p6Settings?.finishToStartLagsAllowed === false && finishToStartWithLag.length) {
+    const byId = new Map(tasks.map(task => [taskId(task), task]))
+    const related = finishToStartWithLag.flatMap(rel => [byId.get(String(rel?.pred_task_id)), byId.get(String(rel?.task_id))]).filter(Boolean)
+    findings.push(finding({
+      primaryDomain: 'AR-07',
+      crossReferencedDomains: ['AR-03'],
+      ruleStrength: 'REQUIRED',
+      severity: 4,
+      title: 'Finish-to-Start relationships contain prohibited lag',
+      whatFound: `${finishToStartWithLag.length} Finish-to-Start relationship${finishToStartWithLag.length === 1 ? '' : 's'} contain nonzero lag although the project basis requires direct Finish-to-Start logic.`,
+      whyItMatters: 'Lag can conceal waiting, review, curing, access, or delivery periods that should remain visible and statusable.',
+      reviewerCheck: 'Replace each lag with explicit activities or correct the relationship in accordance with the project requirements.',
+      preSubmissionNote: 'Remove prohibited Finish-to-Start lag before submission.',
+      referenceRequirement: projectBasisReference,
+      affectedActivities: affected(related, 'Connected by Finish-to-Start lag'),
+    }))
+  }
+
+  const maxPositiveLagDays = Number(p6Settings?.maxPositiveLagDays || 0)
+  if (p6SettingsConfigured && maxPositiveLagDays > 0) {
+    const excessivePositiveLags = relationships.filter(rel => Number(rel?.lag_hr_cnt || 0) / Math.max(1, Number(p6Settings?.hoursPerDay || 8)) > maxPositiveLagDays)
+    if (excessivePositiveLags.length) {
+      const byId = new Map(tasks.map(task => [taskId(task), task]))
+      const related = excessivePositiveLags.flatMap(rel => [byId.get(String(rel?.pred_task_id)), byId.get(String(rel?.task_id))]).filter(Boolean)
+      findings.push(finding({
+        primaryDomain: 'AR-07',
+        crossReferencedDomains: ['AR-03'],
+        ruleStrength: 'REQUIRED',
+        severity: 4,
+        title: 'Relationship lag exceeds the project limit',
+        whatFound: `${excessivePositiveLags.length} relationship${excessivePositiveLags.length === 1 ? '' : 's'} exceed the project limit of ${maxPositiveLagDays} working days.`,
+        whyItMatters: 'Excessive lag hides measurable waiting or work and weakens the transparency of the CPM network.',
+        reviewerCheck: 'Replace excessive lag with explicit activities or document the authorized project-specific exception.',
+        preSubmissionNote: 'Resolve relationship lag exceeding the project limit.',
+        referenceRequirement: projectBasisReference,
+        affectedActivities: affected(related, `Connected by lag exceeding ${maxPositiveLagDays} working days`),
+      }))
+    }
+  }
+
+  if (p6SettingsConfigured && p6Settings?.externalRelationshipsAllowed === false) {
+    const externalRelationships = relationships.filter(rel => rel?.pred_proj_id && rel?.proj_id && String(rel.pred_proj_id) !== String(rel.proj_id))
+    if (externalRelationships.length) findings.push(finding({
+      primaryDomain: 'AR-07',
+      crossReferencedDomains: ['AR-03'],
+      ruleStrength: 'REQUIRED',
+      severity: 4,
+      title: 'External project relationships are present',
+      whatFound: `${externalRelationships.length} relationship${externalRelationships.length === 1 ? '' : 's'} reference activities in another P6 project.`,
+      whyItMatters: 'External relationships can move dates or float using logic that is not fully contained in the submitted schedule evidence.',
+      reviewerCheck: 'Remove the external dependency, include the controlling scope in the submitted project, or document the authorized interface.',
+      preSubmissionNote: 'Resolve prohibited external relationships before submission.',
+      referenceRequirement: projectBasisReference,
+      affectedActivities: [],
+    }))
+  }
+
   const constrainedTasks = tasks.filter(task => [task?.cstr_type, task?.cstr_type2].some(value => String(value || '').trim()))
+  const hardConstrainedTasks = constrainedTasks.filter(task => [task?.cstr_type, task?.cstr_type2]
+    .some(value => /MAND|MUST/i.test(String(value || ''))))
+  if (p6SettingsConfigured && p6Settings?.hardConstraintsAllowed === false && hardConstrainedTasks.length) findings.push(finding({
+    primaryDomain: 'AR-07',
+    crossReferencedDomains: ['AR-02', 'AR-01'],
+    ruleStrength: 'REQUIRED',
+    severity: 5,
+    criticalGate: true,
+    title: 'Hard constraints are prohibited by the project basis',
+    whatFound: `${hardConstrainedTasks.length} activit${hardConstrainedTasks.length === 1 ? 'y carries' : 'ies carry'} a Mandatory Start, Mandatory Finish, Must Start, or Must Finish constraint.`,
+    whyItMatters: 'Hard constraints can override CPM network calculations and manufacture dates or float independently of the submitted logic.',
+    reviewerCheck: 'Remove the hard constraint and model the contractual obligation using the authorized milestone and network logic.',
+    preSubmissionNote: 'Remove prohibited hard constraints before submission.',
+    referenceRequirement: projectBasisReference,
+    affectedActivities: affected(hardConstrainedTasks, 'Prohibited hard constraint'),
+  }))
   const unauthorizedConstraints = constrainedTasks.filter(task => {
     const dates = constraintDates(task)
     return !isMilestone(task) || dates.length === 0 || dates.some(value => !authorizedDates.has(value))
@@ -935,6 +1141,33 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
       affectedActivities: nonProjectCodeTypes.map((type: any) => ({ id: String(type.actv_code_type_id), code: String(type.actv_code_type_id), name: String(type.actv_code_type || 'Unnamed code type'), note: String(type.actv_code_type_scope || 'Non-project scope') })),
     }))
   }
+
+  const tablesPresent = new Set((analysis.tablesPresent || []).map(value => String(value || '').toUpperCase()))
+  const hasAssignments = tablesPresent.has('TASKRSRC')
+  if (requirements?.costLoadedRequired && !hasAssignments) findings.push(finding({
+    primaryDomain: 'AR-04',
+    ruleStrength: 'REQUIRED',
+    severity: 4,
+    title: 'Required cost-loading evidence is not present in the XER',
+    whatFound: 'The submitted export does not contain the TASKRSRC assignment table needed to verify activity cost loading.',
+    whyItMatters: 'Cost loading cannot be confirmed from totals, activity names, or a narrative alone.',
+    reviewerCheck: 'Export the schedule with activity resource/cost assignments included or provide the contract-authorized alternative evidence.',
+    preSubmissionNote: 'Include the required cost-loading evidence with the schedule submission.',
+    referenceRequirement: projectBasisReference,
+    affectedActivities: [],
+  }))
+  if (requirements?.resourceLoadedRequired && !hasAssignments) findings.push(finding({
+    primaryDomain: 'AR-04',
+    ruleStrength: 'REQUIRED',
+    severity: 4,
+    title: 'Required resource-loading evidence is not present in the XER',
+    whatFound: 'The submitted export does not contain the TASKRSRC assignment table needed to verify labor or nonlabor resource loading.',
+    whyItMatters: 'Resource loading and workforce feasibility cannot be verified without activity-level assignments.',
+    reviewerCheck: 'Export the schedule with resource assignments included or provide the contract-authorized alternative evidence.',
+    preSubmissionNote: 'Include the required resource-loading evidence with the schedule submission.',
+    referenceRequirement: projectBasisReference,
+    affectedActivities: [],
+  }))
 
   return findings
 }

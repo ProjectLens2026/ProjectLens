@@ -1,4 +1,4 @@
-import type { ContractDates, P6SettingsBasis, Project, ScheduleRequirementsBasis } from './projectStore'
+import type { ContractDates, P6SettingsBasis, Project, ScheduleRequirementsBasis, ScheduleVersion } from './projectStore'
 import { detectFinalCompletionTarget } from './completionBoundary'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -27,7 +27,7 @@ export function contractualDelayDays(forecast: unknown, dates?: ContractDates): 
  * mutating the stored XER evidence. PROJECT.plan_end_date is retained as an
  * administrative term only and can never create a contractual delay signal.
  */
-export function analysisWithProjectBasis(analysis: any, project?: Project | null): any {
+export function analysisWithProjectBasis(analysis: any, project?: Project | null, version?: ScheduleVersion | null): any {
   if (!analysis) return analysis
   const contractDates = project?.contractDates
   const scheduleRequirements = project?.controlBasis?.scheduleRequirements
@@ -72,10 +72,16 @@ export function analysisWithProjectBasis(analysis: any, project?: Project | null
     healthScore,
     condition,
     reviewBasis: {
+      projectId: project?.projectId,
+      projectName: project?.name,
+      scheduleProjectIds: project?.controlBasis?.scheduleProjectIds,
+      submittedProjectId: analysis.projectName,
+      sourceFileName: version?.fileName,
       contractDates,
       scheduleRequirements: scheduleRequirements as ScheduleRequirementsBasis | undefined,
       p6Settings: p6Settings as P6SettingsBasis | undefined,
       governingStandard: project?.controlBasis?.governingStandard,
+      scheduleType: version?.scheduleType,
     },
   }
 }

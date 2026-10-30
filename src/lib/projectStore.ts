@@ -69,6 +69,8 @@ export type ProjectStatus = 'Active' | 'Completed' | 'On Hold' | 'Archived' | 'D
 export interface ContractMilestone {
   id: string
   name: string
+  acronym?: string                    // Displayed as Full Milestone Name (ACRONYM)
+  aliases?: string[]                  // Alternate XER names accepted for this project only
   date: string                         // ISO date (YYYY-MM-DD)
   type?:
     | 'INTERIM_CONTRACT'
@@ -143,7 +145,7 @@ export interface ScheduleRequirementsBasis {
 }
 
 export interface P6SettingsBasis {
-  profile: 'NOT_SET' | 'UFGS_2026' | 'PROJECT_SPECIFIC'
+  profile: 'NOT_SET' | 'UFGS_2026' | 'OWNER_DATA_CENTER_013200' | 'PROJECT_SPECIFIC'
   activityCodesProjectLevel: boolean
   calendarsProjectLevel: boolean
   durationType: 'NOT_SET' | 'FIXED_DURATION_AND_UNITS' | 'PROJECT_SPECIFIC'
@@ -156,6 +158,13 @@ export interface P6SettingsBasis {
   progressedActivities: 'NOT_SET' | 'RETAINED_LOGIC' | 'PROGRESS_OVERRIDE' | 'ACTUAL_DATES' | 'PROJECT_SPECIFIC'
   negativeLagsAllowed: boolean
   startToFinishAllowed: boolean
+  finishToStartLagsAllowed?: boolean
+  maxPositiveLagDays?: number
+  hardConstraintsAllowed?: boolean
+  nonContractConstraintsAllowed?: boolean
+  externalRelationshipsAllowed?: boolean
+  expectedFinishDatesRequired?: boolean
+  floatBasedOnProjectFinish?: boolean
   maxActivityIdLength?: number
   verbNounActivityNames: boolean
   commonCalendarEndTime: boolean
@@ -221,6 +230,7 @@ export interface ProjectSourceDocument {
 export interface ProjectControlBasis {
   contractor?: string
   governingStandard?: string
+  scheduleProjectIds?: string[]          // Authorized P6/MSP identifiers and accepted aliases
   phasingStrategy?: 'NOT_SET' | 'SINGLE_PHASE' | 'MULTI_PHASE'
   projectPhases?: ProjectPhaseBasis[]
   milestonesConfigured?: boolean

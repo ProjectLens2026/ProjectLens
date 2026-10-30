@@ -19,8 +19,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { discoverUSProject, type USProjectDiscoveryResult, type DiscoveryEvidence } from '@/lib/construction/projectDiscovery'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { getActiveProject, getActiveVersion, loadVersionAnalysis, subscribeToProjects, updateVersionApprovalResult } from '@/lib/projectStore'
+import { getActiveProject, getActiveVersion, loadVersionAnalysis, subscribeToProjects, updateVersionApprovalResult, type ContractMilestone } from '@/lib/projectStore'
 import { formatCalendarDate } from '@/lib/calendarDate'
+import { milestoneDisplayName, taskMatchesContractMilestone } from '@/lib/milestoneVocabulary'
 import {
   buildScheduleReviewSnapshot,
   reviewFindingSourceKey,
@@ -320,7 +321,13 @@ const ACTION_COPY: Record<string, Pick<ActionGroup, 'title' | 'why' | 'action' |
 function buildActionGroups(result: ApprovalReadinessResult): { corrections: ActionGroup[]; clarifications: ActionGroup[] } {
   const map = new Map<string, ApprovalFinding[]>()
   for (const f of result.findings.filter(x => approvalKind(x) === 'FINDING')) {
-    const disposition: ActionDisposition = f.criticalGate || f.ruleStrength === 'REQUIRED' ? 'CORRECTION' : 'CLARIFICATION'
+    const disposition: ActionDisposition = f.commentDisposition === 'REQUIRED_CORRECTION'
+      ? 'CORRECTION'
+      : f.commentDisposition === 'CLARIFICATION'
+        ? 'CLARIFICATION'
+        : f.criticalGate || f.ruleStrength === 'REQUIRED'
+          ? 'CORRECTION'
+          : 'CLARIFICATION'
     const family = actionFamily(f)
     const key = `${disposition}:${family}`
     map.set(key, [...(map.get(key) || []), f])
@@ -474,7 +481,7 @@ export default function ApprovalReadinessPage() {
       setProject(p)
       setVersion(v)
       const waitingForDetail = v?.analysisState === 'summary' || v?.analysisState === 'loading'
-      const basedAnalysis = waitingForDetail ? null : analysisWithProjectBasis(v?.analysis || null, p)
+      const basedAnalysis = waitingForDetail ? null : analysisWithProjectBasis(v?.analysis || null, p, v)
       setAnalysis(basedAnalysis)
       if (v && v.analysisState === 'summary') void loadVersionAnalysis(v.id)
       setReviewPurpose(defaultReviewPurpose(v))
@@ -578,7 +585,7 @@ export default function ApprovalReadinessPage() {
     setRunning(true)
     setReviewPersistenceError(null)
     try {
-      const snapshot = buildScheduleReviewSnapshot(analysisWithProjectBasis(analysis, project), {
+      const snapshot = buildScheduleReviewSnapshot(analysisWithProjectBasis(analysis, project, version), {
         versionId: version?.id,
         mode,
         projectType: 'ALL',
@@ -654,7 +661,7 @@ export default function ApprovalReadinessPage() {
         title: group.title,
         concern: group.why,
         requiredCorrection: `${group.action} Acceptance: ${group.acceptance}`,
-        classification: group.disposition === 'CORRECTION' ? 'REQUIRED' : 'ADVISORY',
+        classification: group.disposition === 'CORRECTION' ? 'REQUIRED' : 'CLARIFICATION',
         approvalImpact: group.disposition === 'CORRECTION' ? 'BLOCKS_APPROVAL' : 'NON_BLOCKING',
         responsibleParty: 'Contractor / Scheduler',
         firstVersionId: version.id,
@@ -966,6 +973,14 @@ export default function ApprovalReadinessPage() {
         correctionGroups={snapshotActionGroups.corrections.length}
         clarificationGroups={snapshotActionGroups.clarifications.length}
       />}
+
+      {activeTab === 'comments' && result && <ContractMilestoneSnapshot
+        milestones={project.contractDates?.contractMilestones || []}
+        analysis={analysis}
+        profile={project.controlBasis?.scheduleRequirements?.profile}
+      />}
+
+      {activeTab === 'comments' && result?.standardPractice && <StandardPracticeScorecard result={result} />}
 
       {activeTab === 'comments' && (
         <CommentRegisterPanel
@@ -1321,7 +1336,7 @@ function AddReviewItemModal({ versionId, disabled, onCancel, onSave }: {
   const [concern, setConcern] = useState('')
   const [reference, setReference] = useState('')
   const [correction, setCorrection] = useState('')
-  const [classification, setClassification] = useState<'REQUIRED' | 'ADVISORY' | 'OBSERVATION'>('REQUIRED')
+  const [classification, setClassification] = useState<'REQUIRED' | 'CLARIFICATION' | 'ADVISORY' | 'OBSERVATION'>('REQUIRED')
   const [blocksApproval, setBlocksApproval] = useState(true)
 
   async function save(issueImmediately: boolean) {
@@ -1351,7 +1366,7 @@ function AddReviewItemModal({ versionId, disabled, onCancel, onSave }: {
         <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Owner concern *</span><textarea value={concern} onChange={event => setConcern(event.target.value)} className="mt-1 min-h-[80px] w-full rounded-lg border border-slate-300 px-3 py-2 text-[12px] outline-none focus:border-blue-500" /></label>
         <div className="grid md:grid-cols-2 gap-3">
           <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Contract / specification reference</span><input value={reference} onChange={event => setReference(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-[12px] outline-none focus:border-blue-500" /></label>
-          <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Classification</span><select value={classification} onChange={event => setClassification(event.target.value as any)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-[12px]"><option value="REQUIRED">Required</option><option value="ADVISORY">Advisory</option><option value="OBSERVATION">Observation</option></select></label>
+          <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Classification</span><select value={classification} onChange={event => setClassification(event.target.value as any)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-[12px]"><option value="REQUIRED">Required correction</option><option value="CLARIFICATION">Clarification required</option><option value="ADVISORY">Advisory</option><option value="OBSERVATION">Supporting observation</option></select></label>
         </div>
         <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Required correction</span><textarea value={correction} onChange={event => setCorrection(event.target.value)} className="mt-1 min-h-[70px] w-full rounded-lg border border-slate-300 px-3 py-2 text-[12px] outline-none focus:border-blue-500" /></label>
         <label className="flex items-center gap-2 text-[11px] font-semibold text-slate-700"><input type="checkbox" checked={blocksApproval} onChange={event => setBlocksApproval(event.target.checked)} />This item blocks approval until resolved</label>
@@ -1496,6 +1511,46 @@ function ReviewDecisionHero({ result, mode, workflowBlocking, blockingComments, 
 
 function Chip({ label, color }: { label: string; color: string }) {
   return <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: `${color}18`, color }}>{label}</span>
+}
+
+function StandardPracticeScorecard({ result }: { result: ApprovalReadinessResult }) {
+  const profile = result.standardPractice
+  if (!profile) return null
+  const statusClass: Record<string, string> = {
+    PASS: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    REQUIRED: 'border-red-200 bg-red-50 text-red-700',
+    CLARIFICATION: 'border-amber-200 bg-amber-50 text-amber-800',
+    ADVISORY: 'border-orange-200 bg-orange-50 text-orange-700',
+    EVIDENCE: 'border-blue-200 bg-blue-50 text-blue-700',
+  }
+  const floatRows = [
+    ['Negative', profile.floatDistribution.negative],
+    ['Zero', profile.floatDistribution.zero],
+    ['1–10 days', profile.floatDistribution.oneToTenDays],
+    ['11–30 days', profile.floatDistribution.elevenToThirtyDays],
+    ['31–60 days', profile.floatDistribution.thirtyOneToSixtyDays],
+    ['Over 60 days', profile.floatDistribution.overSixtyDays],
+  ]
+  return <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden mb-4">
+    <div className="flex flex-wrap items-start justify-between gap-3 p-5 border-b border-slate-200">
+      <div>
+        <div className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-blue-600">CPMReview Standard Practice</div>
+        <h2 className="text-[16px] font-extrabold text-slate-900 mt-1">Schedule health checklist</h2>
+        <p className="text-[11px] text-slate-500 mt-1 max-w-[760px]">Technical defects, project requirements, clarifications and good-practice benchmarks remain separate. A benchmark does not become contractual unless it is established in Project Setup.</p>
+      </div>
+      <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[10px] font-extrabold text-slate-700">{profile.reviewType === 'BASELINE' ? 'Baseline review' : 'Update review'}</span>
+    </div>
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[720px] text-left text-[11px]">
+        <thead className="bg-slate-50 text-[9px] uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-2.5">Check</th><th className="px-4 py-2.5">Standard</th><th className="px-4 py-2.5">Actual</th><th className="px-4 py-2.5 text-right">Affected</th><th className="px-4 py-2.5">Treatment</th></tr></thead>
+        <tbody className="divide-y divide-slate-100">{profile.checks.map(check => <tr key={check.id} className="hover:bg-slate-50"><td className="px-4 py-2.5 font-bold text-slate-900">{check.label}</td><td className="px-4 py-2.5 text-slate-600">{check.target}</td><td className="px-4 py-2.5 font-mono font-bold text-slate-800">{check.actual}</td><td className="px-4 py-2.5 text-right font-mono">{check.count}</td><td className="px-4 py-2.5"><span className={`inline-flex rounded-full border px-2 py-1 text-[9px] font-extrabold ${statusClass[check.status] || statusClass.EVIDENCE}`}>{check.status.replace('_', ' ')}</span></td></tr>)}</tbody>
+      </table>
+    </div>
+    <div className="border-t border-slate-200 bg-slate-50 p-4">
+      <div className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500 mb-2">Remaining-activity total-float distribution</div>
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-2">{floatRows.map(([label, value]) => <div key={String(label)} className="rounded-lg border border-slate-200 bg-white px-3 py-2"><div className="text-[9px] font-bold text-slate-500">{label}</div><div className="text-[18px] font-black text-slate-900 mt-0.5">{value}</div></div>)}</div>
+    </div>
+  </section>
 }
 
 function RequirementBadge({ strength, gate = false }: { strength?: string; gate?: boolean }) {
@@ -1783,6 +1838,69 @@ function ApprovalReport({ result, mode, kind, project, sourceFileName, reviewSna
       </div>
     </div>
   )
+}
+
+function ContractMilestoneSnapshot({ milestones, analysis, profile }: {
+  milestones: ContractMilestone[]
+  analysis: any
+  profile?: any
+}) {
+  if (!milestones.length) return null
+  const tasks = Object.values(analysis?.traceTasks || {}) as any[]
+  const dateMs = (value?: string) => {
+    if (!value) return null
+    const parsed = new Date(String(value).replace(' ', 'T'))
+    return Number.isNaN(parsed.getTime()) ? null : Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate())
+  }
+  const rows = milestones.map(milestone => {
+    const candidates = tasks.filter(task => /MILE/i.test(String(task?.task_type || ''))
+      && taskMatchesContractMilestone(task, milestone, profile))
+    const mapped = candidates
+      .map(task => ({ task, forecast: String(task?.reend_date || task?.early_end_date || task?.target_end_date || task?.act_end_date || '').slice(0, 10) }))
+      .filter(item => item.forecast)
+      .sort((a, b) => a.forecast.localeCompare(b.forecast))
+      .pop()
+    const required = String(milestone.currentDate || milestone.date || '').slice(0, 10)
+    const forecastMs = dateMs(mapped?.forecast)
+    const requiredMs = dateMs(required)
+    const variance = forecastMs !== null && requiredMs !== null ? Math.round((forecastMs - requiredMs) / 86400000) : null
+    return { milestone, mapped, required, variance }
+  })
+  const unresolved = rows.filter(row => !row.mapped || (row.variance !== null && row.variance > 0)).length
+
+  return <section className="mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+      <div>
+        <div className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-blue-600">Contract milestone snapshot</div>
+        <h2 className="mt-1 text-[16px] font-extrabold text-slate-900">Required dates compared with the submitted schedule</h2>
+      </div>
+      <span className={`rounded-full px-3 py-1.5 text-[10px] font-extrabold ${unresolved ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
+        {unresolved ? `${unresolved} require review` : 'All mapped on or before required dates'}
+      </span>
+    </div>
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-left text-[11px]">
+        <thead className="bg-slate-50 text-[9px] uppercase tracking-wide text-slate-500">
+          <tr><th className="px-4 py-2.5">Contract milestone</th><th className="px-4 py-2.5">Phase / area</th><th className="px-4 py-2.5">Required</th><th className="px-4 py-2.5">Current forecast</th><th className="px-4 py-2.5">Variance</th><th className="px-4 py-2.5">Result</th></tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">{rows.map(row => {
+          const missing = !row.mapped
+          const late = row.variance !== null && row.variance > 0
+          const status = missing ? 'Not mapped' : late ? 'Late' : 'On or before date'
+          const statusClass = missing || late ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'
+          return <tr key={row.milestone.id} className="align-top">
+            <td className="px-4 py-3 font-extrabold text-slate-900">{milestoneDisplayName(row.milestone)}</td>
+            <td className="px-4 py-3 text-slate-600">{row.milestone.phaseOrArea || 'Project-wide'}</td>
+            <td className="px-4 py-3 font-mono text-slate-700">{shortDate(row.required)}</td>
+            <td className="px-4 py-3"><div className="font-mono font-bold text-slate-800">{row.mapped ? shortDate(row.mapped.forecast) : '—'}</div>{row.mapped && <div className="mt-0.5 text-[9px] text-slate-500">{row.mapped.task.task_code} — {row.mapped.task.task_name}</div>}</td>
+            <td className={`px-4 py-3 font-mono font-extrabold ${late ? 'text-red-700' : 'text-slate-700'}`}>{row.variance === null ? '—' : `${row.variance > 0 ? '+' : ''}${row.variance} calendar days`}</td>
+            <td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-[9px] font-extrabold ${statusClass}`}>{status}</span></td>
+          </tr>
+        })}</tbody>
+      </table>
+    </div>
+    <div className="border-t border-slate-100 bg-slate-50 px-5 py-2.5 text-[10px] text-slate-500">Milestone mapping uses the full contract name, acronym, approved aliases and phase/area. A mapped date is schedule evidence; it does not by itself confirm physical readiness or acceptance.</div>
+  </section>
 }
 
 function Info({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
