@@ -988,8 +988,6 @@ export default function ApprovalReadinessPage() {
         profile={project.controlBasis?.scheduleRequirements?.profile}
       />}
 
-      {activeTab === 'comments' && result?.standardPractice && <StandardPracticeScorecard result={result} />}
-
       {activeTab === 'comments' && (
         <CommentRegisterPanel
           comments={reviewData.comments}
@@ -1344,7 +1342,7 @@ function AddReviewItemModal({ versionId, disabled, onCancel, onSave }: {
   const [concern, setConcern] = useState('')
   const [reference, setReference] = useState('')
   const [correction, setCorrection] = useState('')
-  const [classification, setClassification] = useState<'REQUIRED' | 'CLARIFICATION' | 'ADVISORY' | 'OBSERVATION'>('REQUIRED')
+  const [classification, setClassification] = useState<'REQUIRED' | 'ADVISORY' | 'OBSERVATION'>('REQUIRED')
   const [blocksApproval, setBlocksApproval] = useState(true)
 
   async function save(issueImmediately: boolean) {
@@ -1374,7 +1372,7 @@ function AddReviewItemModal({ versionId, disabled, onCancel, onSave }: {
         <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Owner concern *</span><textarea value={concern} onChange={event => setConcern(event.target.value)} className="mt-1 min-h-[80px] w-full rounded-lg border border-slate-300 px-3 py-2 text-[12px] outline-none focus:border-blue-500" /></label>
         <div className="grid md:grid-cols-2 gap-3">
           <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Contract / specification reference</span><input value={reference} onChange={event => setReference(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-[12px] outline-none focus:border-blue-500" /></label>
-          <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Classification</span><select value={classification} onChange={event => setClassification(event.target.value as any)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-[12px]"><option value="REQUIRED">Required correction</option><option value="CLARIFICATION">Clarification required</option><option value="ADVISORY">Advisory</option><option value="OBSERVATION">Supporting observation</option></select></label>
+          <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Classification</span><select value={classification} onChange={event => setClassification(event.target.value as any)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-[12px]"><option value="REQUIRED">Required correction</option><option value="ADVISORY">Clarification / advisory</option><option value="OBSERVATION">Supporting observation</option></select></label>
         </div>
         <label className="block"><span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Required correction</span><textarea value={correction} onChange={event => setCorrection(event.target.value)} className="mt-1 min-h-[70px] w-full rounded-lg border border-slate-300 px-3 py-2 text-[12px] outline-none focus:border-blue-500" /></label>
         <label className="flex items-center gap-2 text-[11px] font-semibold text-slate-700"><input type="checkbox" checked={blocksApproval} onChange={event => setBlocksApproval(event.target.checked)} />This item blocks approval until resolved</label>
@@ -1522,7 +1520,7 @@ function Chip({ label, color }: { label: string; color: string }) {
 }
 
 function StandardPracticeScorecard({ result }: { result: ApprovalReadinessResult }) {
-  const profile = result.standardPractice
+  const profile = (result as ApprovalReadinessResult & { standardPractice?: any }).standardPractice
   if (!profile) return null
   const statusClass: Record<string, string> = {
     PASS: 'border-emerald-200 bg-emerald-50 text-emerald-700',
@@ -1551,7 +1549,7 @@ function StandardPracticeScorecard({ result }: { result: ApprovalReadinessResult
     <div className="overflow-x-auto">
       <table className="w-full min-w-[720px] text-left text-[11px]">
         <thead className="bg-slate-50 text-[9px] uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-2.5">Check</th><th className="px-4 py-2.5">Standard</th><th className="px-4 py-2.5">Actual</th><th className="px-4 py-2.5 text-right">Affected</th><th className="px-4 py-2.5">Treatment</th></tr></thead>
-        <tbody className="divide-y divide-slate-100">{profile.checks.map(check => <tr key={check.id} className="hover:bg-slate-50"><td className="px-4 py-2.5 font-bold text-slate-900">{check.label}</td><td className="px-4 py-2.5 text-slate-600">{check.target}</td><td className="px-4 py-2.5 font-mono font-bold text-slate-800">{check.actual}</td><td className="px-4 py-2.5 text-right font-mono">{check.count}</td><td className="px-4 py-2.5"><span className={`inline-flex rounded-full border px-2 py-1 text-[9px] font-extrabold ${statusClass[check.status] || statusClass.EVIDENCE}`}>{check.status.replace('_', ' ')}</span></td></tr>)}</tbody>
+        <tbody className="divide-y divide-slate-100">{profile.checks.map((check: any) => <tr key={check.id} className="hover:bg-slate-50"><td className="px-4 py-2.5 font-bold text-slate-900">{check.label}</td><td className="px-4 py-2.5 text-slate-600">{check.target}</td><td className="px-4 py-2.5 font-mono font-bold text-slate-800">{check.actual}</td><td className="px-4 py-2.5 text-right font-mono">{check.count}</td><td className="px-4 py-2.5"><span className={`inline-flex rounded-full border px-2 py-1 text-[9px] font-extrabold ${statusClass[check.status] || statusClass.EVIDENCE}`}>{check.status.replace('_', ' ')}</span></td></tr>)}</tbody>
       </table>
     </div>
     <div className="border-t border-slate-200 bg-slate-50 p-4">
