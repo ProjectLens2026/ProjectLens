@@ -22,6 +22,16 @@ export type ApprovalDomainId =
   | 'AR-09' // WBS / Activity Detail / Coding
 
 export type RuleStrength = 'REQUIRED' | 'EXPECTED' | 'ADVISORY'
+export type RuleAuthority =
+  | 'TECHNICAL_INTEGRITY'
+  | 'PROJECT_REQUIREMENT'
+  | 'STANDARD_PRACTICE'
+  | 'REVIEWER_JUDGMENT'
+export type CommentDisposition =
+  | 'REQUIRED_CORRECTION'
+  | 'CLARIFICATION'
+  | 'ADVISORY'
+  | 'SUPPORTING_EVIDENCE'
 export type ApprovalMode = 'PRE_SUBMISSION' | 'REVIEWER'
 export type Grade = 'A' | 'A-' | 'B+' | 'B' | 'C' | 'D/F'
 export type FindingStatus = 'NEW' | 'OPEN' | 'RESPONDED' | 'PARTIALLY_ADDRESSED' | 'CLOSED' | 'DISMISSED'
@@ -40,6 +50,10 @@ export interface ApprovalFinding {
   targetMilestone?: string
 
   ruleStrength: RuleStrength
+  /** Why the rule is allowed to carry its stated approval impact. */
+  authority?: RuleAuthority
+  /** Default treatment when the finding is converted into the formal register. */
+  commentDisposition?: CommentDisposition
   severity: 1 | 2 | 3 | 4 | 5
   confidence: 'high' | 'medium' | 'low'
   criticalGate: boolean
@@ -104,6 +118,28 @@ export interface ApprovalReadinessResult {
   recommendationCount?: number
   domains: DomainScore[]
   findings: ApprovalFinding[]
+  standardPractice?: {
+    profile: 'CPMREVIEW_STANDARD'
+    reviewType: 'BASELINE' | 'UPDATE'
+    checks: Array<{
+      id: string
+      label: string
+      domain: ApprovalDomainId
+      target: string
+      actual: string
+      count: number
+      status: 'PASS' | 'REQUIRED' | 'CLARIFICATION' | 'ADVISORY' | 'EVIDENCE'
+      findingId?: string
+    }>
+    floatDistribution: {
+      negative: number
+      zero: number
+      oneToTenDays: number
+      elevenToThirtyDays: number
+      thirtyOneToSixtyDays: number
+      overSixtyDays: number
+    }
+  }
 
   // Nature-of-work and path credibility from CL Path Intelligence.
   projectUnderstanding?: ApprovalProjectUnderstanding
