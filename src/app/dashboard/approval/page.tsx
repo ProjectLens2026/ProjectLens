@@ -321,9 +321,15 @@ const ACTION_COPY: Record<string, Pick<ActionGroup, 'title' | 'why' | 'action' |
 function buildActionGroups(result: ApprovalReadinessResult): { corrections: ActionGroup[]; clarifications: ActionGroup[] } {
   const map = new Map<string, ApprovalFinding[]>()
   for (const f of result.findings.filter(x => approvalKind(x) === 'FINDING')) {
-    const disposition: ActionDisposition = f.commentDisposition === 'REQUIRED_CORRECTION'
+    // Older persisted/compiled ApprovalFinding definitions do not expose the
+    // optional disposition field yet. Read it as forward-compatible metadata
+    // and retain the existing gate/strength fallback when it is absent.
+    const commentDisposition = (f as ApprovalFinding & {
+      commentDisposition?: 'REQUIRED_CORRECTION' | 'CLARIFICATION'
+    }).commentDisposition
+    const disposition: ActionDisposition = commentDisposition === 'REQUIRED_CORRECTION'
       ? 'CORRECTION'
-      : f.commentDisposition === 'CLARIFICATION'
+      : commentDisposition === 'CLARIFICATION'
         ? 'CLARIFICATION'
         : f.criticalGate || f.ruleStrength === 'REQUIRED'
           ? 'CORRECTION'
