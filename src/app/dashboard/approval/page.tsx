@@ -667,7 +667,9 @@ export default function ApprovalReadinessPage() {
         title: group.title,
         concern: group.why,
         requiredCorrection: `${group.action} Acceptance: ${group.acceptance}`,
-        classification: group.disposition === 'CORRECTION' ? 'REQUIRED' : 'CLARIFICATION',
+        // ADVISORY is the backward-compatible non-blocking register class.
+        // Older CPMReview releases do not include CLARIFICATION in ReviewItemClass.
+        classification: group.disposition === 'CORRECTION' ? 'REQUIRED' : 'ADVISORY',
         approvalImpact: group.disposition === 'CORRECTION' ? 'BLOCKS_APPROVAL' : 'NON_BLOCKING',
         responsibleParty: 'Contractor / Scheduler',
         firstVersionId: version.id,
