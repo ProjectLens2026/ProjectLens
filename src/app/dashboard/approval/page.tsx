@@ -86,6 +86,48 @@ function contextualReadinessLabel(result: ApprovalReadinessResult, mode: Approva
   return result.readinessLabel || result.recommendation
 }
 
+type FormalReviewDisposition = 'ACCEPTED' | 'REVIEWED_WITH_COMMENTS' | 'RETURNED_WITH_COMMENTS' | 'REVIEW_NOT_PERFORMED'
+
+function formalReviewDisposition(result: ApprovalReadinessResult, comments: ReviewComment[]): {
+  code: FormalReviewDisposition
+  label: string
+  reason: string
+  color: string
+} {
+  const issued = comments.filter(comment => !['DRAFT', 'VOID', 'WITHDRAWN'].includes(comment.status))
+  const open = issued.filter(comment => !['CLOSED', 'VOID', 'WITHDRAWN'].includes(comment.status))
+  const blocking = open.filter(comment => comment.classification === 'REQUIRED' && comment.approvalImpact === 'BLOCKS_APPROVAL')
+  const identityBlocked = result.findings.some(finding =>
+    finding.criticalGate && /does not match the project control basis|project identity|wrong project/i.test(`${finding.title} ${finding.whatFound}`)
+  )
+  if (identityBlocked) return {
+    code: 'REVIEW_NOT_PERFORMED',
+    label: 'REVIEW NOT PERFORMED',
+    reason: 'The submitted schedule does not match the selected project. Select the correct project or schedule before issuing contractual review comments.',
+    color: COLORS.red,
+  }
+  if (blocking.length > 0) return {
+    code: 'RETURNED_WITH_COMMENTS',
+    label: 'RETURNED WITH COMMENTS',
+    reason: `${blocking.length} required correction${blocking.length === 1 ? '' : 's'} remain open. Revise the schedule and respond to each numbered comment before resubmission.`,
+    color: COLORS.red,
+  }
+  if (open.length > 0) return {
+    code: 'REVIEWED_WITH_COMMENTS',
+    label: 'REVIEWED WITH COMMENTS',
+    reason: `${open.length} clarification or advisory comment${open.length === 1 ? '' : 's'} remain open. A revised submission is not required unless directed by the authorized reviewer.`,
+    color: COLORS.amber,
+  }
+  return {
+    code: 'ACCEPTED',
+    label: 'ACCEPTED',
+    reason: issued.length > 0
+      ? 'All issued review comments have been closed by the authorized reviewer.'
+      : 'No formal review comments remain open. The authorized reviewer retains final approval authority.',
+    color: COLORS.green,
+  }
+}
+
 function gradeColor(grade: string): string {
   if (grade === 'A' || grade === 'A-') return COLORS.green
   if (grade === 'B+' || grade === 'B') return COLORS.amber
@@ -793,8 +835,9 @@ export default function ApprovalReadinessPage() {
     const correctionCount = result ? buildActionGroups(result).corrections.length : 0
     const clarificationCount = result ? buildActionGroups(result).clarifications.length : 0
 
+    const narrativeDisposition = result ? formalReviewDisposition(result, reviewData.comments) : null
     const generatedDrafts: Record<string, string> = {
-      EXECUTIVE_SUMMARY: `The selected schedule dated ${shortDate(version.dataDate || analysis?.dataDate)} was reviewed. The current automated disposition is ${result?.readinessLabel || result?.recommendation || 'review pending'} with ${summary.open} open formal review comment${summary.open === 1 ? '' : 's'}. The current forecast is ${shortDate(currentForecast)}. This draft is generated from the submitted schedule, project basis and comment register and should be confirmed by the scheduler or authorized reviewer before issue.`,
+      EXECUTIVE_SUMMARY: `The selected schedule dated ${shortDate(version.dataDate || analysis?.dataDate)} was reviewed. The current formal disposition is ${narrativeDisposition?.label || 'review pending'} with ${summary.open} open formal review comment${summary.open === 1 ? '' : 's'}. The current forecast is ${shortDate(currentForecast)}. This draft is generated from the submitted schedule, project basis and comment register and should be confirmed by the scheduler or authorized reviewer before issue.`,
       CONTRACT_MILESTONES: `The authorized completion currently recorded in the Project Control Basis is ${shortDate(project?.contractDates?.originalContractCompletion)}. The selected schedule forecasts completion on ${shortDate(currentForecast)}${priorVersion ? `, compared with ${shortDate(priorForecast)} in the prior version` : ''}. These dates are reported without determining entitlement; approved time modifications remain the contractual source of truth.`,
       PROGRESS_THIS_PERIOD: `The selected schedule reports ${complete} completed, ${inProgress} in-progress and ${notStarted} not-started activities as of ${shortDate(version.dataDate || analysis?.dataDate)}. The scheduler should confirm the physical-progress basis and add any material accomplishments that are not represented by these schedule statuses.`,
       NEXT_PERIOD_WORK: `The current schedule status and available near-term activity evidence were identified from the selected schedule. The scheduler should confirm the work planned for the next reporting period, responsible trades, access needs and prerequisite approvals before this narrative is issued.`,
@@ -893,6 +936,7 @@ export default function ApprovalReadinessPage() {
 
   const reviewCommentSummary = summarizeReviewComments(reviewData.comments)
   const workflowBlocking = reviewCommentSummary.blocking > 0
+  const reviewDisposition = result ? formalReviewDisposition(result, reviewData.comments) : null
   const snapshotActionGroups = reviewSnapshot
     ? buildActionGroups(reviewSnapshot.approval)
     : { corrections: [], clarifications: [] }
@@ -975,6 +1019,7 @@ export default function ApprovalReadinessPage() {
       {activeTab === 'comments' && result && <ReviewDecisionHero
         result={result}
         mode={mode}
+        disposition={reviewDisposition!}
         workflowBlocking={workflowBlocking}
         blockingComments={reviewCommentSummary.blocking}
         openComments={reviewCommentSummary.open}
@@ -1327,7 +1372,7 @@ function CommentRegisterPanel({
         })}
       </div>}
 
-      {summary.blocking > 0 && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-[11px] font-semibold text-red-800">Not ready for approval — {summary.blocking} required comment{summary.blocking === 1 ? '' : 's'} remain unresolved.</div>}
+      {summary.blocking > 0 && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-[11px] font-semibold text-red-800">Returned with comments — {summary.blocking} required correction{summary.blocking === 1 ? '' : 's'} remain unresolved and require contractor response.</div>}
     </section>
   )
 }
@@ -1469,17 +1514,20 @@ function ModeButton({ active, onClick, title, sub }: { active: boolean; onClick:
   )
 }
 
-function ReviewDecisionHero({ result, mode, workflowBlocking, blockingComments, openComments, correctionGroups, clarificationGroups }: {
+function ReviewDecisionHero({ result, mode, disposition, workflowBlocking, blockingComments, openComments, correctionGroups, clarificationGroups }: {
   result: ApprovalReadinessResult
   mode: ApprovalMode
+  disposition: ReturnType<typeof formalReviewDisposition>
   workflowBlocking: boolean
   blockingComments: number
   openComments: number
   correctionGroups: number
   clarificationGroups: number
 }) {
-  const statusColor = workflowBlocking ? COLORS.red : readinessColor(result.readinessStatus)
-  const statusLabel = workflowBlocking ? 'NOT READY — OPEN REVIEW COMMENTS' : contextualReadinessLabel(result, mode)
+  const statusColor = mode === 'REVIEWER' ? disposition.color : (workflowBlocking ? COLORS.red : readinessColor(result.readinessStatus))
+  const statusLabel = mode === 'REVIEWER'
+    ? disposition.label
+    : (workflowBlocking ? 'CORRECTIONS REQUIRED BEFORE SUBMISSION' : contextualReadinessLabel(result, mode))
   return <section className="relative overflow-hidden rounded-2xl border mb-4 shadow-sm" style={{ borderColor: `${statusColor}55`, background: `linear-gradient(115deg, ${statusColor}14 0%, #ffffff 58%)` }}>
     <div className="absolute left-0 top-0 h-full w-1.5" style={{ background: statusColor }} />
     <div className="grid lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -1487,13 +1535,15 @@ function ReviewDecisionHero({ result, mode, workflowBlocking, blockingComments, 
         <div className="text-[10px] font-extrabold uppercase tracking-[0.18em]" style={{ color: statusColor }}>{mode === 'REVIEWER' ? 'Approval decision' : 'Submission decision'}</div>
         <div className="text-[26px] md:text-[31px] font-black leading-tight mt-1" style={{ color: statusColor }}>{statusLabel}</div>
         <p className="text-[12px] text-slate-600 leading-relaxed mt-2 max-w-[690px]">
-          {workflowBlocking
-            ? `${blockingComments} issued approval-blocking comment${blockingComments === 1 ? '' : 's'} remain unresolved. The technical score cannot override an open formal comment.`
-            : result.readinessReason || 'The review combines schedule logic, sequencing, path credibility and readiness evidence. The authorized reviewer makes the final decision.'}
+          {mode === 'REVIEWER'
+            ? disposition.reason
+            : workflowBlocking
+              ? `${blockingComments} issued required correction${blockingComments === 1 ? '' : 's'} remain unresolved. The technical score cannot override the formal comment register.`
+              : result.readinessReason || 'The review combines schedule logic, sequencing, path credibility and readiness evidence. The authorized reviewer makes the final decision.'}
         </p>
         <div className="flex flex-wrap gap-2 mt-4">
           <Chip label="Benchmark: Project criteria" color={COLORS.blue} />
-          <Chip label={`Critical Gates: ${result.criticalGates.passed ? 'PASS' : 'FAIL'}`} color={result.criticalGates.passed ? COLORS.green : COLORS.red} />
+          <Chip label={`Technical Gates: ${result.criticalGates.passed ? 'PASS' : 'REVIEW'}`} color={result.criticalGates.passed ? COLORS.green : COLORS.red} />
           <Chip label={`${openComments} open comments`} color={openComments ? COLORS.red : COLORS.green} />
           <Chip label={`${correctionGroups} corrections`} color={correctionGroups ? COLORS.red : COLORS.green} />
           <Chip label={`${clarificationGroups} clarifications`} color={clarificationGroups ? COLORS.amber : COLORS.green} />
@@ -1702,6 +1752,7 @@ function ApprovalReport({ result, mode, kind, project, sourceFileName, reviewSna
     .sort((a, b) => a.sequence - b.sequence)
   const showFormalReviewComments = mode === 'REVIEWER' || formalReviewComments.length > 0
   const audit = buildCompleteScheduleAudit(analysis, project, result.projectUnderstanding?.completionTarget)
+  const reportDisposition = formalReviewDisposition(result, reviewComments)
 
   return (
     <div className="ar-print-root flex flex-col h-full">
@@ -1760,13 +1811,13 @@ function ApprovalReport({ result, mode, kind, project, sourceFileName, reviewSna
           <SectionBar>Executive Summary</SectionBar>
           <div className="flex items-start gap-6 mb-4 print:break-inside-avoid">
             <div className="flex-1">
-              <div className="text-[9px] font-extrabold uppercase tracking-[0.14em] text-slate-500 mb-1">Schedule Readiness Status</div>
-              <div className="text-[18px] font-black uppercase tracking-wide mb-1" style={{ color: readinessColor(result.readinessStatus) }}>
-                {neutralReportText(result.readinessLabel || result.recommendation)}
+              <div className="text-[9px] font-extrabold uppercase tracking-[0.14em] text-slate-500 mb-1">Review Disposition</div>
+              <div className="text-[18px] font-black uppercase tracking-wide mb-1" style={{ color: mode === 'REVIEWER' ? reportDisposition.color : readinessColor(result.readinessStatus) }}>
+                {neutralReportText(mode === 'REVIEWER' ? reportDisposition.label : contextualReadinessLabel(result, mode))}
               </div>
-              <div className="text-[10.5px] text-slate-600 leading-relaxed mb-2">{neutralReportText(result.readinessReason || result.recommendation)}</div>
+              <div className="text-[10.5px] text-slate-600 leading-relaxed mb-2">{neutralReportText(mode === 'REVIEWER' ? reportDisposition.reason : (result.readinessReason || result.recommendation))}</div>
               <div className="text-[10.5px] text-slate-600">
-                Critical Gates: <b style={{ color: result.criticalGates.passed ? COLORS.green : COLORS.red }}>{result.criticalGates.passed ? 'PASS' : 'FAIL'}</b>
+                Technical Gates: <b style={{ color: result.criticalGates.passed ? COLORS.green : COLORS.red }}>{result.criticalGates.passed ? 'PASS' : 'REVIEW'}</b>
                 {'  ·  '}Critical {result.counts.critical} · Major {result.counts.major} · Minor {result.counts.minor}
                 {reportRecommendations.length > 0 ? ` · Recommendations ${reportRecommendations.length}` : ''}
               </div>
@@ -1777,7 +1828,7 @@ function ApprovalReport({ result, mode, kind, project, sourceFileName, reviewSna
               )}
             </div>
             <div className="text-center rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 min-w-[110px]">
-              <div className="text-[8px] font-extrabold uppercase tracking-wide text-slate-500">Readiness Score</div>
+              <div className="text-[8px] font-extrabold uppercase tracking-wide text-slate-500">Technical Score</div>
               <div className="font-mono text-[28px] font-extrabold leading-none mt-1" style={{ color: gc }}>
                 {result.totalScore}<span className="text-[12px] text-slate-400">/100</span>
               </div>

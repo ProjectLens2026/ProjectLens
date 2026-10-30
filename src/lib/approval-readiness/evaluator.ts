@@ -20,6 +20,7 @@ import { computeDeduction, FRAMEWORK_VERSION, type ProjectTypeKey } from './fram
 import { scoreDomains, totalScore, gradeAndRecommendation, materialityCounts } from './scoring'
 import { evaluateGates } from './gates'
 import { buildScheduleQualityFindings } from './qualityRules'
+import { evaluateStandardPractice } from './standardPractice'
 
 const ENGINE_VERSION = '2.1.0'
 
@@ -199,23 +200,23 @@ function readinessConclusion(gatesPassed: boolean, counts: { critical: number; m
 } {
   if (!gatesPassed) return {
     status: 'NOT_READY',
-    label: 'NOT READY FOR APPROVAL',
-    reason: 'At least one critical approval gate failed. Resolve the material path, network, milestone, or turnover condition before relying on this schedule as the control baseline.',
+    label: 'TECHNICAL GATE FAILED',
+    reason: 'At least one material technical gate failed. This is supporting evidence for the formal comment register; it is not the owner’s contractual disposition.',
   }
   if (counts.critical > 0 || counts.major >= 2) return {
     status: 'REVIEW_REQUIRED',
-    label: 'REVIEWER ACTION REQUIRED',
-    reason: 'Material schedule conditions remain. The schedule should not be accepted solely on score; the identified logic, sequencing and readiness issues require reviewer resolution.',
+    label: 'MATERIAL TECHNICAL REVIEW REQUIRED',
+    reason: 'Material schedule conditions require reviewer action. Formal disposition is determined by the issued comment register, not by the technical score.',
   }
   if (counts.major > 0 || counts.minor > 0) return {
     status: 'READY_WITH_COMMENTS',
-    label: 'READY FOR APPROVAL REVIEW — COMMENTS REMAIN',
-    reason: 'No critical gate failed, but comments remain that should be resolved or documented during the approval review.',
+    label: 'TECHNICAL COMMENTS IDENTIFIED',
+    reason: 'No critical technical gate failed, but review observations remain. The authorized reviewer determines whether they are issued as required, clarification or advisory comments.',
   }
   return {
     status: 'READY',
-    label: 'READY FOR APPROVAL REVIEW',
-    reason: 'The current schedule checks did not identify a material condition that blocks approval review. The authorized reviewer still makes the final decision.',
+    label: 'NO MATERIAL TECHNICAL EXCEPTIONS',
+    reason: 'The current automated checks did not identify a material technical exception. The authorized reviewer still determines the formal disposition.',
   }
 }
 
@@ -419,6 +420,29 @@ export function evaluateApprovalReadiness(
     })
   }
 
+  // Neutral, cross-industry CPM checks. These benchmarks never become
+  // contractual requirements merely because they are common practice.
+  // Each draft carries its authority and default comment disposition so the
+  // formal register can distinguish corrections, clarifications and advice.
+  const standardPractice = evaluateStandardPractice(analysis as any)
+  for (const standard of standardPractice.findings) {
+    const standardText = norm(`${standard.title} ${standard.whatFound}`)
+    const overlapping = findings.find(existing => {
+      const existingText = norm(`${existing.title} ${existing.whatFound}`)
+      if (norm(existing.title) === norm(standard.title)) return true
+      if (standardText.includes('negative lag') && existingText.includes('negative lag')) return true
+      if (standardText.includes('start to finish') && existingText.includes('start to finish')) return true
+      if (standardText.includes('long activities') && (existingText.includes('long activities') || existingText.includes('duration benchmark'))) return true
+      return false
+    })
+    if (overlapping) continue
+    findings.push({
+      ...standard,
+      id: `CPMR-${String(++n).padStart(3, '0')}`,
+      status: 'NEW',
+    })
+  }
+
   findings.sort((a, b) =>
     (a.kind === 'RECOMMENDATION' ? 1 : 0) - (b.kind === 'RECOMMENDATION' ? 1 : 0) ||
     (b.criticalGate ? 1 : 0) - (a.criticalGate ? 1 : 0) ||
@@ -444,7 +468,7 @@ export function evaluateApprovalReadiness(
     mode: opts.mode,
     totalScore: score,
     grade,
-    recommendation: gates.passed ? recommendation : 'REVISE & RESUBMIT — Critical Approval Gate Failed',
+    recommendation: gates.passed ? recommendation : 'TECHNICAL GATE FAILED — REVIEWER DISPOSITION REQUIRED',
     readinessStatus: readiness.status,
     readinessLabel: readiness.label,
     readinessReason: readiness.reason,
@@ -453,6 +477,7 @@ export function evaluateApprovalReadiness(
     recommendationCount: findings.filter(f => f.kind === 'RECOMMENDATION').length,
     domains,
     findings,
+    standardPractice: standardPractice.profile,
     projectUnderstanding: path?.understanding,
     pathReview: path ? {
       criticalPath: toPathStatus(path.criticalPath, 'CPMr Critical Path'),
