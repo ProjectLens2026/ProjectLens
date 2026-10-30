@@ -1584,6 +1584,85 @@ function RequirementBadge({ strength, gate = false }: { strength?: string; gate?
   )
 }
 
+function reportIdentityToken(value: unknown): string {
+  const match = String(value || '').toUpperCase().match(/(?:^|[^A-Z0-9])([A-Z]{2,8}[-_ ]?\d{2,5})(?=[^A-Z0-9]|$)/)
+  return match ? match[1].replace(/[-_ ]/g, '') : ''
+}
+
+function buildCompleteScheduleAudit(analysis: any, project: any, completionTarget?: any) {
+  const tasks = Object.values(analysis?.traceTasks || {}) as any[]
+  const relationships = Array.isArray(analysis?.traceRelationships) ? analysis.traceRelationships : []
+  const calendars = Object.values(analysis?.calendars || {}) as any[]
+  const projectIdentity = String(project?.projectId || project?.name || '—')
+  const xerIdentity = String(analysis?.projectName || analysis?.reviewBasis?.submittedProjectId || '—')
+  const projectToken = reportIdentityToken(projectIdentity)
+  const xerToken = reportIdentityToken(xerIdentity)
+  const identityStatus = projectToken && xerToken ? (projectToken === xerToken ? 'MATCH' : 'MISMATCH') : 'REVIEW'
+  const milestone = (task: any) => /MILE/i.test(String(task?.task_type || ''))
+  const status = (task: any) => String(task?.status_code || '')
+  const relationshipCounts = relationships.reduce((acc: Record<string, number>, rel: any) => {
+    const label = ({ PR_FS: 'FS', PR_SS: 'SS', PR_FF: 'FF', PR_SF: 'SF' } as Record<string, string>)[String(rel?.pred_type || '')] || String(rel?.pred_type || 'Other')
+    acc[label] = (acc[label] || 0) + 1
+    return acc
+  }, {})
+  const constraints = tasks.flatMap(task => [task?.cstr_type, task?.cstr_type2]).filter(Boolean).reduce((acc: Record<string, number>, code: any) => {
+    const label = ({ CS_MEOB: 'Finish On or Before', CS_MSOA: 'Start On or After', CS_MEOA: 'Finish On or After', CS_MSON: 'Mandatory Start', CS_MEON: 'Mandatory Finish' } as Record<string, string>)[String(code)] || String(code)
+    acc[label] = (acc[label] || 0) + 1
+    return acc
+  }, {})
+  const positiveLags = relationships.map((rel: any) => Number(rel?.lag_hr_cnt || 0)).filter((value: number) => value > 0)
+  const phaseRows = new Map<string, Record<string, string>>()
+  const phaseKinds: Array<[string, RegExp]> = [
+    ['FEA', /\bFEA\b|FIBER EARLY ACCESS/],
+    ['NEA', /\bNEA\b|NETWORK EARLY ACCESS/],
+    ['H2C', /\bH2C\b|HANDOFF TO COMMISSIONING/],
+    ['IST / Inspection', /\bIST\b|INTEGRATED SYSTEM|FINAL INSPECTION/],
+    ['PFHO', /\bPFHO\b|POWER FACILITY HANDOFF/],
+    ['Commissioning', /COMMISSIONING COMPLETE|CX COMPLETE/],
+  ]
+  tasks.filter(milestone).forEach(task => {
+    const text = `${task?.task_code || ''} ${task?.task_name || ''} ${(task?.wbs_path || []).join(' ')}`.toUpperCase()
+    const phaseMatch = text.match(/(?:PHASE|PH)\s*0*(\d{1,2})\b/)
+    if (!phaseMatch) return
+    const phase = `Phase ${Number(phaseMatch[1])}`
+    const row = phaseRows.get(phase) || {}
+    phaseKinds.forEach(([kind, pattern]) => {
+      if (pattern.test(text) && !row[kind]) row[kind] = `${task?.task_code || '—'} · ${String(task?.early_end_date || task?.target_end_date || task?.act_end_date || '').slice(0, 10) || 'undated'}`
+    })
+    phaseRows.set(phase, row)
+  })
+  return {
+    tasks,
+    relationships,
+    calendars,
+    projectIdentity,
+    xerIdentity,
+    identityStatus,
+    completionTarget,
+    counts: {
+      activities: tasks.length,
+      completed: tasks.filter(task => status(task) === 'TK_Complete').length,
+      inProgress: tasks.filter(task => status(task) === 'TK_Active').length,
+      notStarted: tasks.filter(task => status(task) === 'TK_NotStart').length,
+      milestones: tasks.filter(milestone).length,
+      wbs: Object.keys(analysis?.wbsNodes || {}).length,
+      relationships: relationships.length,
+      calendars: calendars.length,
+      codeTypes: Object.keys(analysis?.activityCodeTypes || {}).length,
+      codeAssignments: (analysis?.taskActivityCodes || []).length,
+      udfValues: (analysis?.userDefinedFieldValues || []).length,
+    },
+    relationshipCounts,
+    constraints,
+    positiveLagCount: positiveLags.length,
+    longPositiveLagCount: positiveLags.filter((value: number) => value >= 40).length,
+    maximumLagHours: positiveLags.length ? Math.max(...positiveLags) : 0,
+    scheduleOptions: Object.entries(analysis?.scheduleOptions || {}).filter(([, value]) => String(value || '').trim()).slice(0, 18),
+    phaseRows: Array.from(phaseRows.entries()).sort((a, b) => Number(a[0].replace(/\D/g, '')) - Number(b[0].replace(/\D/g, ''))),
+    resourceTablePresent: (analysis?.tablesPresent || []).includes('TASKRSRC'),
+  }
+}
+
 // =============================================================================
 // ApprovalReport — print-optimized document (Executive or Complete)
 // Built from the structured ApprovalReadinessResult, not scraped from the DOM.
@@ -1611,8 +1690,8 @@ function ApprovalReport({ result, mode, kind, project, sourceFileName, reviewSna
 
   const reportTitle = kind === 'executive'
     ? (mode === 'REVIEWER' ? 'Owner Action Report' : 'Contractor Action Report')
-    : 'Schedule Review Evidence Summary'
-  const docKind = kind === 'executive' ? 'Required Corrections and Clarifications' : 'Consolidated Findings and Selected CPM Evidence'
+    : 'Complete Schedule Review'
+  const docKind = kind === 'executive' ? 'Required Corrections and Clarifications' : 'Contract, CPM, Milestone, and Schedule-Quality Review'
 
   const reportFindings = result.findings.filter(f => approvalKind(f) === 'FINDING')
   const reportRecommendations = result.findings.filter(f => approvalKind(f) === 'RECOMMENDATION')
@@ -1622,6 +1701,7 @@ function ApprovalReport({ result, mode, kind, project, sourceFileName, reviewSna
     .filter(comment => !['DRAFT', 'VOID', 'WITHDRAWN'].includes(comment.status))
     .sort((a, b) => a.sequence - b.sequence)
   const showFormalReviewComments = mode === 'REVIEWER' || formalReviewComments.length > 0
+  const audit = buildCompleteScheduleAudit(analysis, project, result.projectUnderstanding?.completionTarget)
 
   return (
     <div className="ar-print-root flex flex-col h-full">
@@ -1778,6 +1858,45 @@ function ApprovalReport({ result, mode, kind, project, sourceFileName, reviewSna
             </>
           )}
 
+          {kind === 'complete' && <>
+            <SectionBar>Schedule Identity &amp; Control Boundary</SectionBar>
+            <div className="grid grid-cols-3 gap-3 mb-5 print:break-inside-avoid">
+              <div className="rounded-lg border border-slate-200 p-3"><div className="text-[8px] font-extrabold uppercase text-slate-500">Application project</div><div className="mt-1 font-mono text-[10px] font-bold">{audit.projectIdentity}</div></div>
+              <div className="rounded-lg border border-slate-200 p-3"><div className="text-[8px] font-extrabold uppercase text-slate-500">Submitted XER project</div><div className="mt-1 font-mono text-[10px] font-bold">{audit.xerIdentity}</div></div>
+              <div className="rounded-lg border p-3" style={{ borderColor: audit.identityStatus === 'MISMATCH' ? '#fca5a5' : '#cbd5e1', background: audit.identityStatus === 'MISMATCH' ? '#fef2f2' : '#f8fafc' }}><div className="text-[8px] font-extrabold uppercase text-slate-500">Identity check</div><div className="mt-1 text-[11px] font-black" style={{ color: audit.identityStatus === 'MISMATCH' ? COLORS.red : audit.identityStatus === 'MATCH' ? COLORS.green : COLORS.amber }}>{audit.identityStatus}</div></div>
+              <div className="col-span-3 rounded-lg border border-slate-200 p-3 text-[10px]"><b>Construction completion boundary:</b> {audit.completionTarget?.code || '—'} · {audit.completionTarget?.name || 'Not resolved'} {audit.completionTarget?.finish ? `(${shortDate(audit.completionTarget.finish)})` : ''}. Administrative term, retainage, final-payment, and document-review dates are not used as the construction completion target.</div>
+            </div>
+
+            <SectionBar>Schedule Composition</SectionBar>
+            <div className="grid grid-cols-5 gap-2 mb-5 print:break-inside-avoid">
+              {[
+                ['Activities', audit.counts.activities], ['Complete', audit.counts.completed], ['In progress', audit.counts.inProgress], ['Not started', audit.counts.notStarted], ['Milestones', audit.counts.milestones],
+                ['WBS nodes', audit.counts.wbs], ['Relationships', audit.counts.relationships], ['Calendars', audit.counts.calendars], ['Activity-code types', audit.counts.codeTypes], ['Code assignments', audit.counts.codeAssignments],
+              ].map(([label, value]) => <div key={String(label)} className="rounded border border-slate-200 bg-slate-50 p-2"><div className="text-[8px] font-bold uppercase text-slate-500">{label}</div><div className="mt-1 font-mono text-[16px] font-black text-slate-900">{value}</div></div>)}
+            </div>
+
+            <SectionBar>Contract &amp; Phase Milestone Matrix</SectionBar>
+            <div className="text-[10px] text-slate-500 mb-2">Milestones are grouped from the submitted activity names and WBS. A blank cell means the milestone was not evidenced for that phase.</div>
+            {audit.phaseRows.length === 0 ? <div className="mb-5 rounded border border-dashed border-slate-300 p-3 text-[10px] italic text-slate-500">No phase-numbered milestone families were detected.</div> : <table className="w-full text-[8.5px] mb-5">
+              <thead><tr className="border-b-2 border-slate-200 text-left uppercase text-slate-500"><th className="py-1.5 pr-2">Phase</th>{['FEA', 'NEA', 'H2C', 'IST / Inspection', 'PFHO', 'Commissioning'].map(label => <th key={label} className="py-1.5 pr-2">{label}</th>)}</tr></thead>
+              <tbody>{audit.phaseRows.map(([phase, values]) => <tr key={phase} className="border-b border-slate-100 align-top"><td className="py-1.5 pr-2 font-bold">{phase}</td>{['FEA', 'NEA', 'H2C', 'IST / Inspection', 'PFHO', 'Commissioning'].map(label => <td key={label} className="py-1.5 pr-2 font-mono">{values[label] || '—'}</td>)}</tr>)}</tbody>
+            </table>}
+
+            <SectionBar>Calendar, Constraint &amp; Relationship Audit</SectionBar>
+            <div className="grid grid-cols-2 gap-3 mb-5">
+              <div className="rounded-lg border border-slate-200 p-3 print:break-inside-avoid"><div className="text-[10.5px] font-extrabold mb-2">Calendars ({audit.calendars.length})</div>{audit.calendars.length === 0 ? <div className="text-[9.5px] italic text-slate-500">No calendar records preserved.</div> : audit.calendars.map((calendar: any) => <div key={calendar.clndr_id} className="border-t border-slate-100 py-1.5 text-[9.5px]"><b>{calendar.clndr_name || calendar.clndr_id}</b><div className="text-slate-500">{calendar.clndr_type || 'Calendar'} · {calendar.day_hr_cnt || '—'} hr/day · {calendar.week_hr_cnt || '—'} hr/week</div></div>)}</div>
+              <div className="rounded-lg border border-slate-200 p-3 print:break-inside-avoid"><div className="text-[10.5px] font-extrabold mb-2">Constraints</div>{Object.keys(audit.constraints).length === 0 ? <div className="text-[9.5px] text-slate-500">No primary or secondary constraints detected.</div> : Object.entries(audit.constraints).map(([label, count]) => <div key={label} className="flex justify-between border-t border-slate-100 py-1.5 text-[9.5px]"><span>{label}</span><b className="font-mono">{String(count)}</b></div>)}</div>
+              <div className="rounded-lg border border-slate-200 p-3 print:break-inside-avoid"><div className="text-[10.5px] font-extrabold mb-2">Relationship types</div>{Object.entries(audit.relationshipCounts).map(([label, count]) => <div key={label} className="flex justify-between border-t border-slate-100 py-1.5 text-[9.5px]"><span>{label}</span><b className="font-mono">{String(count)}</b></div>)}</div>
+              <div className="rounded-lg border border-slate-200 p-3 print:break-inside-avoid"><div className="text-[10.5px] font-extrabold mb-2">Lag evidence</div><div className="grid grid-cols-3 gap-2 text-center"><div><div className="font-mono text-[16px] font-black">{audit.positiveLagCount}</div><div className="text-[8px] text-slate-500">Positive</div></div><div><div className="font-mono text-[16px] font-black">{audit.longPositiveLagCount}</div><div className="text-[8px] text-slate-500">≥ 40 hours</div></div><div><div className="font-mono text-[16px] font-black">{audit.maximumLagHours}</div><div className="text-[8px] text-slate-500">Max hours</div></div></div></div>
+            </div>
+
+            <SectionBar>P6 Calculation, Coding &amp; Loading Evidence</SectionBar>
+            <div className="grid grid-cols-2 gap-3 mb-5">
+              <div className="rounded-lg border border-slate-200 p-3"><div className="text-[10.5px] font-extrabold mb-2">Schedule calculation options</div>{audit.scheduleOptions.length === 0 ? <div className="text-[9.5px] italic text-slate-500">Scheduling-option records were not preserved in this analysis.</div> : <div className="grid grid-cols-2 gap-x-3">{audit.scheduleOptions.map(([key, value]) => <div key={String(key)} className="flex justify-between gap-2 border-t border-slate-100 py-1 text-[8.5px]"><span className="truncate">{String(key)}</span><b className="font-mono">{String(value)}</b></div>)}</div>}</div>
+              <div className="rounded-lg border border-slate-200 p-3"><div className="text-[10.5px] font-extrabold mb-2">Coding and resource evidence</div><div className="space-y-2 text-[9.5px]"><div className="flex justify-between"><span>Activity-code types / assignments</span><b>{audit.counts.codeTypes} / {audit.counts.codeAssignments}</b></div><div className="flex justify-between"><span>User-defined-field values</span><b>{audit.counts.udfValues}</b></div><div className="flex justify-between"><span>Resource-assignment table</span><b style={{ color: audit.resourceTablePresent ? COLORS.green : COLORS.amber }}>{audit.resourceTablePresent ? 'PRESENT' : 'NOT EVIDENCED'}</b></div></div></div>
+            </div>
+          </>}
+
           {kind === 'executive' && <>
             <SectionBar>Required Actions</SectionBar>
             <div className="text-[10px] text-slate-500 mb-3">Observations are grouped only by corrective workflow. Grouping does not imply a shared root cause; Full CPM Analysis preserves the detailed activity and relationship trace.</div>
@@ -1799,17 +1918,14 @@ function ApprovalReport({ result, mode, kind, project, sourceFileName, reviewSna
             </div>)}
           </>}
 
-          {/* The appendix is an index to the live CPM evidence, not a dump of
-              every internal classifier record. Formal actions remain in the
-              Action Report and detailed trace remains in Full CPM Analysis. */}
           {kind === 'complete' && <>
           <SectionBar>Consolidated Review Findings</SectionBar>
-          <div className="text-[10px] text-slate-500 mb-3">One row represents one consolidated review condition. Open Full CPM Analysis for relationship-level trace evidence.</div>
+          <div className="text-[10px] text-slate-500 mb-3">Each condition states the detected basis and the reviewer action. Full CPM Analysis preserves relationship-level activity trace.</div>
           {reportFindings.length === 0 ? (
             <div className="text-[12px] text-slate-500 italic py-3">No material findings.</div>
           ) : <table className="w-full text-[10px] mb-5">
             <thead><tr className="border-b-2 border-slate-200 text-left text-[8.5px] uppercase tracking-wide text-slate-500"><th className="py-1.5 pr-2">ID</th><th className="py-1.5 pr-2">Domain</th><th className="py-1.5 pr-2">Consolidated condition</th><th className="py-1.5 pr-2">Requirement</th><th className="py-1.5 text-right">Activities</th></tr></thead>
-            <tbody>{reportFindings.map(f => <tr key={f.id} className="border-b border-slate-100 align-top"><td className="py-1.5 pr-2 font-mono font-bold">{neutralReportText(f.id)}</td><td className="py-1.5 pr-2 font-mono">{f.primaryDomain}</td><td className="py-1.5 pr-2 font-semibold text-slate-800">{neutralReportText(findingTitle(f))}</td><td className="py-1.5 pr-2"><RequirementBadge strength={f.ruleStrength} gate={f.criticalGate} /></td><td className="py-1.5 text-right font-mono">{f.affectedActivities.length}</td></tr>)}</tbody>
+            <tbody>{reportFindings.map(f => <tr key={f.id} className="border-b border-slate-100 align-top"><td className="py-2 pr-2 font-mono font-bold">{neutralReportText(f.id)}</td><td className="py-2 pr-2 font-mono">{f.primaryDomain}</td><td className="py-2 pr-2"><div className="font-semibold text-slate-800">{neutralReportText(findingTitle(f))}</div><div className="mt-1 text-[9px] text-slate-600"><b>Detected:</b> {neutralReportText(f.whatFound)}</div><div className="mt-1 text-[9px] text-slate-600"><b>Reviewer action:</b> {neutralReportText(f.reviewerCheck)}</div></td><td className="py-2 pr-2"><RequirementBadge strength={f.ruleStrength} gate={f.criticalGate} /></td><td className="py-2 text-right font-mono">{f.affectedActivities.length}</td></tr>)}</tbody>
           </table>}
           </>}
 

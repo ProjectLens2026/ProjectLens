@@ -58,6 +58,16 @@ const normalized = (value: unknown) => String(value || '').toUpperCase().replace
 const isEnabled = (value: unknown) => ['Y', 'YES', '1', 'TRUE'].includes(String(value || '').trim().toUpperCase())
 const isDisabled = (value: unknown) => ['N', 'NO', '0', 'FALSE'].includes(String(value || '').trim().toUpperCase())
 
+// Conservative automatic identity check. This catches a strong facility/code
+// mismatch such as IAD291 versus IAD290 without treating an internal portfolio
+// number as the submitted P6 project ID. Explicit accepted IDs still govern
+// whenever they have been recorded in Project Setup.
+function strongProjectIdentityToken(value: unknown): string {
+  const text = String(value || '').toUpperCase()
+  const match = text.match(/(?:^|[^A-Z0-9])([A-Z]{2,8}[-_ ]?\d{2,5})(?=[^A-Z0-9]|$)/)
+  return match ? match[1].replace(/[-_ ]/g, '') : ''
+}
+
 function dateOnly(value: unknown): string {
   const raw = String(value || '').trim()
   if (!raw) return ''
@@ -236,17 +246,22 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
   // but that must not make UFGS appear to be the governing contract basis.
   const p6Reference = (ufgs: string, neutral: string) => requirementsAreUfgs ? ufgs : `${projectBasisReference} ${neutral}`
 
-  const identityMatches: boolean | null = expectedProjectIds.length > 0 && Boolean(submittedProjectId)
+  const explicitIdentityMatches: boolean | null = expectedProjectIds.length > 0 && Boolean(submittedProjectId)
     ? expectedProjectIds.some(expected => projectIdentityMatches(expected, submittedProjectId) === true)
     : null
-  if (identityMatches === false) findings.push(finding({
+  const basisIdentity = String(analysis.reviewBasis?.projectId || analysis.reviewBasis?.projectName || '').trim()
+  const basisToken = strongProjectIdentityToken(basisIdentity)
+  const submittedToken = strongProjectIdentityToken(submittedProjectId)
+  const automaticIdentityMismatch = expectedProjectIds.length === 0
+    && Boolean(basisToken && submittedToken && basisToken !== submittedToken)
+  if (explicitIdentityMatches === false || automaticIdentityMismatch) findings.push(finding({
     primaryDomain: 'AR-01',
     crossReferencedDomains: ['AR-07'],
     ruleStrength: 'REQUIRED',
     severity: 5,
     criticalGate: true,
     title: 'Submitted schedule does not match the project control basis',
-    whatFound: `The project basis identifies "${expectedProjectIds.join('" or "')}", while the submitted XER identifies "${submittedProjectId}".${analysis.reviewBasis?.sourceFileName ? ` Source file: ${analysis.reviewBasis.sourceFileName}.` : ''}`,
+    whatFound: `The project basis identifies "${expectedProjectIds.length ? expectedProjectIds.join('" or "') : basisIdentity}", while the submitted XER identifies "${submittedProjectId}".${analysis.reviewBasis?.sourceFileName ? ` Source file: ${analysis.reviewBasis.sourceFileName}.` : ''}`,
     whyItMatters: 'Applying another project’s contract dates, milestone requirements, calendars, or approval gates can create materially false review comments and an incorrect approval decision.',
     reviewerCheck: 'Select the correct project basis or upload the schedule that belongs to this project. Do not continue the contractual review until the identity is resolved.',
     preSubmissionNote: 'Correct the project/schedule association before issuing the review.',
@@ -309,7 +324,7 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     severity: 5,
     criticalGate: true,
     title: 'Final Completion / End Project milestone is not identified',
-    whatFound: 'The submitted schedule does not contain a dated finish milestone clearly identified as Final Completion, End Project, Project Completion, Contract Completion, or Final Acceptance.',
+    whatFound: 'The submitted schedule does not contain a dated finish milestone clearly identified as Final Completion, Overall Complete Work Date, End Project, Project Completion, Contract Completion, or Final Acceptance.',
     whyItMatters: 'A project-level administrative term or latest activity date cannot define the construction completion forecast. Without an explicit completion milestone, delay and controlling-path conclusions are not reliable.',
     reviewerCheck: 'Add or correctly identify the milestone that closes the construction CPM network, tie the controlling completion work into it, and recalculate the schedule.',
     preSubmissionNote: 'Establish the explicit Final Completion / End Project milestone before submission.',

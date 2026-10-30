@@ -22,6 +22,11 @@ function completionRank(task: any): number {
   if (!isScheduleMilestone(task)) return 0
   const text = normalized(`${task?.task_code || ''} ${task?.task_name || task?.name || ''}`)
   if (/FINAL COMPLETION/.test(text)) return 100
+  // Some owner schedules use "Overall Complete Work Date" for the milestone
+  // that closes the construction network. Treat that as a completion boundary,
+  // but keep payment, retainage and administrative-term milestones excluded.
+  if (/OVERALL COMPLETE WORK DATE|OVERALL WORK COMPLETE|OVERALL COMPLETION/.test(text)
+    && !/ADMIN|INVOICE|PAYMENT|RETAINAGE|DOCUMENT/.test(text)) return 95
   if (/END PROJECT|PROJECT END|PROJECT COMPLETE|PROJECT COMPLETION/.test(text)) return 90
   if (/CONTRACT COMPLETION/.test(text)) return 80
   if (/FINAL ACCEPTANCE/.test(text)) return 70
