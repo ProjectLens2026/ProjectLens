@@ -9,7 +9,7 @@
 
 import type { ApprovalFinding, RuleStrength } from './types'
 import { computeDeduction } from './framework'
-import type { ContractDates, P6SettingsBasis, ScheduleRequirementsBasis } from '../projectStore'
+import type { ContractDates, ContractMilestone, P6SettingsBasis, ScheduleRequirementsBasis } from '../projectStore'
 import {
   milestoneDisplayName,
   projectIdentityMatches,
@@ -270,10 +270,16 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
   }))
 
   const contractualMilestones = basisDates?.contractMilestones || []
+  const milestoneCandidates = (milestone: ContractMilestone) => tasks.filter(task => isMilestone(task)
+    && taskMatchesContractMilestone(task, milestone, requirements?.profile))
+  const selectedMilestoneCandidate = (milestone: ContractMilestone) => milestoneCandidates(milestone)
+    .map(task => ({ task, date: taskForecastDate(task) }))
+    .filter(item => item.date)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .pop()
   for (const milestone of contractualMilestones) {
     const label = milestoneDisplayName(milestone)
-    const candidates = tasks.filter(task => isMilestone(task)
-      && taskMatchesContractMilestone(task, milestone, requirements?.profile))
+    const candidates = milestoneCandidates(milestone)
     if (!candidates.length) {
       findings.push(finding({
         primaryDomain: 'AR-01',
@@ -314,6 +320,58 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
         affectedActivities: affected([selected.task], `Forecast ${selected.date}; authorized ${requiredDate}`),
       }))
     }
+  }
+
+  for (const milestone of contractualMilestones) {
+    if (!milestone.predecessorMilestoneId || !Number.isFinite(Number(milestone.minimumSeparationDays))) continue
+    const predecessor = contractualMilestones.find(item => item.id === milestone.predecessorMilestoneId)
+    if (!predecessor) continue
+    const predecessorMatch = selectedMilestoneCandidate(predecessor)
+    const successorMatch = selectedMilestoneCandidate(milestone)
+    if (!predecessorMatch || !successorMatch) continue
+
+    const predecessorMs = Date.parse(`${predecessorMatch.date}T00:00:00Z`)
+    const successorMs = Date.parse(`${successorMatch.date}T00:00:00Z`)
+    if (!Number.isFinite(predecessorMs) || !Number.isFinite(successorMs)) continue
+    const calendarDays = Math.round((successorMs - predecessorMs) / 86400000)
+    const basis = milestone.separationDayBasis || 'CALENDAR_DAYS'
+    const minimumDays = Number(milestone.minimumSeparationDays || 0)
+    if (basis === 'WORKING_DAYS') {
+      findings.push(finding({
+        primaryDomain: 'AR-01',
+        crossReferencedDomains: ['AR-07'],
+        ruleStrength: 'EXPECTED',
+        severity: 2,
+        criticalGate: false,
+        title: `${milestoneDisplayName(milestone)} working-day separation requires verification`,
+        whatFound: `${milestoneDisplayName(predecessor)} is forecast for ${predecessorMatch.date} and ${milestoneDisplayName(milestone)} is forecast for ${successorMatch.date}. The Project Control Basis requires at least ${minimumDays} working days between them.`,
+        whyItMatters: 'Working-day separation depends on the governing project calendar, exceptions and holidays and should not be converted from elapsed calendar days by approximation.',
+        reviewerCheck: 'Verify the interval using the confirmed governing calendar. Record the result or change the criterion to calendar days only when the authorized requirement supports that change.',
+        preSubmissionNote: 'Confirm the required working-day interval against the governing project calendar.',
+        referenceRequirement: milestone.sourceReference || projectBasisReference,
+        affectedActivities: affected([predecessorMatch.task, successorMatch.task], 'Customer-defined working-day milestone dependency'),
+      }))
+      continue
+    }
+    const measuredDays = calendarDays
+    if (measuredDays >= minimumDays) continue
+
+    const predecessorLabel = milestoneDisplayName(predecessor)
+    const successorLabel = milestoneDisplayName(milestone)
+    findings.push(finding({
+      primaryDomain: 'AR-01',
+      crossReferencedDomains: ['AR-03', 'AR-08'],
+      ruleStrength: 'REQUIRED',
+      severity: milestone.isApprovalGate ? 5 : 4,
+      criticalGate: Boolean(milestone.isApprovalGate),
+      title: `${successorLabel} does not meet the recorded milestone separation`,
+      whatFound: `${predecessorLabel} is forecast for ${predecessorMatch.date} and ${successorLabel} is forecast for ${successorMatch.date}, providing ${measuredDays} calendar days against the recorded minimum of ${minimumDays}.`,
+      whyItMatters: 'The submitted sequence does not provide the interval entered and confirmed in the Project Control Basis.',
+      reviewerCheck: 'Verify the mapped milestones and authorized requirement. Correct the schedule dates or logic, or revise the Project Control Basis only when an authorized requirement change supports it.',
+      preSubmissionNote: `Provide at least ${minimumDays} calendar days between the two recorded milestones, or document the authorized basis for a different interval.`,
+      referenceRequirement: milestone.sourceReference || projectBasisReference,
+      affectedActivities: affected([predecessorMatch.task, successorMatch.task], 'Customer-defined milestone dependency'),
+    }))
   }
 
   const finalCompletionTarget = detectFinalCompletionTarget(tasks)

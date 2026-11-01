@@ -7,8 +7,9 @@ export interface MilestoneVocabularyEntry {
   profiles?: ScheduleRequirementsProfile[]
 }
 
-// These entries are naming aids, not contractual requirements. A milestone
-// becomes required only when it is recorded in the project control basis.
+// Public, cross-industry naming aids only. Client-specific milestones, aliases
+// and dependencies must be entered and confirmed in the Project Control Basis.
+// They are intentionally never shipped as product defaults.
 export const MILESTONE_VOCABULARY: MilestoneVocabularyEntry[] = [
   { name: 'Notice to Proceed', acronym: 'NTP', aliases: ['NOTICE TO PROCEED'] },
   { name: 'Start Work Date', acronym: 'SWD', aliases: ['START WORK', 'START OF WORK'] },
@@ -16,24 +17,6 @@ export const MILESTONE_VOCABULARY: MilestoneVocabularyEntry[] = [
   { name: 'Final Completion', acronym: 'FC', aliases: ['CONTRACT COMPLETION', 'PROJECT COMPLETION', 'END PROJECT'] },
   { name: 'Project Closeout', acronym: 'PCO', aliases: ['PROJECT CLOSE OUT', 'CLOSEOUT COMPLETE'] },
   { name: 'Beneficial Occupancy', acronym: 'BO', aliases: ['BENEFICIAL USE', 'BENEFICIAL OCCUPANCY DATE'] },
-  {
-    name: 'Fiber Early Access', acronym: 'FEA', aliases: ['FIBER ACCESS'], profiles: ['OWNER_DATA_CENTER'],
-  },
-  {
-    name: 'Network Early Access', acronym: 'NEA', aliases: ['NETWORK ACCESS'], profiles: ['OWNER_DATA_CENTER'],
-  },
-  {
-    name: 'Handoff to Commissioning', acronym: 'H2C', aliases: ['HAND OFF TO COMMISSIONING', 'COMMISSIONING HANDOFF'], profiles: ['OWNER_DATA_CENTER'],
-  },
-  {
-    name: 'Power Facility Handoff', acronym: 'PFHO', aliases: ['POWER FACILITY HAND OFF', 'FACILITY HANDOFF'], profiles: ['OWNER_DATA_CENTER'],
-  },
-  {
-    name: 'Integrated Systems Testing', acronym: 'IST', aliases: ['INTEGRATED SYSTEM TEST', 'INTEGRATED SYSTEMS TEST'], profiles: ['OWNER_DATA_CENTER'],
-  },
-  {
-    name: 'Live Load Testing', acronym: 'LLT', aliases: ['LIVE LOAD TEST'], profiles: ['OWNER_DATA_CENTER'],
-  },
 ]
 
 export function normalizeMilestoneText(value: unknown): string {

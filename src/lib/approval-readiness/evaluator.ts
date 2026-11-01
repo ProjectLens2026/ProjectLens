@@ -239,17 +239,21 @@ export function evaluateApprovalReadiness(
   }
 
   const findings: ApprovalFinding[] = []
-  let n = 0
+  let findingNumber = 0
+  let recommendationNumber = 0
+  const nextId = (kind: ApprovalFinding['kind']) => kind === 'RECOMMENDATION'
+    ? `R-${String(++recommendationNumber).padStart(3, '0')}`
+    : `F-${String(++findingNumber).padStart(3, '0')}`
 
   for (const evidence of Array.from(groups.values())) {
     const rep = evidence.slice().sort((a, b) => b.severity - a.severity)[0]
     const primaryDomain = mapDomain(rep)
-    const ruleStrength = strengthFor(rep)
+    const suggestedStrength = strengthFor(rep)
+    const ruleStrength: RuleStrength = suggestedStrength === 'ADVISORY' ? 'ADVISORY' : 'EXPECTED'
     const severity = rep.severity
-    const kind: ApprovalFinding['kind'] = evidence.every(e => e.scoreEligible === false || e.findingKind === 'KEY_MILESTONE_SUGGESTION')
-      ? 'RECOMMENDATION' : 'FINDING'
-    const criticalGate = kind === 'FINDING' && severity >= 5 && ruleStrength === 'REQUIRED'
-    const deduction = kind === 'RECOMMENDATION' ? 0 : computeDeduction(severity, ruleStrength)
+    const kind: ApprovalFinding['kind'] = 'RECOMMENDATION'
+    const criticalGate = false
+    const deduction = 0
 
     const seen = new Set<string>()
     const affected: ApprovalFinding['affectedActivities'] = []
@@ -269,13 +273,15 @@ export function evaluateApprovalReadiness(
       : rep.recommendation
 
     findings.push({
-      id: `CPMR-${String(++n).padStart(3, '0')}`,
+      id: nextId(kind),
       kind,
       primaryDomain,
       phase: rep.phase,
       discipline: rep.discipline,
       system: rep.system,
       ruleStrength,
+      authority: 'STANDARD_PRACTICE',
+      commentDisposition: 'ADVISORY',
       severity,
       confidence: rep.confidence,
       criticalGate,
@@ -283,12 +289,8 @@ export function evaluateApprovalReadiness(
       title: rep.headline,
       whatFound: `${rep.detail}${evidence.length > 1 ? ` ${evidence.length} related activities were identified under this same condition.` : ''}`,
       whyItMatters: impactForDomain(primaryDomain),
-      reviewerCheck: kind === 'RECOMMENDATION'
-        ? (rep.recommendation || 'Confirm whether this recommendation is applicable to the project and map an equivalent control point where appropriate.')
-        : (rep.recommendation || 'Verify the identified condition and revise the schedule where appropriate or provide supporting clarification.'),
-      preSubmissionNote: kind === 'RECOMMENDATION'
-        ? `Before submission, confirm whether this recommendation is applicable. ${rep.recommendation || ''}`.trim()
-        : `Before submission, address or explain this condition. ${rep.recommendation || ''}`.trim(),
+      reviewerCheck: rep.recommendation || 'Confirm whether this recommendation is applicable to the project and map an equivalent control point where appropriate.',
+      preSubmissionNote: `Before submission, confirm whether this recommendation is applicable. ${rep.recommendation || ''}`.trim(),
       referenceRequirement: specificReference,
       affectedActivities: affected.slice(0, 40),
       evidence,
@@ -327,17 +329,19 @@ export function evaluateApprovalReadiness(
           note: 'CPM path evidence',
         }
       })
-      const isRecommendation = profile.kind === 'RECOMMENDATION'
+      const isRecommendation = true
       findings.push({
-        id: `CPMR-${String(++n).padStart(3, '0')}`,
-        kind: profile.kind,
+        id: nextId('RECOMMENDATION'),
+        kind: 'RECOMMENDATION',
         primaryDomain: profile.primaryDomain,
         crossReferencedDomains: profile.crossReferencedDomains,
-        ruleStrength: profile.ruleStrength,
+        ruleStrength: profile.ruleStrength === 'ADVISORY' ? 'ADVISORY' : 'EXPECTED',
+        authority: 'STANDARD_PRACTICE',
+        commentDisposition: 'ADVISORY',
         severity: profile.findingSeverity,
         confidence: rep.severity === 'REVIEW' ? 'medium' : 'high',
-        criticalGate: !isRecommendation && profile.findingSeverity >= 5 && profile.ruleStrength === 'REQUIRED',
-        scoreDeduction: isRecommendation ? 0 : computeDeduction(profile.findingSeverity, profile.ruleStrength),
+        criticalGate: false,
+        scoreDeduction: 0,
         title: rep.title,
         whatFound: `${rep.detail}${group.length > 1 ? ` This pattern occurs in ${group.length} submitted completion/readiness conditions.` : ''}`,
         whyItMatters: profile.why,
@@ -361,15 +365,17 @@ export function evaluateApprovalReadiness(
         return { id: String(t?.task_id || code), code, name: String(t?.task_name || 'Submitted schedule activity'), note: 'Critical-path review' }
       })
       findings.push({
-        id: `CPMR-${String(++n).padStart(3, '0')}`,
-        kind: 'FINDING',
+        id: nextId('RECOMMENDATION'),
+        kind: 'RECOMMENDATION',
         primaryDomain: 'AR-02',
         crossReferencedDomains: ['AR-08', 'AR-06'],
-        ruleStrength: 'REQUIRED',
+        ruleStrength: 'EXPECTED',
+        authority: 'STANDARD_PRACTICE',
+        commentDisposition: 'CLARIFICATION',
         severity: 5,
         confidence: 'high',
-        criticalGate: true,
-        scoreDeduction: computeDeduction(5, 'REQUIRED'),
+        criticalGate: false,
+        scoreDeduction: 0,
         title: 'Critical path does not close into the completion target',
         whatFound: path.criticalPath.connectionNote,
         whyItMatters: 'A credible readiness chain is visible in the submitted work, but the relationship network does not close that chain into the completion target. The P6-reported critical/longest path can therefore bypass work that appears necessary for actual readiness.',
@@ -415,7 +421,7 @@ export function evaluateApprovalReadiness(
     }
     findings.push({
       ...quality,
-      id: `CPMR-${String(++n).padStart(3, '0')}`,
+      id: nextId(quality.kind),
       status: 'NEW',
     })
   }
@@ -438,7 +444,7 @@ export function evaluateApprovalReadiness(
     if (overlapping) continue
     findings.push({
       ...standard,
-      id: `CPMR-${String(++n).padStart(3, '0')}`,
+      id: nextId(standard.kind),
       status: 'NEW',
     })
   }

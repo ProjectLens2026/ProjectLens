@@ -84,6 +84,9 @@ export interface ContractMilestone {
   sourceReference?: string
   isApprovalGate?: boolean
   currentDate?: string                  // Authorized date after approved modifications
+  predecessorMilestoneId?: string       // Optional customer-defined sequence rule
+  minimumSeparationDays?: number        // Target must follow predecessor by at least this many days
+  separationDayBasis?: 'CALENDAR_DAYS' | 'WORKING_DAYS'
 }
 
 export interface ContractDates {
@@ -115,7 +118,7 @@ export interface VersionDates {
 export type ScheduleRequirementsProfile =
   | 'NOT_SET'
   | 'UFGS_01_32_01_00_10'
-  | 'OWNER_DATA_CENTER'
+  | 'OWNER_DATA_CENTER' // Legacy stored value; UI normalizes this to CUSTOM.
   | 'CUSTOM'
 
 export interface ScheduleRequirementsBasis {
@@ -145,7 +148,7 @@ export interface ScheduleRequirementsBasis {
 }
 
 export interface P6SettingsBasis {
-  profile: 'NOT_SET' | 'UFGS_2026' | 'OWNER_DATA_CENTER_013200' | 'PROJECT_SPECIFIC'
+  profile: 'NOT_SET' | 'UFGS_2026' | 'OWNER_DATA_CENTER_013200' | 'PROJECT_SPECIFIC' // Legacy owner value is normalized on load.
   activityCodesProjectLevel: boolean
   calendarsProjectLevel: boolean
   durationType: 'NOT_SET' | 'FIXED_DURATION_AND_UNITS' | 'PROJECT_SPECIFIC'

@@ -497,7 +497,7 @@ export default function ApprovalReadinessPage() {
   const [expandedSignalIds, setExpandedSignalIds] = useState<string[]>([])
   const [reportSignalIds, setReportSignalIds] = useState<string[]>([])
   const [reportKind, setReportKind] = useState<null | 'executive' | 'complete'>(null)
-  const [activeTab, setActiveTab] = useState<'comments' | 'narrative' | 'changes' | 'evidence'>('comments')
+  const [activeTab, setActiveTab] = useState<'comments' | 'recommendations' | 'status' | 'narrative' | 'changes' | 'evidence'>('comments')
   const [reviewData, setReviewData] = useState<ReviewWorkspaceCloudData>({ comments: [], narratives: {} })
   const [reviewDataLoading, setReviewDataLoading] = useState(false)
   const [reviewDataError, setReviewDataError] = useState<string | null>(null)
@@ -941,6 +941,7 @@ export default function ApprovalReadinessPage() {
     ? buildActionGroups(reviewSnapshot.approval)
     : { corrections: [], clarifications: [] }
   const snapshotConcernGroups = snapshotActionGroups.corrections.length + snapshotActionGroups.clarifications.length
+  const recommendations = result?.findings.filter(finding => finding.kind === 'RECOMMENDATION') || []
 
   return (
     <Shell project={project}>
@@ -1001,7 +1002,9 @@ export default function ApprovalReadinessPage() {
 
       <div className="flex gap-1 border-b border-slate-200 mb-4 overflow-x-auto" role="tablist" aria-label="Review workspace">
         {([
-          ['comments', 'Comment Register'],
+          ['comments', '1 · Comments'],
+          ['recommendations', '2 · Recommendations'],
+          ['status', '3 · Review Status'],
           ['narrative', 'Schedule Narrative'],
           ['changes', 'Changes Since Prior Version'],
           ['evidence', 'Supporting Evidence'],
@@ -1016,7 +1019,7 @@ export default function ApprovalReadinessPage() {
       {reviewDataError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4 text-[11px] text-red-800">{reviewDataError}</div>}
       {reviewPersistenceError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4 text-[11px] font-semibold text-red-800">{reviewPersistenceError}</div>}
 
-      {activeTab === 'comments' && result && <ReviewDecisionHero
+      {activeTab === 'status' && result && <ReviewDecisionHero
         result={result}
         mode={mode}
         disposition={reviewDisposition!}
@@ -1027,7 +1030,7 @@ export default function ApprovalReadinessPage() {
         clarificationGroups={snapshotActionGroups.clarifications.length}
       />}
 
-      {activeTab === 'comments' && result && <ContractMilestoneSnapshot
+      {activeTab === 'status' && result && <ContractMilestoneSnapshot
         milestones={project.contractDates?.contractMilestones || []}
         analysis={analysis}
         profile={project.controlBasis?.scheduleRequirements?.profile}
@@ -1047,7 +1050,11 @@ export default function ApprovalReadinessPage() {
         />
       )}
 
-      {activeTab === 'comments' && reviewSnapshot && <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden mb-4">
+      {activeTab === 'recommendations' && result && <RecommendationsPanel recommendations={recommendations} />}
+
+      {activeTab === 'recommendations' && result && <StandardPracticeScorecard result={result} />}
+
+      {activeTab === 'recommendations' && reviewSnapshot && <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden mb-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="p-5">
             <div className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-blue-600">Unified CPM Review</div>
@@ -1110,6 +1117,40 @@ export default function ApprovalReadinessPage() {
 
         {!reviewSnapshot.decisionIntegrity.internallyConsistent && <div role="alert" className="m-4 rounded-lg border border-red-200 bg-red-50 p-3 text-[11px] font-semibold text-red-800">{reviewSnapshot.decisionIntegrity.explanation}</div>}
       </section>}
+
+      {activeTab === 'status' && !result && !running && (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 mb-4 text-center">
+          <div className="text-[13px] font-bold text-slate-900">Review status is not available yet</div>
+          <div className="text-[11px] text-slate-500 mt-1">Run the schedule review, issue the applicable numbered comments, and then confirm the formal review disposition.</div>
+          <button type="button" onClick={() => setActiveTab('comments')} className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-[11px] font-bold text-white">Go to Comments</button>
+        </div>
+      )}
+
+      {activeTab === 'recommendations' && !result && !running && (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 mb-4 text-center">
+          <div className="text-[13px] font-bold text-slate-900">Recommendations will appear after the schedule review</div>
+          <div className="text-[11px] text-slate-500 mt-1">Recommendations are review guidance. They do not become contractual requirements unless adopted in the Project Control Basis or issued as a formal comment.</div>
+        </div>
+      )}
+
+      {activeTab === 'comments' && result && (
+        <div className="flex justify-end mb-4">
+          <button type="button" onClick={() => setActiveTab('recommendations')} className="rounded-lg bg-blue-600 px-4 py-2.5 text-[11px] font-bold text-white hover:bg-blue-700">Continue to Recommendations →</button>
+        </div>
+      )}
+
+      {activeTab === 'recommendations' && result && (
+        <div className="flex flex-wrap justify-between gap-2 mb-4">
+          <button type="button" onClick={() => setActiveTab('comments')} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-[11px] font-bold text-slate-700">← Back to Comments</button>
+          <button type="button" onClick={() => setActiveTab('status')} className="rounded-lg bg-slate-900 px-4 py-2.5 text-[11px] font-bold text-white">Continue to Review Status →</button>
+        </div>
+      )}
+
+      {activeTab === 'status' && result && (
+        <div className="flex justify-start mb-4">
+          <button type="button" onClick={() => setActiveTab('recommendations')} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-[11px] font-bold text-slate-700">← Back to Recommendations</button>
+        </div>
+      )}
 
       {activeTab === 'evidence' && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 mb-4">
         <div className="text-xs text-slate-600">A concise index to project discovery and detailed CPM trace evidence. Actions and decisions remain in the Comment Register.</div>
@@ -1569,6 +1610,46 @@ function Chip({ label, color }: { label: string; color: string }) {
   return <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: `${color}18`, color }}>{label}</span>
 }
 
+function RecommendationsPanel({ recommendations }: { recommendations: ApprovalFinding[] }) {
+  return <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden mb-4">
+    <div className="p-5 border-b border-slate-200 bg-gradient-to-r from-blue-50/70 to-white">
+      <div className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-blue-600">Reviewer guidance</div>
+      <div className="flex flex-wrap items-end justify-between gap-3 mt-1">
+        <div>
+          <h2 className="text-[17px] font-extrabold text-slate-900">Numbered recommendations</h2>
+          <p className="text-[11px] text-slate-500 mt-1 max-w-[760px]">These are professional review recommendations, not automatic contractual deficiencies. Issue a formal numbered comment only when the project requirements or the authorized reviewer require action.</p>
+        </div>
+        <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-[10px] font-extrabold text-blue-700">{recommendations.length} recommendation{recommendations.length === 1 ? '' : 's'}</span>
+      </div>
+    </div>
+    {recommendations.length > 0 ? <div className="divide-y divide-slate-100">
+      {recommendations.map((recommendation, index) => <article key={recommendation.id} className="grid grid-cols-[58px_minmax(0,1fr)] gap-3 p-4 hover:bg-slate-50">
+        <div className="flex h-10 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 font-mono text-[12px] font-black text-blue-700">R-{String(index + 1).padStart(3, '0')}</div>
+        <div>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <h3 className="text-[12px] font-extrabold text-slate-900">{recommendation.title}</h3>
+            <RequirementBadge strength={recommendation.ruleStrength} />
+          </div>
+          <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500">Observed condition</div>
+              <p className="mt-1 text-[10px] leading-relaxed text-slate-700">{recommendation.whatFound}</p>
+            </div>
+            <div className="rounded-lg border border-blue-100 bg-blue-50/50 p-3">
+              <div className="text-[9px] font-extrabold uppercase tracking-wide text-blue-600">Recommendation</div>
+              <p className="mt-1 text-[10px] leading-relaxed text-slate-700">{recommendation.reviewerCheck}</p>
+            </div>
+          </div>
+          {recommendation.affectedActivities.length > 0 && <div className="mt-2 text-[9px] font-semibold text-slate-500">{recommendation.affectedActivities.length} affected activit{recommendation.affectedActivities.length === 1 ? 'y' : 'ies'} documented in the CPM evidence.</div>}
+        </div>
+      </article>)}
+    </div> : <div className="p-6 text-center">
+      <div className="text-[12px] font-bold text-slate-800">No separate recommendations were generated</div>
+      <p className="mt-1 text-[10px] text-slate-500">Required corrections and clarifications, if any, remain in the numbered Comment Register.</p>
+    </div>}
+  </section>
+}
+
 function StandardPracticeScorecard({ result }: { result: ApprovalReadinessResult }) {
   const profile = (result as ApprovalReadinessResult & { standardPractice?: any }).standardPractice
   if (!profile) return null
@@ -1661,25 +1742,28 @@ function buildCompleteScheduleAudit(analysis: any, project: any, completionTarge
     return acc
   }, {})
   const positiveLags = relationships.map((rel: any) => Number(rel?.lag_hr_cnt || 0)).filter((value: number) => value > 0)
-  const phaseRows = new Map<string, Record<string, string>>()
-  const phaseKinds: Array<[string, RegExp]> = [
-    ['FEA', /\bFEA\b|FIBER EARLY ACCESS/],
-    ['NEA', /\bNEA\b|NETWORK EARLY ACCESS/],
-    ['H2C', /\bH2C\b|HANDOFF TO COMMISSIONING/],
-    ['IST / Inspection', /\bIST\b|INTEGRATED SYSTEM|FINAL INSPECTION/],
-    ['PFHO', /\bPFHO\b|POWER FACILITY HANDOFF/],
-    ['Commissioning', /COMMISSIONING COMPLETE|CX COMPLETE/],
-  ]
-  tasks.filter(milestone).forEach(task => {
-    const text = `${task?.task_code || ''} ${task?.task_name || ''} ${(task?.wbs_path || []).join(' ')}`.toUpperCase()
-    const phaseMatch = text.match(/(?:PHASE|PH)\s*0*(\d{1,2})\b/)
-    if (!phaseMatch) return
-    const phase = `Phase ${Number(phaseMatch[1])}`
-    const row = phaseRows.get(phase) || {}
-    phaseKinds.forEach(([kind, pattern]) => {
-      if (pattern.test(text) && !row[kind]) row[kind] = `${task?.task_code || '—'} · ${String(task?.early_end_date || task?.target_end_date || task?.act_end_date || '').slice(0, 10) || 'undated'}`
-    })
-    phaseRows.set(phase, row)
+  const configuredMilestones = (project?.contractDates?.contractMilestones || []) as ContractMilestone[]
+  const requirementsProfile = project?.controlBasis?.scheduleRequirements?.profile
+  const milestoneRows = configuredMilestones.map(configured => {
+    const mapped = tasks
+      .filter(task => milestone(task) && taskMatchesContractMilestone(task, configured, requirementsProfile))
+      .map(task => ({
+        task,
+        forecast: String(task?.reend_date || task?.early_end_date || task?.target_end_date || task?.act_end_date || '').slice(0, 10),
+      }))
+      .filter(item => item.forecast)
+      .sort((a, b) => a.forecast.localeCompare(b.forecast))
+      .pop()
+    return {
+      id: configured.id,
+      label: milestoneDisplayName(configured),
+      phase: configured.phaseOrArea || 'Project-wide',
+      required: configured.currentDate || configured.date,
+      mappedCode: mapped?.task?.task_code || '—',
+      mappedName: mapped?.task?.task_name || 'Not mapped',
+      forecast: mapped?.forecast || '',
+      source: configured.sourceReference || 'Project Control Basis',
+    }
   })
   return {
     tasks,
@@ -1708,7 +1792,7 @@ function buildCompleteScheduleAudit(analysis: any, project: any, completionTarge
     longPositiveLagCount: positiveLags.filter((value: number) => value >= 40).length,
     maximumLagHours: positiveLags.length ? Math.max(...positiveLags) : 0,
     scheduleOptions: Object.entries(analysis?.scheduleOptions || {}).filter(([, value]) => String(value || '').trim()).slice(0, 18),
-    phaseRows: Array.from(phaseRows.entries()).sort((a, b) => Number(a[0].replace(/\D/g, '')) - Number(b[0].replace(/\D/g, ''))),
+    milestoneRows,
     resourceTablePresent: (analysis?.tablesPresent || []).includes('TASKRSRC'),
   }
 }
@@ -1926,11 +2010,11 @@ function ApprovalReport({ result, mode, kind, project, sourceFileName, reviewSna
               ].map(([label, value]) => <div key={String(label)} className="rounded border border-slate-200 bg-slate-50 p-2"><div className="text-[8px] font-bold uppercase text-slate-500">{label}</div><div className="mt-1 font-mono text-[16px] font-black text-slate-900">{value}</div></div>)}
             </div>
 
-            <SectionBar>Contract &amp; Phase Milestone Matrix</SectionBar>
-            <div className="text-[10px] text-slate-500 mb-2">Milestones are grouped from the submitted activity names and WBS. A blank cell means the milestone was not evidenced for that phase.</div>
-            {audit.phaseRows.length === 0 ? <div className="mb-5 rounded border border-dashed border-slate-300 p-3 text-[10px] italic text-slate-500">No phase-numbered milestone families were detected.</div> : <table className="w-full text-[8.5px] mb-5">
-              <thead><tr className="border-b-2 border-slate-200 text-left uppercase text-slate-500"><th className="py-1.5 pr-2">Phase</th>{['FEA', 'NEA', 'H2C', 'IST / Inspection', 'PFHO', 'Commissioning'].map(label => <th key={label} className="py-1.5 pr-2">{label}</th>)}</tr></thead>
-              <tbody>{audit.phaseRows.map(([phase, values]) => <tr key={phase} className="border-b border-slate-100 align-top"><td className="py-1.5 pr-2 font-bold">{phase}</td>{['FEA', 'NEA', 'H2C', 'IST / Inspection', 'PFHO', 'Commissioning'].map(label => <td key={label} className="py-1.5 pr-2 font-mono">{values[label] || '—'}</td>)}</tr>)}</tbody>
+            <SectionBar>Customer-Confirmed Milestone Basis</SectionBar>
+            <div className="text-[10px] text-slate-500 mb-2">Only milestones entered and confirmed in Project Setup are evaluated here. CPMReview does not supply private-client milestones or sequencing criteria.</div>
+            {audit.milestoneRows.length === 0 ? <div className="mb-5 rounded border border-dashed border-slate-300 p-3 text-[10px] italic text-slate-500">No additional project-specific milestones were recorded in the Project Control Basis.</div> : <table className="w-full text-[8.5px] mb-5">
+              <thead><tr className="border-b-2 border-slate-200 text-left uppercase text-slate-500"><th className="py-1.5 pr-2">Milestone</th><th className="py-1.5 pr-2">Phase / area</th><th className="py-1.5 pr-2">Required</th><th className="py-1.5 pr-2">Submitted evidence</th><th className="py-1.5 pr-2">Forecast</th><th className="py-1.5 pr-2">Source</th></tr></thead>
+              <tbody>{audit.milestoneRows.map(row => <tr key={row.id} className="border-b border-slate-100 align-top"><td className="py-1.5 pr-2 font-bold">{row.label}</td><td className="py-1.5 pr-2">{row.phase}</td><td className="py-1.5 pr-2 font-mono">{shortDate(row.required)}</td><td className="py-1.5 pr-2"><span className="font-mono">{row.mappedCode}</span> · {row.mappedName}</td><td className="py-1.5 pr-2 font-mono">{row.forecast ? shortDate(row.forecast) : '—'}</td><td className="py-1.5 pr-2">{row.source}</td></tr>)}</tbody>
             </table>}
 
             <SectionBar>Calendar, Constraint &amp; Relationship Audit</SectionBar>

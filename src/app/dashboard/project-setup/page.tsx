@@ -117,31 +117,6 @@ const UFGS_P6_SETTINGS: P6SettingsBasis = {
   commonCalendarEndTime: true,
 }
 
-const OWNER_DATA_CENTER_P6_SETTINGS: P6SettingsBasis = {
-  profile: 'OWNER_DATA_CENTER_013200',
-  activityCodesProjectLevel: true,
-  calendarsProjectLevel: true,
-  durationType: 'FIXED_DURATION_AND_UNITS',
-  percentCompleteType: 'PHYSICAL',
-  hoursPerDay: 8,
-  hoursPerWeek: 40,
-  hoursPerMonth: 168,
-  hoursPerYear: 2016,
-  criticalActivities: 'TOTAL_FLOAT',
-  progressedActivities: 'RETAINED_LOGIC',
-  negativeLagsAllowed: false,
-  startToFinishAllowed: false,
-  finishToStartLagsAllowed: false,
-  maxPositiveLagDays: 10,
-  hardConstraintsAllowed: false,
-  nonContractConstraintsAllowed: false,
-  externalRelationshipsAllowed: false,
-  expectedFinishDatesRequired: true,
-  floatBasedOnProjectFinish: true,
-  verbNounActivityNames: true,
-  commonCalendarEndTime: false,
-}
-
 function formatDate(value?: string) {
   if (!value) return 'Not recorded'
   const formatted = formatCalendarDate(value, 'short')
@@ -282,8 +257,18 @@ export default function ProjectControlBasisPage() {
       setPhases(active?.controlBasis?.projectPhases || [])
       setTimeModifications(active?.controlBasis?.timeModifications || [])
       setSourceDocuments(active?.controlBasis?.sourceDocuments || [])
-      setRequirements({ ...EMPTY_REQUIREMENTS, ...(active?.controlBasis?.scheduleRequirements || {}) })
-      setP6Settings({ ...EMPTY_P6_SETTINGS, ...(active?.controlBasis?.p6Settings || {}) })
+      const storedRequirements = active?.controlBasis?.scheduleRequirements
+      setRequirements({
+        ...EMPTY_REQUIREMENTS,
+        ...(storedRequirements || {}),
+        profile: storedRequirements?.profile === 'OWNER_DATA_CENTER' ? 'CUSTOM' : (storedRequirements?.profile || 'NOT_SET'),
+      })
+      const storedP6 = active?.controlBasis?.p6Settings
+      setP6Settings({
+        ...EMPTY_P6_SETTINGS,
+        ...(storedP6 || {}),
+        profile: storedP6?.profile === 'OWNER_DATA_CENTER_013200' ? 'PROJECT_SPECIFIC' : (storedP6?.profile || 'NOT_SET'),
+      })
     }
     whenHydrated().then(syncProject)
     const unsubscribe = subscribeToProjects(syncProject)
@@ -350,6 +335,10 @@ export default function ProjectControlBasisPage() {
       setError('Every additional contractual milestone must have a name, required date, and authorized source reference.')
       return
     }
+    if (milestones.some(milestone => milestone.predecessorMilestoneId && (!milestone.minimumSeparationDays || milestone.minimumSeparationDays < 0))) {
+      setError('Every milestone dependency must include a valid minimum separation.')
+      return
+    }
     const normalizedPhases = phases
       .map((phase, index) => ({ ...phase, name: phase.name.trim(), sequence: index + 1 }))
       .filter(phase => phase.name)
@@ -397,10 +386,7 @@ export default function ProjectControlBasisPage() {
       setBasis(current => ({ ...current, governingStandard: 'UFGS 01 32 01.00 10' }))
       return
     }
-    setRequirements(current => ({ ...current, profile }))
-    if (profile === 'OWNER_DATA_CENTER') {
-      setBasis(current => ({ ...current, governingStandard: 'Owner / data center schedule requirements' }))
-    }
+    setRequirements(current => ({ ...current, profile: profile === 'OWNER_DATA_CENTER' ? 'CUSTOM' : profile }))
   }
 
   function saveRequirements() {
@@ -796,7 +782,7 @@ export default function ProjectControlBasisPage() {
                         <TextField
                           label="Milestone name"
                           value={milestone.name}
-                          placeholder="Network Early Access"
+                          placeholder="Enter the contract milestone name"
                           onChange={value => setMilestones(current => current.map(item => {
                             if (item.id !== milestone.id) return item
                             const inferred = item.acronym || inferMilestoneAcronym(value, requirements.profile)
@@ -806,7 +792,7 @@ export default function ProjectControlBasisPage() {
                         <TextField
                           label="Acronym"
                           value={milestone.acronym || ''}
-                          placeholder="NEA"
+                          placeholder="Optional"
                           onChange={value => setMilestones(current => current.map(item => item.id === milestone.id ? { ...item, acronym: value.toUpperCase() } : item))}
                         />
                         <SelectField
@@ -843,6 +829,32 @@ export default function ProjectControlBasisPage() {
                             onChange={value => setMilestones(current => current.map(item => item.id === milestone.id ? { ...item, aliases: value.split(',').map(alias => alias.trim()).filter(Boolean) } : item))}
                           />
                         </div>
+                        <SelectField
+                          label="Required predecessor milestone"
+                          value={milestone.predecessorMilestoneId || ''}
+                          onChange={value => setMilestones(current => current.map(item => item.id === milestone.id ? {
+                            ...item,
+                            predecessorMilestoneId: value || undefined,
+                            minimumSeparationDays: value ? item.minimumSeparationDays : undefined,
+                            separationDayBasis: value ? (item.separationDayBasis || 'CALENDAR_DAYS') : undefined,
+                          } : item))}
+                          options={[
+                            ['', 'No customer-defined predecessor'],
+                            ...milestones.filter(item => item.id !== milestone.id).map(item => [item.id, milestoneDisplayName(item) || item.name] as [string, string]),
+                          ]}
+                        />
+                        <NumberField
+                          label="Minimum separation"
+                          value={milestone.minimumSeparationDays}
+                          suffix={milestone.separationDayBasis === 'WORKING_DAYS' ? 'working days' : 'calendar days'}
+                          onChange={value => setMilestones(current => current.map(item => item.id === milestone.id ? { ...item, minimumSeparationDays: value } : item))}
+                        />
+                        <SelectField
+                          label="Separation day basis"
+                          value={milestone.separationDayBasis || 'CALENDAR_DAYS'}
+                          onChange={value => setMilestones(current => current.map(item => item.id === milestone.id ? { ...item, separationDayBasis: value as ContractMilestone['separationDayBasis'] } : item))}
+                          options={[["CALENDAR_DAYS", "Calendar days"], ["WORKING_DAYS", "Working days"]]}
+                        />
                         <div className="lg:col-span-2">
                           <TextField
                             label="Authorized source reference"
@@ -880,7 +892,7 @@ export default function ProjectControlBasisPage() {
                 <TextField label="Governing standard / specification" value={basis.governingStandard || ''} onChange={value => { setBasis(current => ({ ...current, governingStandard: value })); clearMessages() }} placeholder="Contract-specific requirement" />
                 <TextField label="Accepted schedule project IDs" value={(basis.scheduleProjectIds || []).join(', ')} onChange={value => { setBasis(current => ({ ...current, scheduleProjectIds: value.split(',').map(item => item.trim()).filter(Boolean) })); clearMessages() }} placeholder="Example: IAD290, IAD290-004.04-PR" />
                 <SelectField label="Requirements profile" value={requirements.profile} onChange={value => applyRequirementsProfile(value as ScheduleRequirementsBasis['profile'])}
-                  options={[['NOT_SET', 'Select profile'], ['UFGS_01_32_01_00_10', 'UFGS 01 32 01.00 10'], ['OWNER_DATA_CENTER', 'Owner / data center'], ['CUSTOM', 'Custom / project-specific']]} />
+                  options={[['NOT_SET', 'Select profile'], ['UFGS_01_32_01_00_10', 'UFGS 01 32 01.00 10'], ['CUSTOM', 'Custom / project-specific']]} />
                 <SelectField label="Delivery method" value={requirements.deliveryMethod || 'NOT_SET'} onChange={value => { setRequirements(current => ({ ...current, deliveryMethod: value as ScheduleRequirementsBasis['deliveryMethod'] })); clearMessages() }}
                   options={[['NOT_SET', 'Select method'], ['DESIGN_BID_BUILD', 'Design-Bid-Build'], ['DESIGN_BUILD', 'Design-Build'], ['CM_AT_RISK', 'CM at Risk'], ['OTHER', 'Other']]} />
                 <TextField label="Specification section" value={requirements.specificationSection || ''} onChange={value => { setRequirements(current => ({ ...current, specificationSection: value })); clearMessages() }} placeholder="Example: 01 32 01.00 10" />
@@ -937,7 +949,6 @@ export default function ProjectControlBasisPage() {
                   <div className="mt-1 text-[11px] text-slate-500">Use the contract specification if it differs from the standard profile.</div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => { setP6Settings({ ...OWNER_DATA_CENTER_P6_SETTINGS }); clearMessages() }} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50">Apply owner data-center 01 32 00 defaults</button>
                   <button type="button" onClick={() => { setP6Settings({ ...UFGS_P6_SETTINGS }); clearMessages() }} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50">Apply UFGS 08/2026 defaults</button>
                 </div>
               </div>
