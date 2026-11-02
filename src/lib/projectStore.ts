@@ -71,6 +71,8 @@ export interface ContractMilestone {
   name: string
   acronym?: string                    // Displayed as Full Milestone Name (ACRONYM)
   aliases?: string[]                  // Alternate XER names accepted for this project only
+  mappedActivityCode?: string         // User-confirmed Activity ID; exact match, no name fallback
+  requiredWeekday?: string            // 0=Sunday ... 6=Saturday; blank means unrestricted
   date: string                         // ISO date (YYYY-MM-DD)
   type?:
     | 'INTERIM_CONTRACT'
@@ -151,7 +153,7 @@ export interface P6SettingsBasis {
   profile: 'NOT_SET' | 'UFGS_2026' | 'OWNER_DATA_CENTER_013200' | 'PROJECT_SPECIFIC' // Legacy owner value is normalized on load.
   activityCodesProjectLevel: boolean
   calendarsProjectLevel: boolean
-  durationType: 'NOT_SET' | 'FIXED_DURATION_AND_UNITS' | 'PROJECT_SPECIFIC'
+  durationType: 'NOT_SET' | 'FIXED_DURATION_AND_UNITS' | 'FIXED_DURATION_AND_UNITS_TIME' | 'PROJECT_SPECIFIC'
   percentCompleteType: 'NOT_SET' | 'PHYSICAL' | 'PROJECT_SPECIFIC'
   hoursPerDay?: number
   hoursPerWeek?: number
@@ -165,6 +167,7 @@ export interface P6SettingsBasis {
   maxPositiveLagDays?: number
   hardConstraintsAllowed?: boolean
   nonContractConstraintsAllowed?: boolean
+  constraintExceptionReference?: string // Governing reference for permitted non-contract constraints
   externalRelationshipsAllowed?: boolean
   expectedFinishDatesRequired?: boolean
   floatBasedOnProjectFinish?: boolean

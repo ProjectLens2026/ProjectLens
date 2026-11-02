@@ -22,7 +22,7 @@ import { evaluateGates } from './gates'
 import { buildScheduleQualityFindings } from './qualityRules'
 import { evaluateStandardPractice } from './standardPractice'
 
-const ENGINE_VERSION = '2.1.0'
+const ENGINE_VERSION = '2.1.1'
 
 interface AnalysisInput {
   sourceFormat?: 'PRIMAVERA_XER' | 'MS_PROJECT_XML'

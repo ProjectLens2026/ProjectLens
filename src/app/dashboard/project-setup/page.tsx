@@ -335,7 +335,7 @@ export default function ProjectControlBasisPage() {
       setError('Every additional contractual milestone must have a name, required date, and authorized source reference.')
       return
     }
-    if (milestones.some(milestone => milestone.predecessorMilestoneId && (!milestone.minimumSeparationDays || milestone.minimumSeparationDays < 0))) {
+    if (milestones.some(milestone => milestone.predecessorMilestoneId && (milestone.minimumSeparationDays === undefined || !Number.isFinite(milestone.minimumSeparationDays) || milestone.minimumSeparationDays < 0 || !milestones.some(other => other.id === milestone.predecessorMilestoneId && other.id !== milestone.id)))) {
       setError('Every milestone dependency must include a valid minimum separation.')
       return
     }
@@ -821,6 +821,8 @@ export default function ProjectControlBasisPage() {
                           placeholder="Optional"
                           onChange={value => setMilestones(current => current.map(item => item.id === milestone.id ? { ...item, phaseOrArea: value } : item))}
                         />
+                        <TextField label="Confirmed schedule Activity ID" value={milestone.mappedActivityCode || ''} placeholder="Exact Activity ID (optional before upload)" onChange={value => setMilestones(current => current.map(item => item.id === milestone.id ? { ...item, mappedActivityCode: value.trim() || undefined } : item))} />
+                        <SelectField label="Required milestone weekday" value={milestone.requiredWeekday || ''} onChange={value => setMilestones(current => current.map(item => item.id === milestone.id ? { ...item, requiredWeekday: value || undefined } : item))} options={[["", "No weekday restriction"], ["0", "Sunday"], ["1", "Monday"], ["2", "Tuesday"], ["3", "Wednesday"], ["4", "Thursday"], ["5", "Friday"], ["6", "Saturday"]]} />
                         <div className="lg:col-span-2">
                           <TextField
                             label="Accepted schedule aliases"
@@ -954,7 +956,7 @@ export default function ProjectControlBasisPage() {
               </div>
               <div className="mt-5 grid gap-4 sm:grid-cols-2">
                 <SelectField label="Duration type" value={p6Settings.durationType} onChange={value => setP6Settings(current => ({ ...current, profile: 'PROJECT_SPECIFIC', durationType: value as P6SettingsBasis['durationType'] }))}
-                  options={[['NOT_SET', 'Select setting'], ['FIXED_DURATION_AND_UNITS', 'Fixed Duration & Units'], ['PROJECT_SPECIFIC', 'Project-specific']]} />
+                  options={[['NOT_SET', 'Select setting'], ['FIXED_DURATION_AND_UNITS', 'Fixed Duration & Units'], ['FIXED_DURATION_AND_UNITS_TIME', 'Fixed Duration & Units/Time'], ['PROJECT_SPECIFIC', 'Project-specific — manual verification']]} />
                 <SelectField label="Percent complete type" value={p6Settings.percentCompleteType} onChange={value => setP6Settings(current => ({ ...current, profile: 'PROJECT_SPECIFIC', percentCompleteType: value as P6SettingsBasis['percentCompleteType'] }))}
                   options={[['NOT_SET', 'Select setting'], ['PHYSICAL', 'Physical'], ['PROJECT_SPECIFIC', 'Project-specific']]} />
                 <SelectField label="Critical activity definition" value={p6Settings.criticalActivities} onChange={value => setP6Settings(current => ({ ...current, profile: 'PROJECT_SPECIFIC', criticalActivities: value as P6SettingsBasis['criticalActivities'] }))}
@@ -984,6 +986,7 @@ export default function ProjectControlBasisPage() {
                 <NumberField label="Max positive lag" value={p6Settings.maxPositiveLagDays} suffix="days" onChange={value => setP6Settings(current => ({ ...current, maxPositiveLagDays: value }))} />
               </div>
               <TextArea label="Project-specific P6 settings / exceptions" value={p6Settings.notes || ''} onChange={value => setP6Settings(current => ({ ...current, notes: value }))} />
+              {p6Settings.nonContractConstraintsAllowed && <TextField label="Non-contract constraint authorization reference" value={p6Settings.constraintExceptionReference || ''} placeholder="Governing clause or documented authorization" onChange={value => setP6Settings(current => ({ ...current, constraintExceptionReference: value }))} />}
               <SaveMessage error={error} saved={savedSection === 'p6-settings'} label="Required P6 settings saved at the project level." />
             </BasisCard>
           )}

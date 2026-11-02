@@ -1745,15 +1745,14 @@ function buildCompleteScheduleAudit(analysis: any, project: any, completionTarge
   const configuredMilestones = (project?.contractDates?.contractMilestones || []) as ContractMilestone[]
   const requirementsProfile = project?.controlBasis?.scheduleRequirements?.profile
   const milestoneRows = configuredMilestones.map(configured => {
-    const mapped = tasks
-      .filter(task => milestone(task) && taskMatchesContractMilestone(task, configured, requirementsProfile))
+    const matches = tasks.filter(task => milestone(task) && taskMatchesContractMilestone(task, configured, requirementsProfile))
+    const mapped = matches
       .map(task => ({
         task,
         forecast: String(task?.reend_date || task?.early_end_date || task?.target_end_date || task?.act_end_date || '').slice(0, 10),
       }))
       .filter(item => item.forecast)
-      .sort((a, b) => a.forecast.localeCompare(b.forecast))
-      .pop()
+      .filter((_item, _index, all) => all.length === 1 && matches.length === 1)[0]
     return {
       id: configured.id,
       label: milestoneDisplayName(configured),
@@ -2115,8 +2114,7 @@ function ContractMilestoneSnapshot({ milestones, analysis, profile }: {
     const mapped = candidates
       .map(task => ({ task, forecast: String(task?.reend_date || task?.early_end_date || task?.target_end_date || task?.act_end_date || '').slice(0, 10) }))
       .filter(item => item.forecast)
-      .sort((a, b) => a.forecast.localeCompare(b.forecast))
-      .pop()
+      .filter((_item, _index, all) => all.length === 1 && candidates.length === 1)[0]
     const required = String(milestone.currentDate || milestone.date || '').slice(0, 10)
     const forecastMs = dateMs(mapped?.forecast)
     const requiredMs = dateMs(required)
@@ -2156,7 +2154,7 @@ function ContractMilestoneSnapshot({ milestones, analysis, profile }: {
         })}</tbody>
       </table>
     </div>
-    <div className="border-t border-slate-100 bg-slate-50 px-5 py-2.5 text-[10px] text-slate-500">Milestone mapping uses the full contract name, acronym, approved aliases and phase/area. A mapped date is schedule evidence; it does not by itself confirm physical readiness or acceptance.</div>
+    <div className="border-t border-slate-100 bg-slate-50 px-5 py-2.5 text-[10px] text-slate-500">A confirmed Activity ID takes precedence over names and aliases. Ambiguous or missing matches require verification in Project Setup. A mapped date is schedule evidence, not confirmation of physical readiness or acceptance.</div>
   </section>
 }
 

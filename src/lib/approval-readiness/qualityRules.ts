@@ -180,17 +180,6 @@ function isReviewApprovalTask(task: any): boolean {
   return /REVIEW|APPROV|ACCEPT/.test(text) && /SUBMITTAL|SHOP DRAWING|RFI|DOCUMENT|OWNER|AE|A E|DESIGN|REVIEW|APPROV/.test(text)
 }
 
-function calendarWorkingDays(calendar: any): number {
-  const dayHours = Number(calendar?.day_hr_cnt || 0)
-  const weekHours = Number(calendar?.week_hr_cnt || 0)
-  if (dayHours > 0 && weekHours > 0) return Math.max(0, Math.min(7, Math.round(weekHours / dayHours)))
-  const name = normalized(calendar?.clndr_name)
-  if (/7 DAY|SEVEN DAY|24 7/.test(name)) return 7
-  if (/6 DAY|SIX DAY|MON SAT/.test(name)) return 6
-  if (/5 DAY|FIVE DAY|MON FRI/.test(name)) return 5
-  return 0
-}
-
 function contractualDates(dates?: ContractDates): Set<string> {
   const result = new Set<string>()
   for (const value of [
@@ -275,8 +264,8 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
   const selectedMilestoneCandidate = (milestone: ContractMilestone) => milestoneCandidates(milestone)
     .map(task => ({ task, date: taskForecastDate(task) }))
     .filter(item => item.date)
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .pop()
+    .filter((_item, _index, all) => all.length === 1 && milestoneCandidates(milestone).length === 1)
+    [0]
   for (const milestone of contractualMilestones) {
     const label = milestoneDisplayName(milestone)
     const candidates = milestoneCandidates(milestone)
@@ -284,13 +273,13 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
       findings.push(finding({
         primaryDomain: 'AR-01',
         crossReferencedDomains: ['AR-02', 'AR-08'],
-        ruleStrength: 'REQUIRED',
-        severity: milestone.isApprovalGate ? 5 : 4,
-        criticalGate: Boolean(milestone.isApprovalGate),
-        title: `${label} is not identified in the submitted schedule`,
+        ruleStrength: 'EXPECTED',
+        severity: 2,
+        criticalGate: false,
+        title: `${label} mapping is missing or needs verification`,
         whatFound: `No schedule milestone matches the authorized ${label}${milestone.phaseOrArea ? ` for ${milestone.phaseOrArea}` : ''}. Accepted project aliases: ${(milestone.aliases || []).join(', ') || 'none recorded'}.`,
         whyItMatters: 'A contractual milestone cannot be monitored, forecast, or traced to its prerequisite work unless it is explicitly represented and mapped in the CPM network.',
-        reviewerCheck: 'Add the contractual milestone or map the equivalent submitted milestone by recording its accepted project alias, then verify its predecessor path and forecast date.',
+        reviewerCheck: 'Verify whether the milestone exists. Record its exact Activity ID; add a milestone only if the required scope is genuinely absent.',
         preSubmissionNote: `Represent and logically connect ${label} before submission.`,
         referenceRequirement: milestone.sourceReference || projectBasisReference,
         affectedActivities: [],
@@ -299,11 +288,42 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     }
 
     const requiredDate = dateOnly(milestone.currentDate || milestone.date)
+    if (candidates.length !== 1) {
+      findings.push(finding({
+        primaryDomain: 'AR-01', ruleStrength: 'EXPECTED', severity: 2, criticalGate: false,
+        title: `${label} activity mapping needs confirmation`,
+        whatFound: `${candidates.length} activities match this milestone. No date or separation conclusion has been made.`,
+        whyItMatters: 'Choosing the latest matching activity can assign the wrong phase or contractual target.',
+        reviewerCheck: 'Record the exact schedule Activity ID in Project Setup, then rerun the review.',
+        preSubmissionNote: 'Confirm a unique milestone mapping.',
+        referenceRequirement: milestone.sourceReference || projectBasisReference,
+        affectedActivities: affected(candidates, 'Ambiguous milestone mapping'),
+      }))
+      continue
+    }
     const forecastCandidates = candidates
       .map(task => ({ task, date: taskForecastDate(task) }))
       .filter(item => item.date)
       .sort((a, b) => a.date.localeCompare(b.date))
     const selected = forecastCandidates[forecastCandidates.length - 1]
+    if (!selected) findings.push(finding({
+      primaryDomain: 'AR-01', ruleStrength: 'EXPECTED', severity: 2, criticalGate: false,
+      title: `${label} forecast date needs verification`,
+      whatFound: 'The mapped activity does not contain a usable forecast finish date.',
+      whyItMatters: 'Missing evidence cannot demonstrate that a contractual date is met.',
+      reviewerCheck: 'Verify the milestone date in the source schedule and re-export.',
+      preSubmissionNote: 'Provide a dated milestone.', referenceRequirement: milestone.sourceReference || projectBasisReference,
+      affectedActivities: affected(candidates, 'Forecast date unavailable'),
+    }))
+    if (selected && milestone.requiredWeekday && /^[0-6]$/.test(milestone.requiredWeekday) && new Date(`${selected.date}T12:00:00Z`).getUTCDay() !== Number(milestone.requiredWeekday)) findings.push(finding({
+      primaryDomain: 'AR-01', ruleStrength: 'REQUIRED', severity: 3, criticalGate: false,
+      title: `${label} does not meet the confirmed weekday requirement`,
+      whatFound: `${taskCode(selected.task)} — ${taskName(selected.task)} is forecast for ${selected.date}; the recorded requirement is ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][Number(milestone.requiredWeekday)]}.`,
+      whyItMatters: 'The forecast differs from the customer-confirmed milestone criterion.',
+      reviewerCheck: 'Review the mapped activity and calendar or document an authorized exception. Do not force the forecast using an unsupported constraint.',
+      preSubmissionNote: 'Address the milestone weekday variance.', referenceRequirement: milestone.sourceReference || projectBasisReference,
+      affectedActivities: affected([selected.task], 'Milestone weekday variance'),
+    }))
     if (selected && requiredDate && selected.date > requiredDate) {
       findings.push(finding({
         primaryDomain: 'AR-01',
@@ -527,8 +547,8 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
         const hoursPerDay = Math.max(1, Number(calendar?.day_hr_cnt || 8))
         const taskDays = Number(task?.target_drtn_hr_cnt || 0) / hoursPerDay
         const durationMismatch = Math.abs(taskDays - reviewDuration) > 0.01
-        const calendarMismatch = reviewDurationBasis === 'CALENDAR_DAYS' && calendarWorkingDays(calendar) !== 7
-        return durationMismatch || calendarMismatch
+        // Calendar-day compliance requires actual workweek/exception evidence.
+        return reviewDurationBasis === 'WORKING_DAYS' && Number(calendar?.day_hr_cnt) > 0 && durationMismatch
       })
       if (mismatched.length) findings.push(finding({
         primaryDomain: 'AR-01',
@@ -818,7 +838,7 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
 
   const constrainedTasks = tasks.filter(task => [task?.cstr_type, task?.cstr_type2].some(value => String(value || '').trim()))
   const hardConstrainedTasks = constrainedTasks.filter(task => [task?.cstr_type, task?.cstr_type2]
-    .some(value => /MAND|MUST/i.test(String(value || ''))))
+    .some(value => /MAND|MUST/i.test(String(value || '')) || ['CS_MSON', 'CS_MEON'].includes(String(value || '').toUpperCase())))
   if (p6SettingsConfigured && p6Settings?.hardConstraintsAllowed === false && hardConstrainedTasks.length) findings.push(finding({
     primaryDomain: 'AR-07',
     crossReferencedDomains: ['AR-02', 'AR-01'],
@@ -837,41 +857,58 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     const dates = constraintDates(task)
     return !isMilestone(task) || dates.length === 0 || dates.some(value => !authorizedDates.has(value))
   })
-  if (unauthorizedConstraints.length) findings.push(finding({
+  const constraintsRestricted = p6SettingsConfigured && p6Settings?.nonContractConstraintsAllowed === false
+  const constraintExceptionDocumented = p6Settings?.nonContractConstraintsAllowed === true && Boolean(p6Settings.constraintExceptionReference?.trim())
+  if (unauthorizedConstraints.length && !constraintExceptionDocumented) findings.push(finding({
     primaryDomain: 'AR-07',
     crossReferencedDomains: ['AR-02', 'AR-01'],
-    ruleStrength: 'REQUIRED',
-    severity: 5,
-    criticalGate: true,
-    title: 'Schedule constraints are not supported by contractual milestone dates',
+    ruleStrength: constraintsRestricted ? 'REQUIRED' : 'EXPECTED',
+    severity: constraintsRestricted ? 4 : 2,
+    criticalGate: false,
+    title: constraintsRestricted ? 'Schedule constraints differ from the confirmed milestone-only policy' : 'Schedule constraint authorization needs verification',
     whatFound: `${unauthorizedConstraints.length} constrained activit${unauthorizedConstraints.length === 1 ? 'y is' : 'ies are'} not a milestone tied to a date recorded in the project contract basis.`,
-    whyItMatters: 'Constraints can force dates and float independently of the CPM network. Only authorized contractual milestone constraints may remain without a documented exception.',
-    reviewerCheck: 'Remove each unsupported constraint or record the authorized contractual milestone and date in the project basis, then recalculate the schedule.',
+    whyItMatters: 'A constraint needs a documented basis; a date match alone does not establish authorization.',
+    reviewerCheck: constraintsRestricted ? 'Review each constraint against the recorded milestone-only policy and document any authorized exception.' : 'Confirm the constraint policy and record its authorization reference before treating these constraints as prohibited.',
     preSubmissionNote: 'Retain constraints only on authorized contractual milestones and explain approved exceptions.',
     referenceRequirement: requirements?.specificationSection || 'Project-specific contractual milestone and constraint requirements govern.',
     affectedActivities: affected(unauthorizedConstraints, 'Constraint is not supported by the project contract basis'),
   }))
 
-  const fixedDurationRequired = p6SettingsAreUfgs || p6Settings?.durationType === 'FIXED_DURATION_AND_UNITS'
+  const fixedUnitsTimeRequired = p6Settings?.durationType === 'FIXED_DURATION_AND_UNITS_TIME'
+  const fixedDurationRequired = fixedUnitsTimeRequired || p6SettingsAreUfgs || p6Settings?.durationType === 'FIXED_DURATION_AND_UNITS'
+  const durationLabel = fixedUnitsTimeRequired ? 'Fixed Duration & Units/Time' : 'Fixed Duration & Units'
+  const missingDurationTypes = isPrimavera && fixedDurationRequired ? tasks.filter(task => isDetailedWorkActivity(task) && !String(task?.duration_type || '').trim()) : []
+  if (missingDurationTypes.length) findings.push(finding({
+    primaryDomain: 'AR-07', ruleStrength: 'EXPECTED', severity: 2, criticalGate: false,
+    title: 'Activity duration-type evidence is unavailable',
+    whatFound: `${missingDurationTypes.length} detailed activities have no exported duration type.`,
+    whyItMatters: 'Missing data cannot establish conformity with the selected duration type.',
+    reviewerCheck: `Verify ${durationLabel} in P6 and provide an export containing the evidence.`,
+    preSubmissionNote: 'Verify missing duration-type evidence.', referenceRequirement: projectBasisReference,
+    affectedActivities: affected(missingDurationTypes, 'Duration type missing'),
+  }))
   const wrongDurationType = isPrimavera && fixedDurationRequired ? tasks.filter(task => {
+    if (!isDetailedWorkActivity(task)) return false
     const value = String(task?.duration_type || '').toUpperCase()
     if (!value) return false
     const compact = value.replace(/[^A-Z0-9]/g, '')
     const named = value.replace(/_/g, ' ').replace(/\s+/g, ' ').trim()
-    return !['DTFIXEDDUR2', 'DTFIXEDDRTN2'].includes(compact) && !/^FIXED DURATION\s*(?:&|AND)\s*UNITS$/.test(named)
+    return fixedUnitsTimeRequired
+      ? !['DTFIXEDDUR', 'DTFIXEDDRTN'].includes(compact) && !/^FIXED DURATION\s*(?:&|AND)\s*UNITS\s*\/\s*TIME$/.test(named)
+      : !['DTFIXEDDUR2', 'DTFIXEDDRTN2'].includes(compact) && !/^FIXED DURATION\s*(?:&|AND)\s*UNITS$/.test(named)
   }) : []
   if (wrongDurationType.length) findings.push(finding({
     primaryDomain: 'AR-07',
     ruleStrength: 'REQUIRED',
     severity: 4,
-    title: 'Activity duration type differs from Fixed Duration & Units',
+    title: `Activity duration type differs from ${durationLabel}`,
     whatFound: `${wrongDurationType.length} activit${wrongDurationType.length === 1 ? 'y uses' : 'ies use'} a duration type other than the selected P6 setting.`,
     whyItMatters: 'Inconsistent duration types can cause remaining duration, resource changes, and dates to react differently across the schedule.',
-    reviewerCheck: 'Set the applicable activities to Fixed Duration & Units or document the governing approved exception.',
+    reviewerCheck: `Review the applicable activities against ${durationLabel} or document the governing authorized exception.`,
     preSubmissionNote: 'Correct activity duration types before submission.',
     referenceRequirement: p6Reference(
       'UFGS 01 32 01.00 10, 3.12(c) - Activity Duration Types must be Fixed Duration & Units.',
-      'The selected P6 settings require Fixed Duration & Units.',
+      `The selected P6 settings require ${durationLabel}.`,
     ),
     affectedActivities: affected(wrongDurationType, 'Noncompliant duration type'),
   }))
@@ -908,9 +945,9 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
   if (missingCalendarPolicies.length) findings.push(finding({
     primaryDomain: 'AR-07',
     crossReferencedDomains: ['AR-01'],
-    ruleStrength: 'REQUIRED',
-    severity: 5,
-    criticalGate: true,
+    ruleStrength: 'EXPECTED',
+    severity: 2,
+    criticalGate: false,
     title: 'Contract calendar requirements are not fully captured',
     whatFound: `The project basis does not establish: ${missingCalendarPolicies.join(', ')}.`,
     whyItMatters: 'Calendar compliance cannot be judged without knowing the permitted workweek, weather-calendar requirement, and procurement time basis.',
@@ -920,68 +957,24 @@ export function buildScheduleQualityFindings(analysis: QualityAnalysis): Quality
     affectedActivities: [],
   }))
 
-  if (requirements?.saturdayWorkPolicy === 'PROHIBITED') {
-    const saturdayWork = tasks.filter(task => {
-      if (!isDetailedWorkActivity(task) || isProcurement(task) || isReviewApprovalTask(task)) return false
-      const calendar = calendarById.get(String(task?.clndr_id || ''))
-      return calendarWorkingDays(calendar) >= 6
-    })
-    if (saturdayWork.length) findings.push(finding({
-      primaryDomain: 'AR-07',
-      ruleStrength: 'REQUIRED',
-      severity: 5,
-      criticalGate: true,
-      title: 'Construction activities use calendars that permit Saturday work',
-      whatFound: `${saturdayWork.length} construction activit${saturdayWork.length === 1 ? 'y is' : 'ies are'} assigned to a six- or seven-day calendar although Saturday work is prohibited by the project basis.`,
-      whyItMatters: 'Permitting unapproved Saturday work can calculate earlier dates and additional float that are not achievable under the contract workweek.',
-      reviewerCheck: 'Assign the approved construction calendar or record an authorized calendar exception in the project basis.',
-      preSubmissionNote: 'Remove unapproved Saturday work from construction calendars and recalculate the schedule.',
-      referenceRequirement: requirements.specificationSection || 'Project-specific permitted workweek requirement.',
-      affectedActivities: affected(saturdayWork, 'Assigned calendar permits Saturday work'),
-    }))
-  }
-
-  if (requirements?.weatherCalendarPolicy === 'REQUIRED') {
-    const weatherCalendars = calendars.filter((calendar: any) =>
-      usedCalendars.has(String(calendar?.clndr_id || ''))
-      && /WEATHER|ADVERSE|WINTER|RAIN|SEASON/.test(normalized(calendar?.clndr_name)),
-    )
-    if (!weatherCalendars.length) findings.push(finding({
-      primaryDomain: 'AR-07',
-      ruleStrength: 'REQUIRED',
-      severity: 5,
-      criticalGate: true,
-      title: 'Required weather calendar is not assigned',
-      whatFound: 'No used project calendar is identified as the required weather/adverse-condition calendar.',
-      whyItMatters: 'Weather-sensitive work may otherwise be calculated on days the contract does not recognize as workable.',
-      reviewerCheck: 'Create or identify the approved weather calendar, assign it to applicable activities, and verify the contract weather allowances.',
-      preSubmissionNote: 'Assign the required weather calendar before submission.',
-      referenceRequirement: requirements.specificationSection || 'Project-specific weather-calendar requirement.',
-      affectedActivities: [],
-    }))
-  }
-
-  if (requirements?.procurementCalendarBasis === 'SEVEN_DAY') {
-    const procurementNotSevenDay = tasks.filter(task => {
-      if (!isProcurement(task) || !isDetailedWorkActivity(task)) return false
-      const calendar = calendarById.get(String(task?.clndr_id || ''))
-      return calendarWorkingDays(calendar) !== 7
-    })
-    if (procurementNotSevenDay.length) findings.push(finding({
-      primaryDomain: 'AR-07',
-      crossReferencedDomains: ['AR-05'],
-      ruleStrength: 'REQUIRED',
-      severity: 5,
-      criticalGate: true,
-      title: 'Procurement activities are not assigned to a seven-day calendar',
-      whatFound: `${procurementNotSevenDay.length} procurement activit${procurementNotSevenDay.length === 1 ? 'y is' : 'ies are'} not assigned to a verified seven-day calendar.`,
-      whyItMatters: 'Calendar-day submittal, fabrication, shipping, and delivery periods will be misstated when calculated on a five- or six-day work calendar.',
-      reviewerCheck: 'Assign the approved seven-day procurement calendar to the applicable procurement chain and recalculate the schedule.',
-      preSubmissionNote: 'Correct procurement calendar assignments before submission.',
-      referenceRequirement: requirements.specificationSection || 'Project-specific procurement calendar requirement.',
-      affectedActivities: affected(procurementNotSevenDay, 'Procurement calendar is not seven-day'),
-    }))
-  }
+  const calendarChecks = [
+    Number(requirements?.reviewApprovalDuration || 0) > 0 ? 'review-period calendar and duration conversion' : '',
+    requirements?.saturdayWorkPolicy === 'PROHIBITED' ? 'Saturday restrictions' : '',
+    requirements?.weatherCalendarPolicy === 'REQUIRED' ? 'weather allowances' : '',
+    requirements?.procurementCalendarBasis === 'SEVEN_DAY' ? 'seven-day procurement calendars' : '',
+  ].filter(Boolean)
+  if (calendarChecks.length) findings.push(finding({
+    primaryDomain: 'AR-07', ruleStrength: 'EXPECTED', severity: 2, criticalGate: false,
+    title: 'Detailed calendar evidence requires verification',
+    whatFound: `The confirmed criteria include ${calendarChecks.join(', ')}. Calendar names and aggregate hours cannot verify the actual weekdays, shifts, holiday exceptions or weather allowances.`,
+    whyItMatters: 'A calendar labeled as five-day or weather-adjusted may not contain the expected working-time rules.',
+    reviewerCheck: 'Inspect the assigned calendars in the source scheduling application, including workweek, inherited rules and date exceptions. Record the verification against this schedule version.',
+    preSubmissionNote: 'Provide calendar detail for the applicable criteria; no automatic calendar compliance conclusion has been made.',
+    referenceRequirement: projectBasisReference,
+    affectedActivities: calendars.filter((calendar: any) => usedCalendars.has(String(calendar.clndr_id || ''))).map((calendar: any) => ({
+      id: String(calendar.clndr_id), code: String(calendar.clndr_id), name: String(calendar.clndr_name || 'Unnamed calendar'), note: 'Detailed calendar verification pending',
+    })),
+  }))
 
   const nonProjectCalendars = calendars.filter(calendar => {
     if (!usedCalendars.has(String(calendar?.clndr_id || ''))) return false

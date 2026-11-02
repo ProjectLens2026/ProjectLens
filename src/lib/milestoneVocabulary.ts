@@ -67,9 +67,10 @@ export function milestoneSearchTerms(
 
 export function taskMatchesContractMilestone(
   task: { task_code?: string; task_name?: string; wbs_path?: string[] },
-  milestone: Pick<ContractMilestone, 'name' | 'acronym' | 'aliases' | 'phaseOrArea'>,
+  milestone: Pick<ContractMilestone, 'name' | 'acronym' | 'aliases' | 'phaseOrArea' | 'mappedActivityCode'>,
   profile?: ScheduleRequirementsProfile,
 ): boolean {
+  if (milestone.mappedActivityCode?.trim()) return String(task.task_code || '').trim() === milestone.mappedActivityCode.trim()
   const identity = normalizeMilestoneText(`${task.task_code || ''} ${task.task_name || ''}`)
   const terms = milestoneSearchTerms(milestone, profile)
   if (!terms.some(term => identity === term || identity.includes(term))) return false
