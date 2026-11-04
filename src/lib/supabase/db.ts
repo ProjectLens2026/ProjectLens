@@ -345,6 +345,7 @@ function rowToProject(row: any): Project {
     contractValue: row.contract_value || undefined,
     phase: row.phase || undefined,
     status: fromDbStatus(row.status),
+    deletedAt: row.status === 'deleted' ? row.updated_at : undefined,
     contractDates: row.contract_dates || undefined,
     controlBasis: row.control_basis || undefined,
     evm: row.evm || undefined,
@@ -399,6 +400,8 @@ function rowToVersion(row: any): ScheduleVersion {
   return {
     id: getLocalIdForUuid(row.id, 'ver'),
     uploadedAt: row.uploaded_at,
+    deletedAt: row.deleted_at || undefined,
+    archivedAt: row.archived_at || undefined,
     dataDate: row.data_date || undefined,
     fileName: row.file_name || '',
     versionLabel: row.version_label || undefined,
@@ -2168,4 +2171,28 @@ export async function cleanupTiaTempFile(path: string): Promise<void> {
   if (!path) return
   const supabase = createClient()
   await supabase.storage.from(BUCKET).remove([path]).catch(() => {})
+}
+
+/** Small, verified lifecycle write: no full analysis is read or rewritten. */
+export async function saveLifecycleChange(projectId: string, versionId: string | undefined, action: string, targetId?: string): Promise<void> {
+  const db = createClient()
+  const signal = AbortSignal.timeout(15000)
+  if (action === 'move') {
+    const { data: destinations, error: lookupError } = await db.from('projects').select('id, org_id, status').in('id', [toUuid(projectId), toUuid(targetId!)]).abortSignal(signal)
+    const source = destinations?.find(p => p.id === toUuid(projectId))
+    const target = destinations?.find(p => p.id === toUuid(targetId!))
+    if (lookupError || !source || !target || source.org_id !== target.org_id || ['deleted','archived'].includes(target.status)) throw new Error('Destination must be an accessible active project in the same workspace.')
+  }
+  const stamp = new Date().toISOString()
+  const patch: any = versionId
+    ? action === 'move' ? { project_id: toUuid(targetId!) }
+      : action === 'delete' ? { deleted_at: stamp }
+      : action === 'restore' ? { deleted_at: null }
+      : { archived_at: action === 'archive' ? stamp : null }
+    : action === 'rename' ? { name: targetId!.trim(), updated_at: stamp } : { status: action === 'delete' ? 'deleted' : action === 'archive' ? 'archived' : 'active', updated_at: stamp }
+  let query = db.from(versionId ? 'schedule_versions' : 'projects').update(patch).eq('id', toUuid(versionId || projectId))
+  if (versionId) query = query.eq('project_id', toUuid(projectId))
+  const { data, error } = await query.select('id').abortSignal(signal)
+  if (error) throw new Error(error.message)
+  if (!data || data.length !== 1) throw new Error('No row was updated. Check access permissions or reload the project list.')
 }

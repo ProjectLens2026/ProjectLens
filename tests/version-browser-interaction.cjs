@@ -11,6 +11,8 @@ const React = require(path.join(tooling, 'react'))
 const Renderer = require(path.join(tooling, 'react-test-renderer'))
 const root = path.resolve(__dirname, '..')
 const requests = []
+const mutations = []
+let rejectMutation = false
 const permissions = { user: { email: 'test@example.invalid', orgName: 'Test enterprise' }, can: { uploadSchedule: true } }
 const storage = new Map()
 const fakeStorage = { getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value) }
@@ -29,7 +31,7 @@ const dateHelpers = compile('src/lib/versionBrowser.ts', {'./sourceScheduleDate'
 const Browser = compile('src/components/ProjectVersionBrowser.tsx', {
   'next/link': { default: ({ children, ...props }) => React.createElement('a', props, children) },
   'next/navigation': { useSearchParams: () => new URLSearchParams() },
-  '@/lib/projectStore': { getVisibleVersions: p => p.versions.filter(v => !v.deletedAt) },
+  '@/lib/projectStore': { getProjectStatus: p => p.status || 'Active', manageProjectItem: async(...args)=>{if(rejectMutation)throw Error('Cloud denied save');mutations.push(args)}, getVisibleVersions: p => p.versions.filter(v => !v.deletedAt && !v.archivedAt) },
   '@/lib/versionBrowser': dateHelpers,
   './VersionNavigation': { useVersionNavigation: () => ({ request: (...args) => requests.push(args), opening: false }) },
   '@/lib/usePermissions': { usePermissions: () => permissions },
@@ -65,3 +67,29 @@ Renderer.act(() => tree.update(React.createElement(Browser, { projects })))
 assert.ok(!tree.root.findAllByType('a').some(a => a.props.href.includes('mode=existing')))
 Renderer.act(() => tree.unmount())
 console.log('PASS: expand, select without switching, explicit open, same-date versions, hidden deleted versions, upload target, search, column persistence, viewer upload visibility')
+;(async()=>{
+  permissions.can.deleteVersion=true
+  permissions.can.archiveProject=true
+  permissions.can.softDeleteProject=true
+  permissions.can.restoreProject=true
+  await Renderer.act(async()=>{tree=Renderer.create(React.createElement(Browser,{projects}))})
+  Renderer.act(()=>button('P1').props.onClick())
+  const row=()=>tree.root.findAllByType('tr').find(r=>r.props.tabIndex===0)
+  const rowButton=text=>row().findAllByType('button').find(b=>label(b)===text)
+  Renderer.act(()=>rowButton('Delete').props.onClick())
+  assert.equal(mutations.length,0,'opening confirmation cannot write')
+  rejectMutation=true
+  await Renderer.act(async()=>{await button('Confirm').props.onClick()})
+  assert.ok(tree.root.findAllByProps({role:'alert'}).some(n=>label(n).includes('Cloud denied save')))
+  assert.equal(mutations.length,0)
+  rejectMutation=false
+  await Renderer.act(async()=>{await button('Confirm').props.onClick()})
+  assert.equal(mutations[0][1],'delete')
+  assert.ok(mutations[0][2],'version ID required')
+  Renderer.act(()=>button('Deleted items').props.onClick())
+  assert.ok(JSON.stringify(tree.toJSON()).includes('deleted.xer'))
+  assert.ok(tree.root.findAllByType('button').some(b=>label(b)==='Restore'))
+  assert.ok(tree.root.findAllByType('a').some(a=>label(a).includes('All projects')&&a.props.href==='/dashboard/projects'))
+  Renderer.act(()=>tree.unmount())
+  console.log('PASS: confirmation, cloud-error display, retry, deleted tab, restore and return-to-projects link')
+})().catch(e=>{console.error(e);process.exitCode=1})

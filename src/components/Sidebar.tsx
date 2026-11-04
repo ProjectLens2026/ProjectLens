@@ -510,7 +510,7 @@ export default function Sidebar({ user }: SidebarProps) {
           <span className="text-sm w-4 text-center">📊</span>
           <span className="flex-1">Enterprise Dashboard</span>
         </Link>
-        <Link href="/dashboard/archive"
+        <Link href="/dashboard/projects?view=archived"
           className={clsx(
             'flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2',
             isArchiveActive
@@ -525,7 +525,7 @@ export default function Sidebar({ user }: SidebarProps) {
             </span>
           )}
         </Link>
-        <Link href="/dashboard/deleted"
+        <Link href="/dashboard/projects?view=deleted"
           className={clsx(
             'flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[11px] font-medium border-l-2',
             isDeletedActive

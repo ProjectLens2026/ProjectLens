@@ -32,6 +32,7 @@ import {
   restoreVersionInSupabase,
   renameProjectInSupabase,
   moveVersionInSupabase,
+  saveLifecycleChange,
 } from './supabase/db'
 import { createClient } from './supabase/client'
 
@@ -251,6 +252,7 @@ export interface ProjectControlBasis {
 }
 
 export interface ScheduleVersion {
+  archivedAt?: string
   id: string
   uploadedAt: string
   dataDate?: string
@@ -997,6 +999,37 @@ export function loadProjects(): Project[] {
   return _projects
 }
 
+export async function manageProjectItem(projectId: string, action: 'delete' | 'restore' | 'archive' | 'unarchive' | 'move' | 'rename', versionId?: string, targetId?: string): Promise<void> {
+  const source = _projects.find(p => p.id === projectId)
+  if (!source) throw new Error('Project no longer exists. Reload the list.')
+  if (action === 'rename' && (versionId || !targetId?.trim())) throw new Error('Enter a project name.')
+  const version = versionId ? source.versions.find(v => v.id === versionId) : undefined
+  if (versionId && !version) throw new Error('Version no longer exists. Reload the list.')
+  if (action === 'move') {
+    const target = _projects.find(p => p.id === targetId)
+    if (!version || !target || target.id === projectId || ['Deleted', 'Archived'].includes(getProjectStatus(target))) throw new Error('Select a different active destination project.')
+    if (version.parentVersionId || source.versions.some(v => v.parentVersionId === versionId)) throw new Error('This version belongs to a TIA parent/fragnet pair. Move is blocked to preserve its lineage.')
+  }
+  // Commit remotely first. A denied/failed write leaves the visible state intact.
+  await saveLifecycleChange(projectId, versionId, action, targetId)
+  const stamp = new Date().toISOString()
+  _projects = _projects.map(p => {
+    if (action === 'move' && p.id === targetId) return { ...p, versions: [...p.versions, version!], updatedAt: stamp }
+    if (p.id !== projectId) return p
+    if (action === 'rename') return { ...p, name: targetId!.trim(), updatedAt: stamp }
+    if (!versionId) return { ...p, status: (action === 'delete' ? 'Deleted' : action === 'archive' ? 'Archived' : 'Active') as ProjectStatus, deletedAt: action === 'delete' ? stamp : undefined, updatedAt: stamp }
+    return { ...p, updatedAt: stamp, versions: action === 'move' ? p.versions.filter(v => v.id !== versionId) : p.versions.map(v => v.id !== versionId ? v : { ...v, ...(action === 'delete' || action === 'restore' ? { deletedAt: action === 'delete' ? stamp : undefined } : { archivedAt: action === 'archive' ? stamp : undefined }) }) }
+  })
+  if (versionId && getActiveVersionId() === versionId) {
+    if (action === 'move') setActiveProjectId(targetId!)
+    else if (action === 'delete' || action === 'archive') setActiveVersionId(null)
+  }
+  if (!versionId && getActiveProjectId() === projectId && (action === 'delete' || action === 'archive')) { setActiveVersionId(null); setActiveProjectId(null) }
+  notifyListeners()
+  await Promise.all(_projects.filter(p => p.id === projectId || p.id === targetId).map(p => idbPutProject(p).catch(err => console.warn('Cloud saved; local cache refresh failed', err))))
+}
+
+
 export function loadVersionAnalysis(
   versionId: string,
   options: { retainWith?: string[] } = {},
@@ -1134,7 +1167,7 @@ export function getActiveProject(): Project | null {
 // project selection, trend analysis, or latest-version resolution.
 export function getVisibleVersions(project: Project | null): ScheduleVersion[] {
   if (!project || !project.versions) return []
-  return project.versions.filter(v => !v.deletedAt)
+  return project.versions.filter(v => !v.deletedAt && !v.archivedAt)
 }
 
 export function getLatestVersion(project: Project | null): ScheduleVersion | null {
