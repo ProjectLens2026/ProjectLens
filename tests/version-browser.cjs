@@ -15,7 +15,7 @@ const version = (id, dataDate, uploadedAt, sequenceNumber = 0) => ({ id, dataDat
 assert.equal(scheduleDataDate(version('a', undefined, '2026-12-01')), '')
 assert.equal(scheduleDataDate({ analysis: { dataDate: '2026-10-24T08:00:00' } }), '2026-10-24')
 assert.equal(scheduleDataDate(version('x', '2026-02-30')), '')
-assert.equal(browserDate('2028-01-20T00:00:00Z'), '20-Jan-2028')
+assert.equal(browserDate('2028-01-20T00:00:00Z'), '01 20 2028')
 const records = [version('missing', undefined, '2026-12-01'), version('old', '2026-10-17', '2026-11-02'), version('new', '2026-10-24', '2026-10-25')]
 assert.deepEqual(records.sort(compareScheduleVersions).map(v => v.id), ['new', 'old', 'missing'])
 const sameDate = [version('original', '2026-10-24', '2026-10-25', 1), version('revision', '2026-10-24', '2026-10-26', 2)]

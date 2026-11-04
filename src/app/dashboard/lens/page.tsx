@@ -16,6 +16,7 @@ import { analyzeCLPathIntelligence } from '@/lib/construction/clPathIntelligence
 import { buildScheduleReviewSnapshot } from '@/lib/scheduleReviewSnapshot'
 import { reviewOpenEndedLogic } from '@/lib/approval-readiness/qualityRules'
 import TraceLogicPanel from '@/components/TraceLogicPanel'
+import { displayScheduleDate } from '@/lib/activityNetwork'
 import { printReport } from '@/lib/printReport'
 import { analysisWithProjectBasis } from '@/lib/projectReviewBasis'
 
@@ -279,7 +280,7 @@ export default function ControlLensAnalysisPage() {
           <div className="tab-bar flex gap-0 border-b border-slate-100 overflow-x-auto no-print">
             {[
               { id: 'schedule-filter', label: 'Schedule Filters (Primavera)', icon: '🔎' },
-              { id: 'trace', label: 'Activity & Milestone Paths', icon: '🧭' },
+              { id: 'trace', label: 'Logic Trace', icon: '🧭' },
               { id: 'noties', label: 'No Logic Ties', icon: '⛓️' },
               { id: 'longlead', label: 'Long Lead Items', icon: '📦' },
               { id: 'field', label: 'Field Reality', icon: '👷' },
@@ -305,7 +306,7 @@ export default function ControlLensAnalysisPage() {
                     <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">Select analysis</label>
                     <select value={scheduleFilter} onChange={e => setScheduleFilter(e.target.value as any)}
                       className="w-full border-2 border-slate-300 rounded-lg bg-white px-3 py-2.5 text-sm font-bold text-slate-900 shadow-sm focus:outline-none focus:border-blue-500">
-                      <option value="paths">Multiple paths / Logic trace to selected activity</option>
+                      <option value="paths">Phase / Finish Milestone Paths</option>
                       <option value="critical">P6 Critical Activities</option>
                       <option value="lookahead">2 Week Lookahead</option>
                       <option value="not-started">Activities Not Started</option>
@@ -314,7 +315,7 @@ export default function ControlLensAnalysisPage() {
                   </div>
                 </div>
 
-                {scheduleFilter === 'paths' && <TraceLogicPanel analysis={analysis} />}
+                {scheduleFilter === 'paths' && <TraceLogicPanel key="milestone-paths" analysis={analysis} milestoneMode />}
                 {/* P6 CRITICAL ACTIVITIES — submitted schedule truth only */}
                 {scheduleFilter === 'critical' && (
                   <div>
@@ -847,20 +848,12 @@ function PathCredibilityPanel({ result, title, compact = false }: { result: Path
 }
 
 // =============================================================================
-// fmtDate — format dates as "Jan 06, 2026" everywhere on this page.
+// fmtDate — MM DD YYYY without local-time conversion.
 // Module-scope so both the main component and the PathCard sub-component use it.
 // Accepts the various forms P6 XER hands us ('2026-01-06 00:00', '2026-01-06', etc.)
 // =============================================================================
 function fmtDate(d?: string | null): string {
-  if (!d) return '—'
-  const iso = d.slice(0, 10)  // "2026-01-06"
-  const parts = iso.split('-')
-  if (parts.length !== 3) return d
-  const [y, m, day] = parts
-  const mIdx = parseInt(m, 10) - 1
-  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  if (mIdx < 0 || mIdx > 11) return d
-  return `${monthNames[mIdx]} ${day}, ${y}`
+  return displayScheduleDate(d)
 }
 
 // =============================================================================
