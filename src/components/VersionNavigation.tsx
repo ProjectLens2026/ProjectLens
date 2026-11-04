@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { getActiveProject, getActiveVersion, loadProjects, loadVersionAnalysis, setActiveProjectId, setActiveVersionId } from '@/lib/projectStore'
 
 type Destination = { projectId: string; versionId: string; projectName: string; label: string; date: string; fromLabel: string; fromDate: string }
-type Navigation = { request: (projectId: string, versionId: string) => void; opening: boolean; revision: number; finished: () => void }
+type Navigation = { request: (projectId: string, versionId: string, path?: string) => void; opening: boolean; revision: number; finished: () => void; targetPath: string }
 const Context = createContext<Navigation | null>(null)
 export function useVersionNavigation() {
   const value = useContext(Context)
@@ -25,12 +25,13 @@ export default function VersionNavigation({ children }: { children: React.ReactN
   const locked = useRef(false)
   const edited = useRef(false)
   const pathname = usePathname()
+  const [targetPath,setTargetPath] = useState('/dashboard')
   useEffect(() => {
     edited.current = false
     const markEdited = (event: Event) => {
       const target = event.target as HTMLElement
       if (['/dashboard/projects', '/dashboard/enterprise'].includes(pathname)) return
-      if (target.closest('aside')) return
+      if (target.closest('aside, [data-navigation-controls]')) return
       if (target.matches('input:not([type="search"]), textarea, select, [contenteditable="true"]')) edited.current = true
     }
     document.addEventListener('input', markEdited)
@@ -42,10 +43,12 @@ export default function VersionNavigation({ children }: { children: React.ReactN
   const previousFocus = useRef<HTMLElement | null>(null)
   const finished = () => { locked.current = false; setDestination(null) }
 
-  function request(projectId: string, versionId: string) {
+  function request(projectId: string, versionId: string, path = '/dashboard') {
     if (locked.current || destination) return
     const currentProject = getActiveProject(), current = getActiveVersion(currentProject)
-    if (currentProject?.id === projectId && current?.id === versionId) { router.push('/dashboard'); return }
+    const route = path === '/dashboard' || path.startsWith('/dashboard/') ? path : '/dashboard'
+    if (currentProject?.id === projectId && current?.id === versionId) { router.push(route); return }
+    setTargetPath(route)
     const project = loadProjects().find(p => p.id === projectId)
     const version = project?.versions.find(v => v.id === versionId)
     if (!project || !version) return
@@ -53,7 +56,7 @@ export default function VersionNavigation({ children }: { children: React.ReactN
     const next = { projectId, versionId, projectName: project.name, label: label(version), date: date(version), fromLabel: label(current), fromDate: date(current) }
     setError(''); setDestination(next)
     if (edited.current) setPhase('confirm')
-    else void confirm(next)
+    else void confirm(next,route)
   }
   function cancel() {
     if (phase === 'opening') return
@@ -62,7 +65,7 @@ export default function VersionNavigation({ children }: { children: React.ReactN
     setDestination(null)
     previousFocus.current?.focus()
   }
-  async function confirm(target: Destination | null = destination) {
+  async function confirm(target: Destination | null = destination, route = targetPath) {
     if (!target || locked.current) return
     const attempt = ++generation.current
     locked.current = true; setError(''); setPhase('loading')
@@ -77,7 +80,7 @@ export default function VersionNavigation({ children }: { children: React.ReactN
       setActiveProjectId(target.projectId)
       setActiveVersionId(target.versionId)
       setRevision(n => n + 1)
-      router.push('/dashboard')
+      router.push(route)
     } catch (e) {
       if (attempt !== generation.current) return
       locked.current = false; setPhase('confirm')
@@ -89,7 +92,7 @@ export default function VersionNavigation({ children }: { children: React.ReactN
     else background.current?.removeAttribute('inert')
   }, [destination])
 
-  return <Context.Provider value={{ request, opening: Boolean(destination && phase === 'opening'), revision, finished }}>
+  return <Context.Provider value={{ request, opening: Boolean(destination && phase === 'opening'), revision, finished, targetPath }}>
     <div ref={background} className="version-navigation-background contents" aria-hidden={destination ? true : undefined}>{children}</div>
     <style>{`@media print { .version-navigation-background[aria-hidden="true"] { display: none !important; } }`}</style>
     {destination && <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/60 p-4" onKeyDown={event => {
@@ -111,7 +114,7 @@ export default function VersionNavigation({ children }: { children: React.ReactN
         }
         <p id="version-switch-description" className="mt-4 text-sm text-slate-600">{phase === 'confirm' ? 'You edited fields on this page. Save any changes you need before leaving.' : 'Loading the selected schedule. Review and print actions are unavailable until it is ready.'}</p>
         {error && <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-        {phase === 'confirm' ? <div className="mt-5 flex justify-end gap-3"><button onClick={cancel} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold">Stay on current version</button><button onClick={() => void confirm()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">{error ? 'Retry switch' : 'Switch version'}</button></div> : <div role="status" aria-live="polite" className="mt-5 text-sm font-semibold text-blue-700">{phase === 'opening' ? 'Opening Overview…' : 'Loading schedule evidence…'}{phase === 'loading' && <button onClick={cancel} className="ml-4 rounded-lg border border-slate-300 px-3 py-2 text-slate-700">Cancel switch</button>}</div>}
+        {phase === 'confirm' ? <div className="mt-5 flex justify-end gap-3"><button onClick={cancel} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold">Stay on current version</button><button onClick={() => void confirm()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">{error ? 'Retry switch' : 'Switch version'}</button></div> : <div role="status" aria-live="polite" className="mt-5 text-sm font-semibold text-blue-700">{phase === 'opening' ? 'Opening selected view…' : 'Loading schedule evidence…'}{phase === 'loading' && <button onClick={cancel} className="ml-4 rounded-lg border border-slate-300 px-3 py-2 text-slate-700">Cancel switch</button>}</div>}
       </div>
     </div>}
   </Context.Provider>
@@ -120,14 +123,14 @@ export default function VersionNavigation({ children }: { children: React.ReactN
 // Remount version-specific page state after committing the selection. Do not
 // expose the old page beneath the new version name while routing to Overview.
 export function VersionContent({ children }: { children: React.ReactNode }) {
-  const { opening, revision, finished } = useVersionNavigation()
+  const { opening, revision, finished, targetPath } = useVersionNavigation()
   const pathname = usePathname()
   useEffect(() => {
-    if (!opening || pathname !== '/dashboard') return
+    if (!opening || pathname !== targetPath) return
     let next = 0
     const frame = requestAnimationFrame(() => { next = requestAnimationFrame(finished) })
     return () => { cancelAnimationFrame(frame); cancelAnimationFrame(next) }
-  }, [opening, revision, pathname])
-  if (opening && pathname !== '/dashboard') return <div className="p-6 text-sm text-slate-500">Opening the selected version…</div>
+  }, [opening, revision, pathname, targetPath])
+  if (opening && pathname !== targetPath) return <div className="p-6 text-sm text-slate-500">Opening the selected version…</div>
   return <div key={revision} className="contents">{children}</div>
 }

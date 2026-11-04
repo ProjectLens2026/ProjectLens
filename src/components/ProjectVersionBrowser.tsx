@@ -39,14 +39,14 @@ export default function ProjectVersionBrowser({ projects }: { projects: Project[
     const deleted = v ? !!v.deletedAt : getProjectStatus(p) === 'Deleted'
     const archived = v ? !!v.archivedAt : getProjectStatus(p) === 'Archived'
     const canEdit = v ? permissions.can.deleteVersion : permissions.can.archiveProject
-    return <span className="inline-flex flex-wrap gap-3 ml-3" onClick={e=>e.stopPropagation()} onDoubleClick={e=>e.stopPropagation()}>
+    return <details className="inline-block ml-3" onClick={e=>e.stopPropagation()} onDoubleClick={e=>e.stopPropagation()}><summary className="cursor-pointer list-none border border-slate-200 rounded-lg px-2 py-1 text-slate-600" aria-label={`Actions for ${v?.versionLabel||v?.fileName||p.name}`}>•••</summary><span className="flex flex-wrap gap-3 rounded-lg border border-slate-200 bg-white p-3 mt-2 text-xs">
       {deleted ? (v ? canEdit : permissions.can.restoreProject) && <button onClick={()=>ask(p.id,'restore',v?.id)}>Restore</button> : <>
       {!v && permissions.can.renameProject && <button onClick={()=>ask(p.id,'rename')}>Rename</button>}
       {canEdit && <button onClick={()=>ask(p.id,archived?'unarchive':'archive',v?.id)}>{archived?'Unarchive':'Archive'}</button>}
       {v && canEdit && <button onClick={()=>ask(p.id,'move',v.id)}>Move…</button>}
       {(v ? canEdit : permissions.can.softDeleteProject) && <button className="text-red-700" onClick={()=>ask(p.id,'delete',v?.id)}>Delete</button>}
       </>}
-    </span>
+    </span></details>
   }
   const [expanded, setExpanded] = useState<string[]>([])
   const [selected, setSelected] = useState<{ projectId: string; versionId: string } | null>(null)
@@ -117,6 +117,7 @@ export default function ProjectVersionBrowser({ projects }: { projects: Project[
       <label className="text-xs text-slate-600">To<input type="date" value={to} onChange={e => setTo(e.target.value)} className="block mt-1 border rounded-lg p-2" /></label>
       <label className="text-xs text-slate-600">Schedule type<select value={type} onChange={e => setType(e.target.value)} className="block mt-1 border rounded-lg p-2"><option value="all">All types</option>{Array.from(new Set(activeProjects.flatMap(p => getVisibleVersions(p).map(v => v.scheduleType).filter(Boolean)))).sort().map(t => <option key={t} value={t}>{t}</option>)}</select></label>
       <button onClick={() => setShowColumns(!showColumns)} aria-expanded={showColumns} className="border rounded-lg px-3 py-2 text-sm bg-white">Columns</button>
+      {permissions.can.createProject&&<Link href="/dashboard/upload?mode=new" className="border border-teal-200 rounded-lg px-3 py-2 text-sm text-teal-800 bg-teal-50">+ New project</Link>}
       <button disabled={!selectedVersion || !selectionVisible || navigation.opening} onClick={openSelected} className="rounded-lg bg-blue-600 disabled:bg-slate-300 text-white px-4 py-2 text-sm font-semibold">Open Version →</button>
     </div>
     {showColumns && <div className="flex flex-wrap gap-4 bg-white border p-3 rounded-lg text-sm">{optionalColumns.map(c => <label key={c} className="flex items-center gap-2"><input type="checkbox" checked={columns.includes(c)} onChange={() => toggleColumn(c)} />{c}</label>)}</div>}
@@ -125,7 +126,7 @@ export default function ProjectVersionBrowser({ projects }: { projects: Project[
       <table className="w-full text-sm text-left border-collapse">
         <thead className="bg-slate-100 text-xs text-slate-600"><tr><th className="p-3 min-w-[300px]">Project / Schedule version</th><th className="p-3 whitespace-nowrap" aria-sort={newest ? 'descending' : 'ascending'}><button onClick={() => setNewest(!newest)}>Data Date {newest ? '↓' : '↑'}</button></th>{columns.map(c => <th className="p-3 whitespace-nowrap" key={c}>{c}</th>)}<th className="p-3">Actions</th></tr></thead>
         <tbody>
-          <tr className="bg-slate-900 text-white"><td colSpan={columnCount} className="p-3"><button onClick={() => setCollapsed(!collapsed)} aria-expanded={!collapsed} className="font-semibold">{collapsed ? '▸' : '▾'} {permissions.user?.orgName || permissions.user?.company || 'Enterprise workspace'} · {activeProjects.length} projects</button></td></tr>
+          <tr className="bg-teal-50 text-teal-900"><td colSpan={columnCount} className="p-3"><button onClick={() => setCollapsed(!collapsed)} aria-expanded={!collapsed} className="font-semibold">{collapsed ? '▸' : '▾'} {permissions.user?.orgName || permissions.user?.company || 'Enterprise workspace'} · {activeProjects.length} projects</button></td></tr>
           {!collapsed && rows.map(({ project, versions }) => {
             const isExpanded = expanded.includes(project.id) || filtering || scope !== 'active'
             return <Fragment key={project.id}>
