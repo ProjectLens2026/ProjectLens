@@ -2,6 +2,7 @@
 // (header comment unchanged — see prior version for details)
 
 import type { EvmData } from './evm'
+import { analysisDataDate, versionDataDate } from './sourceScheduleDate'
 import {
   type ScheduleType,
   type DateSnapshot,
@@ -435,7 +436,8 @@ function summarizeAnalysisForCache(analysis: any): any {
     longLeadAtRisk: analysis.longLeadAtRisk ?? 0,
     contractEnd: analysis.contractEnd,
     projectedEnd: analysis.projectedEnd,
-    dataDate: analysis.dataDate,
+    dataDate: analysisDataDate(analysis),
+    sourceDataDate: analysis.traceTasks || analysis.projectSettings || analysis.sourceDataDate !== undefined ? analysisDataDate(analysis) : undefined,
     sourceFormat: analysis.sourceFormat,
     sourceLabel: analysis.sourceLabel,
     fileType: analysis.fileType,
@@ -1039,7 +1041,8 @@ export function loadVersionAnalysis(
     latestVersions[latestVersionIndex] = result.ok && result.analysis
       ? {
           ...latestVersion,
-          analysis: result.analysis,
+          analysis: { ...result.analysis, dataDate: analysisDataDate(result.analysis), sourceDataDate: analysisDataDate(result.analysis) },
+          dataDate: analysisDataDate(result.analysis) || undefined,
           analysisPath: result.path || latestVersion.analysisPath,
           analysisState: 'loaded',
           analysisError: undefined,
@@ -1074,7 +1077,7 @@ export function loadVersionAnalysis(
 }
 
 export function getVersionEffectiveDate(v: ScheduleVersion): string {
-  return v.dataDate || v.analysis?.dataDate || v.uploadedAt
+  return versionDataDate(v)
 }
 
 export function getProjectStatus(project: Project): ProjectStatus {
@@ -1138,8 +1141,7 @@ export function getLatestVersion(project: Project | null): ScheduleVersion | nul
   const versions = getVisibleVersions(project)
   if (versions.length === 0) return null
   return [...versions].sort((a, b) =>
-    new Date(getVersionEffectiveDate(b)).getTime() -
-    new Date(getVersionEffectiveDate(a)).getTime()
+    getVersionEffectiveDate(b).localeCompare(getVersionEffectiveDate(a))
   )[0]
 }
 

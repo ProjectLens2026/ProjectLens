@@ -1,8 +1,9 @@
 import type { ScheduleVersion } from './projectStore'
+import { versionDataDate } from './sourceScheduleDate'
 
 // Schedule dates are calendar dates, not upload timestamps or UTC instants.
 export function scheduleDataDate(v: ScheduleVersion): string {
-  const raw = v.dataDate || v.analysis?.dataDate
+  const raw = versionDataDate(v)
   const match = typeof raw === 'string' ? raw.match(/^(\d{4}-\d{2}-\d{2})/) : null
   if (!match) return ''
   const date = new Date(`${match[1]}T00:00:00Z`)

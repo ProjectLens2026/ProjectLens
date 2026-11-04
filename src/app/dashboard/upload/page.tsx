@@ -345,37 +345,7 @@ export default function UploadPage() {
 
   // v14 — compute the version-label PREVIEW the PM will see saved. Uses the
   // same generator as the actual save path so what they see is what they get.
-  const labelPreview = useMemo<string | null>(() => {
-    if (!scheduleType) return null
-    if (!cd.ntp) return null
-    if (projectMode === 'new') {
-      const pid = newProjectId.trim()
-      if (!pid || validateProjectId(pid)) return null
-      // New project always starts at sequence 0 (baseline). We don't show
-      // rebaseline/update for new projects, but guard anyway.
-      const seq = scheduleType === 'baseline' ? 0 : 1
-      return generateVersionLabel({
-        projectId: pid, ntp: cd.ntp, type: scheduleType, sequenceNumber: seq,
-      })
-    }
-    const project = existingProjects.find(p => p.id === selectedProjectId)
-    if (!project || !project.projectId) return null
-    const labelerVersions = project.versions.map(v => ({
-      id: v.id,
-      scheduleType: v.scheduleType,
-      sequenceNumber: v.sequenceNumber,
-      dataDate: v.dataDate,
-    }))
-    const next = getNextSequenceNumber(labelerVersions, scheduleType)
-    if (next === null) return null
-    return generateVersionLabel({
-      projectId: project.projectId,
-      ntp: project.contractDates?.ntp || cd.ntp,
-      type: scheduleType,
-      sequenceNumber: next,
-      dataDate: cd.manualDataDate || undefined,
-    })
-  }, [scheduleType, projectMode, newProjectId, selectedProjectId, existingProjects, cd.ntp])
+  const labelPreview: string | null = null // Assigned from the source data date after parsing.
 
   // -------------------------------------------------------------------------
   // runAnalysis — validate everything, parse XER, save version with the new
@@ -413,19 +383,7 @@ export default function UploadPage() {
       // path both use the strict version.
       setNewProjectId(trimmed)
     }
-    // Validate contract dates
-    if (!cd.ntp) {
-      setDateError('NTP / Contract Start Date is required')
-      return
-    }
-    if (!cd.originalContractCompletion) {
-      setDateError('Original Contract Completion Date is required')
-      return
-    }
-    if (cd.ntp >= cd.originalContractCompletion) {
-      setDateError('Original Contract Completion must be after NTP')
-      return
-    }
+    // Schedule analysis does not require manually entered contract dates.
     // v14 — Project Name required for new projects (matches the locked-once
     // rule from the spec). Empty falls back to file name if PM somehow gets
     // past this, but we nudge them to enter one.
@@ -488,21 +446,13 @@ export default function UploadPage() {
       // we look up the next sequence number for the chosen schedule type.
       // ---------------------------------------------------------------------
       try {
-        const versionDates: VersionDates = {
-          timeExtensionDays: cd.timeExtensionDays || 0,
-          revisedContractCompletion: cd.revisedContractCompletion || undefined,
-          manualDataDate: cd.manualDataDate || undefined,
-        }
-        const dataDate = cd.manualDataDate || data.analysis?.dataDate || undefined
+        const versionDates: VersionDates = { timeExtensionDays: 0 }
+        const dataDate = data.analysis?.dataDate || undefined
 
-        const projectContractDates: ContractDates = {
-          ntp: cd.ntp,
-          originalContractCompletion: cd.originalContractCompletion,
-          substantialCompletion: cd.substantialCompletion || undefined,
-        }
+        const projectContractDates: ContractDates = {}
 
         if (projectMode === 'existing' && selectedProjectId) {
-          updateProjectContractDates(selectedProjectId, projectContractDates)
+          // Preserve existing setup records; uploads must not rewrite contract dates.
           // Re-read project after the contractDates update so the labeler
           // sees the latest data when computing sequence numbers.
           const updatedProject = loadProjects().find(p => p.id === selectedProjectId)
@@ -521,12 +471,12 @@ export default function UploadPage() {
           }
           const versionLabel = generateVersionLabel({
             projectId: updatedProject.projectId,
-            ntp: updatedProject.contractDates?.ntp || cd.ntp,
+            ntp: dataDate || '',
             type: scheduleType,
             sequenceNumber: nextSeq,
             dataDate,
           })
-          const snapshot = buildDateSnapshot(updatedProject.contractDates || projectContractDates, dataDate)
+          const snapshot = buildDateSnapshot({}, dataDate)
 
           const version: ScheduleVersion = {
             id: 'ver_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
@@ -562,7 +512,7 @@ export default function UploadPage() {
             || 'Untitled Project'
           const versionLabel = generateVersionLabel({
             projectId: pid,
-            ntp: cd.ntp,
+            ntp: dataDate || '',
             type: scheduleType,                          // 'baseline' for new projects
             sequenceNumber: scheduleType === 'baseline' ? 0 : 1,
           })
@@ -763,7 +713,7 @@ export default function UploadPage() {
             <p className="text-slate-500 text-sm mb-5">
               {requestedMode === 'existing'
                 ? 'The selected project is preserved. Choose the schedule type and upload this file as its next version.'
-                : 'Project ID and Name lock once set. Contract dates feed into the dashboard. On future uploads, fields auto-fill — edit only what changed.'}
+                : 'Choose the project and schedule type. Dates are read directly from the uploaded schedule.'}
             </p>
 
             {/* Phase A.2 + B.1 — Trial expired banner (red, hard block).
@@ -1050,89 +1000,8 @@ export default function UploadPage() {
               </div>
             </div>
 
-            {/* CONTRACT DATES */}
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-xs font-bold text-blue-900 uppercase tracking-wider">📅 Contract Dates</div>
-                {selectedProjectHasContractDates && (
-                  <span className="text-[10px] font-semibold text-blue-700 bg-white border border-blue-200 px-2 py-0.5 rounded-full">
-                    Auto-filled from project
-                  </span>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-4 mb-3">
-                <div>
-                  <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">
-                    NTP / Contract Start <span className="text-red-600">*</span>
-                  </label>
-                  <input type="date"
-                    value={cd.ntp}
-                    onChange={e => { setCd(c => ({...c, ntp: e.target.value})); setDateError('') }}
-                    className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">
-                    Original Contract Completion <span className="text-red-600">*</span>
-                  </label>
-                  <input type="date"
-                    value={cd.originalContractCompletion}
-                    onChange={e => updateOriginal(e.target.value)}
-                    className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4 mb-3">
-                <div>
-                  <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">
-                    Time Extension (days)
-                  </label>
-                  <input type="number" min="0" step="1"
-                    value={cd.timeExtensionDays}
-                    onChange={e => updateTimeExt(e.target.value)}
-                    className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
-                  <div className="text-[10px] text-slate-500 mt-1">0 if no time extension granted</div>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">
-                    Revised Contract Completion
-                  </label>
-                  <input type="date"
-                    value={cd.revisedContractCompletion}
-                    onChange={e => setCd(c => ({...c, revisedContractCompletion: e.target.value}))}
-                    className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white font-semibold" />
-                  <div className="text-[10px] text-slate-500 mt-1">
-                    Auto = Original + {cd.timeExtensionDays || 0} days. Override if needed.
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4 mb-3">
-                <div>
-                  <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">
-                    Substantial Completion (optional)
-                  </label>
-                  <input type="date"
-                    value={cd.substantialCompletion}
-                    onChange={e => setCd(c => ({...c, substantialCompletion: e.target.value}))}
-                    className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
-                  <div className="text-[10px] text-slate-500 mt-1">Per contract. Dashboard shows this next to the schedule-detected one.</div>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1">
-                    Data Date for this Version (optional)
-                  </label>
-                  <input type="date"
-                    value={cd.manualDataDate}
-                    onChange={e => setCd(c => ({...c, manualDataDate: e.target.value}))}
-                    className="w-full px-3 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
-                  <div className="text-[10px] text-slate-500 mt-1">Leave blank to use the source schedule’s data/status date.</div>
-                </div>
-              </div>
-              {dateError && (
-                <div className="mt-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 font-semibold">
-                  ⚠ {dateError}
-                </div>
-              )}
-            </div>
-
+            <div className="bg-blue-50 border rounded-xl p-4 mb-5 text-sm">Schedule dates are read from the uploaded file. Contract dates and manual data-date overrides are not required.</div>
+            {dateError && <p role="alert" className="text-red-700 mb-3">{dateError}</p>}
             <div className="flex gap-3 pt-2">
               <button onClick={() => setStep('upload')} className="px-4 py-2.5 border border-slate-200 text-slate-600 rounded-lg text-sm font-semibold hover:border-slate-300">
                 ← Change File

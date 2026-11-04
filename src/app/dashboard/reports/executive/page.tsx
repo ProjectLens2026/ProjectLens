@@ -1,4 +1,5 @@
 'use client'
+import { versionDataDate } from '@/lib/sourceScheduleDate'
 
 import { useEffect, useState } from 'react'
 import { getActiveProject, getActiveVersion, subscribeToProjects, loadVersionAnalysis } from '@/lib/projectStore'
@@ -51,10 +52,10 @@ export default function ExecutiveSummaryReportPage() {
         workCompletePct={workCompletePct(a)}
         criticalFloatDays={criticalFloatDays(a)}
         longLeadAtRisk={Number(a.longLeadAtRisk ?? (a.longLeadItems || []).filter((x: any) => Number(x.floatDays) <= 14 && x.status_code !== 'TK_Complete').length)}
-        ntp={project.contractDates?.ntp || a.projectStartDate}
-        originalCompletion={project.contractDates?.originalContractCompletion || a.contractEnd}
-        revisedCompletion={version.versionDates?.revisedContractCompletion || project.contractDates?.originalContractCompletion || a.contractEnd}
-        dataDate={version.versionDates?.manualDataDate || a.dataDate || version.dataDate}
+        ntp={a.projectStartDate}
+        originalCompletion={undefined}
+        revisedCompletion={undefined}
+        dataDate={versionDataDate(version)}
         projectedEnd={projectedEnd(a)}
         risks={{ critical: riskCounts.critical, high: riskCounts.high, medium: riskCounts.medium }}
         sCurve={[]}

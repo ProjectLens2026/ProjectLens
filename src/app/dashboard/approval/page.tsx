@@ -526,7 +526,8 @@ export default function ApprovalReadinessPage() {
       const selectionChanged = selectionKey !== activeSelectionRef.current
       activeSelectionRef.current = selectionKey
 
-      setProject(p)
+      // Preserve stored setup, but exclude manual criteria from source-only review.
+      setProject(p ? { ...p, contractDates: undefined, controlBasis: undefined } : p)
       setVersion(v)
       const waitingForDetail = v?.analysisState === 'summary' || v?.analysisState === 'loading'
       const basedAnalysis = waitingForDetail ? null : analysisWithProjectBasis(v?.analysis || null, p, v)

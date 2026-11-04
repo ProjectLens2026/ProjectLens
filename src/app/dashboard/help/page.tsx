@@ -3,7 +3,6 @@ import Link from 'next/link'
 import { HELP_FAQS } from '@/lib/helpKnowledge'
 
 const FEATURES = [
-  ['Project Setup', '/dashboard/project-setup', 'Record contract dates, requirements, settings and approved modifications once for the project.'],
   ['Overview', '/dashboard', 'See the selected version’s schedule position, key dates and management concerns.'],
   ['Review Schedule', '/dashboard/approval', 'Review numbered comments, narrative, changes since the prior version and supporting evidence.'],
   ['Full CPM Analysis', '/dashboard/lens', 'Inspect filters, logic trace, sequence problems, missing ties, long-lead items and field reality.'],
@@ -27,7 +26,7 @@ export default function HelpPage() {
       </section>
       <section className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
         <h2 className="text-base font-bold text-slate-900">Start with your project, then review a version</h2>
-        <Step n={1} title="Set the project basis">Record the contract dates and applicable requirements in Project Setup.</Step>
+        <Step n={1} title="Choose your project">Project Setup is temporarily hidden. Schedule dates come from the uploaded file.</Step>
         <Step n={2} title="Upload and select a schedule version">Use XER or Microsoft Project XML. Confirm the project, version type and data date.</Step>
         <Step n={3} title="Review the findings">Choose the review purpose and contractor or owner perspective in Review Schedule. Inspect the numbered comments and CPM evidence.</Step>
         <Step n={4} title="Check and print the report">Verify the narrative, responses and selected supporting evidence before printing the executive or complete review.</Step>

@@ -1,4 +1,5 @@
 'use client'
+import { versionDataDate } from '@/lib/sourceScheduleDate'
 
 // =============================================================================
 // src/app/dashboard/report/page.tsx — Complete Project Report (v2 polish)
@@ -108,16 +109,16 @@ function ReportContent({ project, version, orgName }: { project: Project; versio
   const a: any = analysisWithProjectBasis(version.analysis || {}, project)
 
   // ── Manual dates flow (same as Executive Dashboard) ─────────────────────
-  const manualNtp = project.contractDates?.ntp || undefined
-  const manualOriginal = project.contractDates?.originalContractCompletion || undefined
-  const manualSubst = project.contractDates?.substantialCompletion || undefined
-  const timeExt = version.versionDates?.timeExtensionDays ?? 0
-  const manualRevised = version.versionDates?.revisedContractCompletion || undefined
-  const manualDataDate = version.versionDates?.manualDataDate || undefined
+  const manualNtp = undefined
+  const manualOriginal = undefined
+  const manualSubst = undefined
+  const timeExt = 0
+  const manualRevised = undefined
+  const manualDataDate = undefined
   const revisedComp = manualRevised || (manualOriginal ? addCalendarDays(manualOriginal, timeExt) : undefined)
 
-  const dataDate = manualDataDate || a.dataDate || version.dataDate || version.uploadedAt
-  const ntp = manualNtp || a.projectStartDate || dataDate
+  const dataDate = versionDataDate(version)
+  const ntp = a.projectStartDate
   const contractEnd = manualOriginal || a.contractEnd
   const projectedEnd = a.projectedEnd
   const substantialXER = a.substantialCompletionDate

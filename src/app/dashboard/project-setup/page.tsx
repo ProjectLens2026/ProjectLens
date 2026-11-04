@@ -216,6 +216,9 @@ function calculateAuthorizedPosition(
 }
 
 export default function ProjectControlBasisPage() {
+  return <div className="p-8"><h1 className="text-xl font-bold">Project Setup is temporarily hidden</h1><p className="my-4">Upload and review your schedule without entering setup dates. Existing records are preserved.</p><Link href="/dashboard">Return to Overview</Link></div>
+}
+function PreservedProjectControlBasisPage() {
   const [project, setProject] = useState<Project | null>(null)
   const [section, setSection] = useState<BasisSection>('contract-dates')
   const [dates, setDates] = useState<ContractDates>({})

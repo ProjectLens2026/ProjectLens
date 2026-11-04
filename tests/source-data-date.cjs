@@ -1,0 +1,27 @@
+const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict'),ts=require('typescript')
+const root=path.join(__dirname,'..')
+function compile(file,deps={}){const exports={};vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root,file),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES5}}).outputText,{exports,require:id=>deps[id],Date,Set,Map});return exports}
+const dates=compile('src/lib/sourceScheduleDate.ts')
+const source={projectSettings:{last_recalc_date:'2026-10-26 00:00'},dataDate:'2026-10-01',traceTasks:{}}
+const v={dataDate:'2026-10-01',uploadedAt:'2026-11-03',analysis:source,versionDates:{manualDataDate:'2026-10-01'}}
+assert.equal(dates.versionDataDate(v),'2026-10-26')
+assert.equal(dates.versionDataDate({...v,analysis:{dataDate:'2026-10-01'}}),'')
+assert.equal(dates.versionDataDate({uploadedAt:'2026-11-03'}),'')
+assert.equal(dates.analysisDataDate({projectSettings:{last_recalc_date:''},dataDate:'2026-11-03'}),'')
+assert.equal(dates.sourceDay('2026-02-30'),'')
+const parser=compile('src/lib/xerParser.ts',{'./sourceScheduleDate':dates,'./construction/projectDiscovery':{},'./completionBoundary':{detectFinalCompletionTarget:()=>null}})
+const xer='ERMHDR\t2026-11-03\n%T\tPROJECT\n%F\tproj_id\tproj_short_name\tlast_recalc_date\tplan_end_date\tscd_end_date\n%R\t1\tTest\t2026-10-26 00:00\t2028-01-01\t2028-02-01\n%E'
+assert.equal(parser.parseXER(xer).dataDate,'2026-10-26')
+assert.throws(()=>parser.parseXER(xer.replace('\n%E','\n%R\t2\tOther\t2026-08-01 00:00\t\t\n%E')),/multiple projects/)
+assert.equal(parser.parseXER(xer.replace('2026-10-26 00:00','')).dataDate,'')
+const label=compile('src/lib/versionLabeler.ts')
+assert.equal(label.formatNtpForLabel('2026-10-26'),'20261026')
+const stats=compile('src/lib/scheduleStatistics.ts');assert.equal(stats.sourceDataDate(source),'2026-10-26')
+const basis=compile('src/lib/projectReviewBasis.ts',{'./completionBoundary':{detectFinalCompletionTarget:()=>null}})
+const analyzed=basis.analysisWithProjectBasis(source,{contractDates:{originalContractCompletion:'2020-01-01'},controlBasis:{scheduleRequirements:{profile:'CUSTOM'}}})
+assert.equal(analyzed.reviewBasis.contractDates,undefined);assert.equal(analyzed.reviewBasis.scheduleRequirements,undefined);assert.equal(analyzed.contractDelayAvailable,false)
+const upload=fs.readFileSync(path.join(root,'src/app/dashboard/upload/page.tsx'),'utf8')
+assert.ok(!upload.includes("setDateError('NTP / Contract Start Date is required')"))
+assert.ok(!upload.includes('const dataDate = cd.manualDataDate'))
+assert.ok(!upload.includes('Data Date for this Version (optional)'))
+console.log('PASS: raw P6 data date wins, manual/cache/upload fallback blocked, no timezone shift, empty/invalid dates, multi-project rejection, source-only review basis and optional setup upload')

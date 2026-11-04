@@ -17,7 +17,11 @@ export const scheduleDay = (value: unknown): string => {
   const d = new Date(s + 'T00:00:00Z')
   return Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === s ? s : ''
 }
-export const sourceDataDate = (a: Evidence): string => scheduleDay(a.dataDate || a.data_date || a.projectSettings?.last_recalc_date)
+export const sourceDataDate = (a: Evidence): string => {
+  if(a.projectSettings&&Object.prototype.hasOwnProperty.call(a.projectSettings,'last_recalc_date'))return scheduleDay(a.projectSettings.last_recalc_date)
+  if(Object.prototype.hasOwnProperty.call(a,'sourceDataDate'))return scheduleDay(a.sourceDataDate)
+  return scheduleDay(a.dataDate||a.data_date)
+}
 export function calculateStatistics(a: Evidence = {}, incomplete = false, limits = defaultCheckLimits) {
   const available = !!a.traceTasks && typeof a.traceTasks === 'object'
   const all: Evidence[] = available ? Object.values(a.traceTasks) : []

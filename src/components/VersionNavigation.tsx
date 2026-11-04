@@ -1,4 +1,5 @@
 'use client'
+import { versionDataDate } from '@/lib/sourceScheduleDate'
 
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
@@ -13,7 +14,7 @@ export function useVersionNavigation() {
   return value
 }
 const label = (v: any) => v?.versionLabel || v?.fileName || 'No schedule selected'
-const date = (v: any) => v?.versionDates?.manualDataDate || v?.analysis?.dataDate || v?.dataDate || 'Not reported'
+const date = (v: any) => versionDataDate(v) || 'Not reported'
 
 export default function VersionNavigation({ children }: { children: React.ReactNode }) {
   const router = useRouter()

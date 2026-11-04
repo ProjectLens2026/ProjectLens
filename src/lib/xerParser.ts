@@ -1,5 +1,6 @@
 import { discoverUSProject, type USProjectDiscoveryResult } from './construction/projectDiscovery'
 import { detectFinalCompletionTarget } from './completionBoundary'
+import { sourceDay } from './sourceScheduleDate'
 
 export interface Task {
   task_id: string
@@ -360,6 +361,7 @@ export function parseXER(content: string): ParsedXER {
   const nonWorkPeriods: Record<string, string>[] = []
   let projectName = ''
   let dataDate = ''
+  let projectRows = 0
   let contractEnd = ''
   let administrativeTermDate = ''
   let projectedEnd = ''
@@ -374,11 +376,13 @@ export function parseXER(content: string): ParsedXER {
     } else if (line.startsWith('%R')) {
       const values = line.split('\t').slice(1)
       if (currentTable === 'PROJECT') {
+        projectRows++
+        if(projectRows>1)throw new Error('This XER contains multiple projects. Export one project at a time from P6 so activities and data dates cannot be mixed.')
         const row: Record<string, string> = {}
         currentFields.forEach((f, i) => row[f] = values[i] || '')
         projectSettings = row
         projectName = row.proj_short_name || ''
-        dataDate = row.last_recalc_date || ''
+        dataDate = sourceDay(row.last_recalc_date)
         // PROJECT.plan_end_date is a P6 administrative/planned project term.
         // It is not evidence of the governing contractual completion date.
         administrativeTermDate = row.plan_end_date || ''

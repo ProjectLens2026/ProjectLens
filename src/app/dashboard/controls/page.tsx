@@ -128,9 +128,6 @@ export default function ProjectControlsPage() {
                   These controls continue across every XER version. Schedule versions provide evidence, but risks, procurement, submittals, cost and changes belong to the project.
                 </p>
               </div>
-              <Link href="/dashboard/project-setup" className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">
-                Project Setup
-              </Link>
             </div>
           </section>
 

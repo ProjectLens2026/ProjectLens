@@ -1,4 +1,5 @@
 'use client'
+import { versionDataDate } from '@/lib/sourceScheduleDate'
 
 import { useEffect, useState } from 'react'
 import PhaseProgressStrip from '@/components/PhaseProgressStrip'
@@ -21,13 +22,13 @@ export default function CurrentProjectSummary({ project, version }: { project: a
     }).catch(() => { if (active) setFailed(true) })
     return () => { active = false }
   }, [project?.id, version?.id])
-  const basis = project?.contractDates || {}
-  const original = basis.originalContractCompletion
-  const authorized = phaseDate(basis.currentFinalCompletion || version?.versionDates?.revisedContractCompletion || (original ? addCalendarDays(original, version?.versionDates?.timeExtensionDays ?? 0) : a.contractEnd))
+  const basis: any = {}
+  const original = undefined
+  const authorized = undefined
   const forecast = phaseDate(a.projectedEnd || a.projected_end || a.forecastFinish || a.forecast_finish || a.projectedFinish)
-  const dataDate = version?.versionDates?.manualDataDate || a.dataDate || a.data_date || version?.dataDate
+  const dataDate = versionDataDate(version)
   const difference = authorized && forecast ? Math.round((Date.parse(forecast) - Date.parse(authorized)) / 86400000) : null
-  const position = !basis.ntp || !original ? 'Contract basis incomplete' : difference === null ? 'Forecast unavailable' : difference > 0 ? `${difference} calendar days behind` : difference < 0 ? `${-difference} calendar days ahead` : 'Forecast matches authorized completion'
+  const position = 'XER schedule evidence — contractual compliance not assessed'
   const review = version?.approvalResult
   const comments = register?.projectId === project?.id ? register : null
   const decision = comments?.blocking ? 'NOT READY — OPEN REVIEW COMMENTS' : !review ? 'Not reviewed' : !comments ? 'Review disposition not verified — comment register unavailable' : review.readinessLabel || review.recommendation || review.readinessStatus || 'Review completed'

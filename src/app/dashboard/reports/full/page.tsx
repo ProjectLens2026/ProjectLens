@@ -1,4 +1,5 @@
 'use client'
+import { versionDataDate } from '@/lib/sourceScheduleDate'
 
 import { useEffect, useState } from 'react'
 import { getActiveProject, getActiveVersion, subscribeToProjects, loadVersionAnalysis } from '@/lib/projectStore'
@@ -47,7 +48,7 @@ export default function FullScheduleReviewReportPage() {
       inProgressCount={Number(a.inProgress || 0)}
       notStartedCount={Number(a.notStarted || 0)}
       negativeFloatCount={Number(a.negativeFloat || 0)}
-      dataDate={version.versionDates?.manualDataDate || a.dataDate || version.dataDate}
+      dataDate={versionDataDate(version)}
       criticalDriversCount={critical.length}
       criticalDriversTop={critical.slice(0, 10)}
       longestPathCount={longest.length}
