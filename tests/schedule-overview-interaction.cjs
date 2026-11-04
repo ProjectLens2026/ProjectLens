@@ -8,7 +8,9 @@ function compile(file,deps={}){const exports={};vm.runInNewContext(ts.transpileM
 const stats=compile('src/lib/scheduleStatistics.ts'),dates=compile('src/lib/calendarDate.ts')
 const current={id:'v2',versionLabel:'Update 2',fileName:'current.xer',analysis:{dataDate:'2026-10-17',traceTasks:{a:{task_id:'a',task_code:'A001',task_name:'Excavation',status_code:'TK_NotStart',early_start_date:'2026-10-18',early_end_date:'2026-10-20',act_start_date:'',act_end_date:'',cstr_type:'',cstr_type2:'',clndr_id:'c',remain_drtn_hr_cnt:'24',total_float_hr_cnt:'8'}},traceRelationships:[],outOfSequence:[],calendars:{c:{clndr_name:'Project'}}}}
 const previous={id:'v1',fileName:'previous.xer',dataDate:'2026-10-10',analysis:{...current.analysis,dataDate:'2026-10-10',traceTasks:{a:{...current.analysis.traceTasks.a,early_end_date:'2026-10-15'}}}}
-const Component=compile('src/components/ScheduleOverview.tsx',{'@/lib/projectStore':{loadVersionAnalysis:async id=>id==='v1'?previous:current},'@/lib/scheduleStatistics':stats,'@/lib/calendarDate':dates}).default
+const downloads=[]
+const exportHelpers=compile('src/lib/overviewExport.ts',{'./scheduleStatistics':stats})
+const Component=compile('src/components/ScheduleOverview.tsx',{'@/lib/projectStore':{loadVersionAnalysis:async id=>id==='v1'?previous:current},'@/lib/scheduleStatistics':stats,'@/lib/calendarDate':dates,'@/lib/overviewExport':exportHelpers,'@/lib/overviewXlsx':{downloadOverviewXlsx:(sheets,name)=>downloads.push({sheets,name})}}).default
 const project={id:'p',name:'Sample project',versions:[current,previous]};let tree
 const text=n=>n.children.map(c=>typeof c==='string'?c:text(c)).join('')
 const button=s=>tree.root.findAllByType('button').find(n=>text(n).includes(s))
@@ -33,6 +35,12 @@ assert.ok(text(tree.root).includes('Review recommended'))
 const priorSelect=tree.root.findAllByType('select').find(n=>n.findAllByType('option').some(o=>text(o)==='Select previous submission'))
 await Renderer.act(async()=>priorSelect.props.onChange({target:{value:'v1'}}))
 assert.ok(text(tree.root).includes('Oct')||text(tree.root).includes('10/10/2026'))
+await Renderer.act(async()=>button('Export Entire Overview').props.onClick())
+assert.equal(downloads.length,1);assert.equal(downloads[0].sheets.length,6)
+assert.ok(downloads[0].name.endsWith('_Overview_all.xlsx'))
+await Renderer.act(async()=>button('Export Selected Items').props.onClick())
+assert.equal(downloads.length,2)
+assert.ok(!downloads[1].sheets.find(s=>s.name==='Schedule Statistics').rows.some(r=>r[0]==='Total activities'))
 Renderer.act(()=>tree.unmount())
-console.log('PASS: sections, drilldown, selections, preview, storage, print handler, threshold comments and previous-version loading')
+console.log('PASS: sections, drilldown, selections, preview, storage, print handler, threshold comments, previous-version loading and both Excel export actions')
 })().catch(e=>{console.error(e);process.exitCode=1})
