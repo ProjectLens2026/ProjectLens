@@ -1,168 +1,57 @@
 'use client'
-
-import { useMemo, useState } from 'react'
-import Link from 'next/link'
-import { traceLogic, type TraceDirection, type TraceNode } from '@/lib/traceLogic'
-import type { TraceTask, Relationship } from '@/lib/xerParser'
-
-const COLORS = {
-  ink: '#13202e',
-  blue: '#2563eb',
-  red: '#dc2626',
-  amber: '#f59e0b',
-  green: '#16a34a',
-  slate: '#1f2937',
-}
-
-export default function TraceLogicPanel({ analysis }: { analysis: any }) {
-  const [query, setQuery] = useState('')
-  const [rootId, setRootId] = useState<string | null>(null)
-  const [direction, setDirection] = useState<TraceDirection>('both')
-  const [maxDepth, setMaxDepth] = useState<number>(0)
-
-  const relationships: Relationship[] = analysis?.traceRelationships || []
-  const tasks: Record<string, TraceTask> = analysis?.traceTasks || {}
-  const hasTraceData = relationships.length > 0 && Object.keys(tasks).length > 0
-  const allTasks = useMemo(() => Object.values(tasks), [tasks])
-  const matches = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) {
-      const milestones = allTasks.filter(task => task.task_type === 'TT_Mile' || task.task_type === 'TT_FinMile' || task.task_type === 'TT_StartMile')
-      return milestones.slice(0, 40)
-    }
-    return allTasks
-      .filter(task => (task.task_code || '').toLowerCase().includes(q) || (task.task_name || '').toLowerCase().includes(q))
-      .slice(0, 40)
-  }, [allTasks, query])
-
-  const result = useMemo(() => {
-    if (!rootId || !hasTraceData) return null
-    return traceLogic(rootId, relationships, tasks, { direction, maxDepth })
-  }, [rootId, relationships, tasks, direction, maxDepth, hasTraceData])
-
-  if (!hasTraceData) {
-    return (
-      <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center">
-        <div className="text-3xl mb-2">🧭</div>
-        <div className="text-[14px] font-bold" style={{ color: COLORS.ink }}>Logic Trace needs a fresh schedule analysis</div>
-        <div className="text-[12px] text-slate-500 mt-1 max-w-md mx-auto leading-relaxed mb-4">
-          This saved version does not contain the activity relationship network required for tracing. Re-upload the source schedule to enable predecessor and successor tracing.
-        </div>
-        <Link href="/dashboard/upload" className="inline-block bg-blue-600 hover:bg-blue-700 text-white text-[12px] font-bold px-4 py-2 rounded-lg">Re-upload Schedule</Link>
-      </div>
-    )
-  }
-
-  return (
-    <div>
-      <div className="rounded-xl border border-slate-200 bg-white p-4 mb-4">
-        <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-700 mb-1">Logic Trace</div>
-        <div className="text-[11px] text-slate-500 mb-3">Select an activity to inspect the predecessor chain feeding it and the successor chain it drives.</div>
-        <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search by activity ID or name…" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-[13px] outline-none focus:border-blue-500" />
-
-        <div className="mt-2 max-h-52 overflow-y-auto border border-slate-100 rounded-lg divide-y divide-slate-100">
-          {matches.length === 0 && <div className="px-3 py-3 text-[12px] text-slate-400">No activities match “{query}”.</div>}
-          {matches.map(task => {
-            const selected = task.task_id === rootId
-            const milestone = task.task_type === 'TT_Mile' || task.task_type === 'TT_FinMile' || task.task_type === 'TT_StartMile'
-            return (
-              <button key={task.task_id} onClick={() => setRootId(task.task_id)} className={`w-full text-left px-3 py-2 flex items-center gap-2 text-[12px] hover:bg-blue-50 transition-colors ${selected ? 'bg-blue-50' : ''}`}>
-                {milestone && <span title="Milestone">◆</span>}
-                <span className="font-mono font-bold" style={{ color: COLORS.ink }}>{task.task_code}</span>
-                <span className="text-slate-600 truncate flex-1">{task.task_name}</span>
-                <span className="font-mono text-[10px]" style={{ color: floatColor(task) }}>{fmtFloat(task.total_float_hr_cnt)}</span>
-              </button>
-            )
-          })}
-        </div>
-
-        {rootId && <div className="flex flex-wrap items-center gap-4 mt-3 pt-3 border-t border-slate-100">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Direction</span>
-            <Segmented value={direction} onChange={value => setDirection(value as TraceDirection)} options={[{ v: 'both', l: 'Both' }, { v: 'pred', l: 'Predecessors' }, { v: 'succ', l: 'Successors' }]} />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Levels</span>
-            <Segmented value={String(maxDepth)} onChange={value => setMaxDepth(parseInt(value, 10))} options={[{ v: '1', l: '1' }, { v: '2', l: '2' }, { v: '3', l: '3' }, { v: '0', l: 'All' }]} />
-          </div>
-          <button onClick={() => window.print()} className="ml-auto text-[11px] font-bold px-3 py-1.5 rounded-lg text-white print:hidden" style={{ background: COLORS.ink }}>🖨 Print / Save PDF</button>
-        </div>}
-      </div>
-
-      {!rootId && <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center">
-        <div className="text-2xl mb-2">☝️</div>
-        <div className="text-[13px] font-bold" style={{ color: COLORS.ink }}>Select an activity above to trace its logic</div>
-        <div className="text-[11px] text-slate-500 mt-1">Milestones are listed by default—try tracing the governing completion milestone backward.</div>
-      </div>}
-
-      {result && <div className="rounded-xl border border-slate-200 bg-white p-5">
-        <div className="text-[11px] text-slate-500 mb-4">
-          This logical thread contains <b style={{ color: COLORS.ink }}>{result.predCount + result.succCount + 1}</b> activities ({result.predCount} feeding in, {result.succCount} driven).
-          {result.truncated && <span className="text-amber-600 font-bold"> · Trace capped at 500 nodes per direction—narrow the levels to see less.</span>}
-        </div>
-
-        {(direction === 'both' || direction === 'pred') && <TraceSection title="Predecessors" tag="◀ FEEDS IN" color={COLORS.blue} count={result.predCount}>
-          {result.predecessors.length === 0 ? <Empty msg="No predecessors—this activity has no logic feeding into it." /> : result.predecessors.map((node, index) => <NodeRow key={`${node.task.task_id}-${index}`} node={node} onClick={() => setRootId(node.task.task_id)} />)}
-        </TraceSection>}
-
-        <div className="my-3 rounded-lg border-2 p-3 flex items-center gap-3" style={{ borderColor: COLORS.ink, background: '#f8fafc' }}>
-          <span className="font-mono text-[9px] font-bold text-white px-1.5 py-0.5 rounded uppercase tracking-wider" style={{ background: COLORS.ink }}>Traced</span>
-          <span className="font-mono text-[13px] font-extrabold" style={{ color: COLORS.ink }}>{result.root?.task_code}</span>
-          <span className="text-[12px] text-slate-700 flex-1 truncate">{result.root?.task_name}</span>
-          <span className="font-mono text-[11px] font-bold" style={{ color: result.root ? floatColor(result.root) : COLORS.slate }}>{result.root ? fmtFloat(result.root.total_float_hr_cnt) : ''}</span>
-        </div>
-
-        {(direction === 'both' || direction === 'succ') && <TraceSection title="Successors" tag="DRIVES ▶" color={COLORS.green} count={result.succCount}>
-          {result.successors.length === 0 ? <Empty msg="No successors—nothing in the schedule depends on this activity." /> : result.successors.map((node, index) => <NodeRow key={`${node.task.task_id}-${index}`} node={node} onClick={() => setRootId(node.task.task_id)} />)}
-        </TraceSection>}
-      </div>}
-    </div>
-  )
-}
-
-function TraceSection({ title, tag, color, count, children }: { title: string; tag: string; color: string; count: number; children: React.ReactNode }) {
-  return <div>
-    <div className="flex items-center gap-2 mb-2"><span className="font-mono text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider text-white" style={{ background: color }}>{tag}</span><span className="text-[11px] font-extrabold uppercase tracking-wide" style={{ color: COLORS.ink }}>{title}</span><span className="font-mono text-[10px] text-slate-400">{count}</span></div>
-    <div className="space-y-1">{children}</div>
+import {useMemo,useState} from 'react'
+import {exploreActivity,upstreamPaths} from '@/lib/activityNetwork'
+import {downloadOverviewXlsx,type ExcelSheet} from '@/lib/overviewXlsx'
+const input='border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white'
+const headers=['Activity ID','Name','Type','Status','Early start (source)','Early finish (source)','Float (hours)','Calendar ID','Constraint','Secondary constraint','P6 float path','Path order']
+const row=(t:any)=>[t.task_code||t.task_id,t.task_name||'',t.task_type||'',t.status_code||'',t.early_start_date||'',t.early_end_date||'',t.total_float_hr_cnt??'',t.clndr_id||'',t.cstr_type||'',t.cstr_type2||'',t.float_path||'',t.float_path_order||'']
+export default function TraceLogicPanel({analysis}:{analysis:any}) {
+ const [root,setRoot]=useState(''),[query,setQuery]=useState(''),[type,setType]=useState('all'),[constraint,setConstraint]=useState(''),[page,setPage]=useState(0)
+ const [direction,setDirection]=useState('both'),[depth,setDepth]=useState(0),[mode,setMode]=useState('trace'),[error,setError]=useState('')
+ const tasks:Record<string,any>=analysis?.traceTasks||{},links:any[]=analysis?.traceRelationships||[]
+ const all=useMemo(()=>Object.values(tasks),[tasks])
+ const constraints=useMemo(()=>Array.from(new Set(all.flatMap(t=>[t.cstr_type,t.cstr_type2]).filter(Boolean))).sort(),[all])
+ const matches=useMemo(()=>all.filter(t=>{
+  const start=['TT_Mile','TT_StartMile'].includes(t.task_type),finish=t.task_type==='TT_FinMile',cs=[t.cstr_type,t.cstr_type2].filter(Boolean)
+  return (type==='all'||type==='start'&&start||type==='finish'&&finish||type==='milestones'&&(start||finish))&&(!constraint||constraint==='any'&&cs.length||constraint==='none'&&!cs.length||cs.includes(constraint))&&`${t.task_code} ${t.task_name}`.toLowerCase().includes(query.trim().toLowerCase())
+ }),[all,query,type,constraint])
+ const network=useMemo(()=>exploreActivity(root,tasks,links,direction,depth),[root,tasks,links,direction,depth])
+ const paths=useMemo(()=>mode==='paths'?upstreamPaths(root,tasks,links):null,[mode,root,tasks,links])
+ const sourcePaths=Array.from(new Set(network.tasks.map(t=>t.float_path).filter(p=>p&&Number(p)>0))).sort((a,b)=>Number(a)-Number(b))
+ const name=(id:string)=>tasks[id]?.task_code||`Unresolved: ${id}`
+ function exportTrace(){try{
+  const notes=[`Selected activity: ${name(root)}. Direction: ${direction}. Depth: ${depth||'all'}. Data date: ${analysis?.dataDate||'Not reported'}.`,'Source dates and recorded relationships only; no CPM recalculation or critical ranking. Picker filters do not prune the trace.',`${network.unresolved} relationships have unresolved endpoints.`]
+  const sheets:ExcelSheet[]=[{name:'Activities',headers,rows:network.tasks.map(row),notes},{name:'Relationships',headers:['Predecessor','Successor','Type','Lag (hours)'],rows:network.relationships.map(r=>[name(r.pred_task_id),name(r.task_id),r.pred_type||'',r.lag_hr_cnt??'']),notes}]
+  if(paths)sheets.push({name:'Upstream paths',headers:['Path','Position','Activity ID','Name','Boundary'],rows:paths.paths.flatMap((p,i)=>p.ids.map((id,j)=>[i+1,j+1,name(id),tasks[id]?.task_name||'',p.boundary])),notes:[...notes,`Traversal order, not critical rank. Additional paths omitted: ${paths.truncated?'Yes':'No'}. Maximum 20 paths.`]})
+  downloadOverviewXlsx(sheets,`CPMReview_Trace_${name(root)}.xlsx`)
+ }catch(e){setError(e instanceof Error?e.message:'Export failed')}}
+ if(!analysis?.traceTasks||!Array.isArray(analysis?.traceRelationships))return <div className="p-6 bg-amber-50 rounded-xl">This saved analysis lacks network data. Re-analyze the source XER to enable tracing.</div>
+ return <div className="space-y-5">
+  <div className="bg-slate-900 text-white rounded-xl p-5"><h3 className="text-xl font-bold">Activity & milestone explorer</h3><p className="mt-2 text-sm text-slate-300">Select any XER activity. Follow its recorded logic without assumptions about names or construction methods.</p></div>
+  <div className="grid lg:grid-cols-[320px_minmax(0,1fr)] gap-5">
+   <section className="border rounded-xl bg-slate-50 p-4 space-y-3">
+    <label className="block text-sm font-semibold">Find activity<input className={`${input} w-full mt-2`} value={query} onChange={e=>{setQuery(e.target.value);setPage(0)}} placeholder="Activity ID or name"/></label>
+    <label className="block text-sm">Activity type<select className={`${input} w-full`} value={type} onChange={e=>{setType(e.target.value);setPage(0)}}><option value="all">All activities</option><option value="milestones">All milestones</option><option value="start">Start milestones</option><option value="finish">Finish milestones</option></select></label>
+    <label className="block text-sm">Constraint<select className={`${input} w-full`} value={constraint} onChange={e=>{setConstraint(e.target.value);setPage(0)}}><option value="">All</option><option value="any">Any constraint</option><option value="none">No constraint</option>{constraints.map(c=><option key={c}>{c}</option>)}</select></label>
+    <p className="text-xs text-slate-500">{matches.length} matches. Filters narrow selection, not the traced network.</p>
+    <div className="max-h-[460px] overflow-auto space-y-1">{matches.slice(page*50,page*50+50).map(t=><button key={t.task_id} aria-pressed={root===t.task_id} onClick={()=>setRoot(t.task_id)} className={`w-full text-left rounded-lg p-3 border ${root===t.task_id?'bg-blue-100 border-blue-500':'bg-white border-slate-200 hover:border-blue-300'}`}><span className="block font-semibold text-sm">{t.task_code}</span><span className="block text-sm text-slate-600">{t.task_name}</span></button>)}{!matches.length&&<p>No matching activities.</p>}</div>
+    <div className="flex justify-between text-sm"><button disabled={!page} onClick={()=>setPage(page-1)}>Previous</button><span>{page+1} / {Math.max(1,Math.ceil(matches.length/50))}</span><button disabled={(page+1)*50>=matches.length} onClick={()=>setPage(page+1)}>Next</button></div>
+   </section>
+   <section className="min-w-0 space-y-4">
+    {!tasks[root]?<div className="border border-dashed rounded-xl p-10 text-slate-500">Select an activity or milestone to inspect its network.</div>:<>
+     <div className="border-l-4 border-teal-500 bg-teal-50 p-4 rounded-r-xl"><h4 className="font-bold">{name(root)} · {tasks[root].task_name}</h4><p className="text-sm mt-1">Source total float: {tasks[root].total_float_hr_cnt??'Not reported'} hours · Calendar: {tasks[root].clndr_id||'Not reported'}</p></div>
+     <div className="flex flex-wrap gap-2"><select aria-label="Analysis view" className={input} value={mode} onChange={e=>setMode(e.target.value)}><option value="trace">Logic trace</option><option value="paths">Multiple upstream logic paths</option><option value="source">P6 exported float paths</option></select><select aria-label="Trace direction" className={input} value={direction} onChange={e=>setDirection(e.target.value)}><option value="both">Both directions</option><option value="pred">Backward — predecessors</option><option value="succ">Forward — successors</option></select><select aria-label="Trace depth" className={input} value={depth} onChange={e=>setDepth(Number(e.target.value))}><option value={0}>Full chain</option><option value={1}>Direct relationships</option><option value={2}>Two levels</option><option value={3}>Three levels</option></select><button className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm" onClick={exportTrace}>Export trace (.xlsx)</button></div>
+     <p className="text-sm text-slate-500">Recorded logic, not a recalculated CPM forward/backward pass. Float and lag use source hours. Connected does not mean driving or critical.</p>
+     {error&&<p role="alert" className="text-red-700">{error}</p>}
+     {!!network.unresolved&&<p className="p-3 bg-amber-50 text-sm">{network.unresolved} relationships reach external or unresolved endpoints. Trace coverage is incomplete there.</p>}
+     {paths&&<div className="space-y-3"><p className="text-sm font-semibold">Up to 20 upstream paths, in traversal order—not critical rank. Direction and depth controls apply to the network tables below, not these full upstream paths.</p>{paths.truncated&&<p className="text-amber-700">Additional paths omitted by the safety limit.</p>}{paths.paths.map((p,i)=><details key={i} className="p-3 border rounded-lg"><summary>Path {i+1} · {p.ids.length} entries · {p.boundary}</summary><ol>{p.ids.map((id,j)=><li key={`${id}-${j}`} className="py-1"><button disabled={!tasks[id]} onClick={()=>setRoot(id)} className="text-blue-700 text-left">{name(id)} · {tasks[id]?.task_name||'Endpoint not in XER'}</button></li>)}</ol></details>)}</div>}
+     {mode==='source'&&<div className="border rounded-lg p-4"><h4 className="font-semibold">P6 path assignments within this trace</h4><p className="text-sm text-slate-500">Assignments belong to the source scheduling run; not recalculated for this selected target.</p>{!sourcePaths.length?<p className="mt-2">No source path assignments available. Re-analyze an older saved version to read these fields; paths absent from the XER are not invented.</p>:sourcePaths.map(p=><details key={p} className="mt-3"><summary>Source float path {p}</summary>{network.tasks.filter(t=>t.float_path===p).sort((a,b)=>Number(a.float_path_order)-Number(b.float_path_order)).map(t=><button key={t.task_id} onClick={()=>setRoot(t.task_id)} className="block py-1 text-left text-blue-700">{t.float_path_order||'—'} · {t.task_code} · {t.task_name}</button>)}</details>)}</div>}
+     <h4 className="font-semibold">{network.tasks.length} activities · {network.relationships.length} relationships</h4>
+     {!network.relationships.length&&<p className="p-4 bg-slate-50">No relationships found for this activity.</p>}
+     <div className="overflow-auto max-h-[480px] border rounded-lg"><table className="w-full text-sm"><thead className="sticky top-0 bg-slate-100"><tr>{headers.map(h=><th key={h} className="p-3 whitespace-nowrap text-left">{h}</th>)}</tr></thead><tbody>{network.tasks.map(t=><tr key={t.task_id} className="border-t hover:bg-blue-50">{row(t).map((v,i)=><td key={i} className="p-3 whitespace-nowrap">{i===0?<button onClick={()=>setRoot(t.task_id)} className="font-semibold text-blue-700">{v}</button>:v||'—'}</td>)}</tr>)}</tbody></table></div>
+     <details className="border rounded-lg p-3"><summary>Relationship evidence — including converging branches</summary><div className="overflow-auto max-h-96"><table className="text-sm w-full"><thead><tr>{['Predecessor','Successor','Type','Lag (hours)'].map(h=><th key={h} className="text-left p-2">{h}</th>)}</tr></thead><tbody>{network.relationships.map((r,i)=><tr key={i} className="border-t"><td className="p-2">{name(r.pred_task_id)}</td><td className="p-2">{name(r.task_id)}</td><td className="p-2">{r.pred_type}</td><td className="p-2">{r.lag_hr_cnt??'Not reported'}</td></tr>)}</tbody></table></div></details>
+    </>}
+   </section>
   </div>
-}
-
-function NodeRow({ node, onClick }: { node: TraceNode; onClick: () => void }) {
-  const task = node.task
-  return <button onClick={onClick} className="w-full text-left flex items-center gap-2 py-1.5 px-2 rounded hover:bg-blue-50 transition-colors border-b border-slate-50 last:border-0" title="Click to trace from this activity">
-    <span className="font-mono text-[9px] text-slate-300 w-8 flex-shrink-0 text-right">L{node.depth}</span>
-    <span className="font-mono text-[9px] font-bold px-1 py-0.5 rounded bg-slate-100 flex-shrink-0" style={{ color: COLORS.ink }}>{node.relTypeLabel}{node.lagDays ? (node.lagDays > 0 ? `+${node.lagDays}` : node.lagDays) : ''}</span>
-    <span className="font-mono text-[11px] font-bold flex-shrink-0" style={{ color: COLORS.ink }}>{task.task_code}</span>
-    <span className="text-[11.5px] text-slate-600 truncate flex-1">{task.task_name}</span>
-    <span className="font-mono text-[10px] text-slate-500 flex-shrink-0 hidden sm:inline">{fmtShort(task.early_start_date || task.target_start_date)} → {fmtShort(task.early_end_date || task.target_end_date)}</span>
-    <span className="font-mono text-[10px] font-bold w-10 text-right flex-shrink-0" style={{ color: floatColor(task) }}>{fmtFloat(task.total_float_hr_cnt)}</span>
-  </button>
-}
-
-function Segmented({ value, onChange, options }: { value: string; onChange: (value: string) => void; options: { v: string; l: string }[] }) {
-  return <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">{options.map(option => <button key={option.v} onClick={() => onChange(option.v)} className={`text-[11px] font-semibold px-2.5 py-1 transition-colors ${value === option.v ? 'text-white' : 'text-slate-600 hover:bg-slate-50'}`} style={value === option.v ? { background: COLORS.blue } : undefined}>{option.l}</button>)}</div>
-}
-
-function Empty({ msg }: { msg: string }) {
-  return <div className="text-[11px] text-slate-400 italic px-2 py-2">{msg}</div>
-}
-
-function fmtFloat(hours: string): string {
-  const value = parseFloat(hours || '0')
-  return Number.isNaN(value) ? '—' : `${Math.round(value / 8)}d`
-}
-
-function floatColor(task: TraceTask): string {
-  const days = Math.round(parseFloat(task.total_float_hr_cnt || '0') / 8)
-  if (Number.isNaN(days)) return COLORS.slate
-  return days < 0 ? COLORS.red : days === 0 ? COLORS.amber : COLORS.green
-}
-
-function fmtShort(date?: string): string {
-  if (!date) return '—'
-  const parts = date.slice(0, 10).split('-')
-  if (parts.length !== 3) return '—'
-  const monthIndex = parseInt(parts[1], 10) - 1
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  return monthIndex >= 0 && monthIndex <= 11 ? `${months[monthIndex]} ${parts[2]}` : '—'
+ </div>
 }

@@ -23,10 +23,10 @@ export default function ControlLensAnalysisPage() {
   const [analysis, setAnalysis] = useState<any>(null)
   const [project, setProject] = useState<any>(null)
   const [version, setVersion] = useState<any>(null)
-  const [activeTab, setActiveTab] = useState('schedule-filter')
+  const [activeTab, setActiveTab] = useState('trace')
   const [scheduleFilter, setScheduleFilter] = useState<
-    'cl-summary' | 'cl-critical' | 'cl-longest' | 'critical' | 'lookahead' | 'not-started' | 'finished'
-  >('cl-summary')
+    'paths' | 'cl-summary' | 'cl-critical' | 'cl-longest' | 'critical' | 'lookahead' | 'not-started' | 'finished'
+  >('paths')
   const [logicGapFilter, setLogicGapFilter] = useState<'all' | 'pred' | 'succ' | 'both'>('all')
 
   useEffect(() => {
@@ -36,7 +36,7 @@ export default function ControlLensAnalysisPage() {
 
   useEffect(() => {
     const requestedTab = new URLSearchParams(window.location.search).get('tab')
-    if (requestedTab && ['schedule-filter', 'trace', 'logic', 'noties', 'longlead', 'field'].includes(requestedTab)) {
+    if (requestedTab && ['schedule-filter', 'trace', 'noties', 'longlead', 'field'].includes(requestedTab)) {
       setActiveTab(requestedTab)
     }
   }, [])
@@ -279,8 +279,7 @@ export default function ControlLensAnalysisPage() {
           <div className="tab-bar flex gap-0 border-b border-slate-100 overflow-x-auto no-print">
             {[
               { id: 'schedule-filter', label: 'Schedule Filters (Primavera)', icon: '🔎' },
-              { id: 'trace', label: 'Logic Trace', icon: '🧭' },
-              { id: 'logic', label: 'Sequence Problems', icon: '🔧' },
+              { id: 'trace', label: 'Activity & Milestone Paths', icon: '🧭' },
               { id: 'noties', label: 'No Logic Ties', icon: '⛓️' },
               { id: 'longlead', label: 'Long Lead Items', icon: '📦' },
               { id: 'field', label: 'Field Reality', icon: '👷' },
@@ -300,15 +299,13 @@ export default function ControlLensAnalysisPage() {
                 <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3 mb-6">
                   <div>
                     <h3 className="text-lg font-extrabold text-slate-900">Schedule Analysis</h3>
-                    <p className="text-xs text-slate-500 mt-1">Choose exactly what you want to review. CPM Analysis Summary keeps the decision summary separate from detailed schedule evidence.</p>
+                    <p className="text-xs text-slate-500 mt-1">Inspect submitted activities and relationships. Select any activity or milestone to trace its network.</p>
                   </div>
                   <div className="w-full lg:w-[360px]">
                     <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">Select analysis</label>
                     <select value={scheduleFilter} onChange={e => setScheduleFilter(e.target.value as any)}
                       className="w-full border-2 border-slate-300 rounded-lg bg-white px-3 py-2.5 text-sm font-bold text-slate-900 shadow-sm focus:outline-none focus:border-blue-500">
-                      <option value="cl-summary">CPM Analysis Summary</option>
-                      <option value="cl-critical">CPMr Critical Path</option>
-                      <option value="cl-longest">CPMr Longest Path</option>
+                      <option value="paths">Multiple paths / Logic trace to selected activity</option>
                       <option value="critical">P6 Critical Activities</option>
                       <option value="lookahead">2 Week Lookahead</option>
                       <option value="not-started">Activities Not Started</option>
@@ -317,6 +314,7 @@ export default function ControlLensAnalysisPage() {
                   </div>
                 </div>
 
+                {scheduleFilter === 'paths' && <TraceLogicPanel analysis={analysis} />}
                 {/* P6 CRITICAL ACTIVITIES — submitted schedule truth only */}
                 {scheduleFilter === 'critical' && (
                   <div>

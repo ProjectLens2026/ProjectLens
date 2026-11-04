@@ -1060,6 +1060,8 @@ export function analyzeXER(parsed: ParsedXER): XERAnalysis {
       cstr_date2: t.cstr_date2,
       duration_type: t.duration_type,
       complete_pct_type: t.complete_pct_type,
+      float_path: t.float_path,
+      float_path_order: t.float_path_order,
       // Brick 1 — raw WBS truth (no inference)
       wbs_id: t.wbs_id,
       wbs_name: wnode?.wbs_name,
