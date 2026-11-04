@@ -1,9 +1,12 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { Suspense, useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import ProjectVersionBrowser from '@/components/ProjectVersionBrowser'
+import { useVersionNavigation } from '@/components/VersionNavigation'
+import { usePermissions } from '@/lib/usePermissions'
 import {
-  loadProjects, deleteProject, renameProject, deleteVersion,
+  loadProjects, subscribeToProjects, deleteProject, renameProject, deleteVersion,
   moveVersionToProject,
   updateProjectContractDates,
   setActiveProjectId, setActiveVersionId, getLatestVersion, getVisibleVersions,
@@ -13,6 +16,9 @@ import { analysisWithProjectBasis } from '@/lib/projectReviewBasis'
 
 export default function ProjectsPage() {
   const router = useRouter()
+  const navigation = useVersionNavigation()
+  const permissions = usePermissions()
+  const [managementView, setManagementView] = useState(false)
   const [projects, setProjects] = useState<Project[]>([])
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -29,6 +35,7 @@ export default function ProjectsPage() {
   useEffect(() => {
     migrateLegacyData()
     setProjects(loadProjects())
+    return subscribeToProjects(() => setProjects(loadProjects()))
   }, [])
 
   function refresh() {
@@ -36,9 +43,8 @@ export default function ProjectsPage() {
   }
 
   function openProject(id: string, versionId?: string) {
-    setActiveProjectId(id)
-    if (versionId) setActiveVersionId(versionId)
-    router.push('/dashboard')
+    if (versionId) navigation.request(id, versionId)
+    else { setManagementView(false); router.push(`/dashboard/projects?projectId=${encodeURIComponent(id)}`) }
   }
 
   function handleDelete(id: string) {
@@ -200,6 +206,14 @@ export default function ProjectsPage() {
     return { color: 'text-green-700', bg: 'bg-green-50', border: 'border-green-200', dot: 'bg-green-500' }
   }
 
+  if (!managementView) return <div className="flex flex-col h-full">
+    <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between gap-4">
+      <h1 className="text-lg font-bold text-slate-900">Projects & Schedule Versions</h1>
+      <div className="flex gap-3 items-center"><button onClick={() => setManagementView(true)} className="text-sm text-slate-600 border rounded-lg px-3 py-2">Manage projects</button>{permissions.can.createProject && <Link href="/dashboard/upload?mode=new" className="text-sm rounded-lg bg-blue-600 text-white px-3 py-2">+ New Project</Link>}</div>
+    </header>
+    <Suspense fallback={<div className="p-6 text-slate-500">Loading projects…</div>}><ProjectVersionBrowser projects={projects} /></Suspense>
+  </div>
+
   if (projects.length === 0) {
     return (
       <div className="flex flex-col h-full">
@@ -229,6 +243,7 @@ export default function ProjectsPage() {
   return (
     <div className="flex flex-col h-full">
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0">
+        <button onClick={() => setManagementView(false)} className="text-sm text-blue-600">← Projects & Versions</button>
         <div>
           <span className="font-bold text-slate-900 text-base">Projects</span>
           <span className="text-slate-400 text-sm ml-2">· {projects.length} active project{projects.length > 1 ? 's' : ''}</span>

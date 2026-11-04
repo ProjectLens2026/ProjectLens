@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import clsx from 'clsx'
 import { useVersionNavigation } from '@/components/VersionNavigation'
+import { compareScheduleVersions, scheduleDataDate, browserDate } from '@/lib/versionBrowser'
 import {
   getActiveProject, getActiveVersion, loadProjects,
   setActiveProjectId, setActiveVersionId,
@@ -240,19 +241,7 @@ export default function Sidebar({ user }: SidebarProps) {
     versionNavigation.request(projectId, versionId)
   }
   function openProjectLatest(projectId: string) {
-    const project = projects.find(p => p.id === projectId)
-    if (!project) return
-    const latest = getLatestVersion(project)
-    if (latest) {
-      versionNavigation.request(projectId, latest.id)
-    } else {
-      // Phase 3B — empty shell. No baseline yet. Send to upload page so the
-      // PM can put one in. Dashboard would have nothing to render.
-      setActiveProjectId(projectId)
-      setActiveVersionId(null)
-      refresh()
-      router.push('/dashboard/upload')
-    }
+    router.push(`/dashboard/projects?projectId=${encodeURIComponent(projectId)}`)
   }
   function toggleExpand(projectId: string, e?: React.MouseEvent) {
     if (e) e.stopPropagation()
@@ -490,13 +479,7 @@ export default function Sidebar({ user }: SidebarProps) {
         </div>
       )}
       <div className="px-3 py-2 border-b border-white/5 flex-shrink-0 relative">
-        <input
-          value={searchQuery}
-          onChange={e => setSearchQuery(e.target.value)}
-          placeholder="Search projects or versions"
-          className="w-full bg-white/5 border border-white/10 text-white text-xs placeholder-white/40 pl-7 pr-2 py-1.5 rounded-md outline-none focus:border-blue-500/50"
-        />
-        <span className="absolute left-5 top-1/2 -translate-y-1/2 text-white/40 text-[11px] pointer-events-none">🔍</span>
+        <Link href="/dashboard/projects" className="block rounded-lg bg-blue-600/20 border border-blue-400/30 text-white text-sm font-semibold px-3 py-3">Projects & Versions →</Link>
       </div>
       <div className="flex-1 overflow-y-auto px-2 py-1.5">
         {projects.length === 0 && (
@@ -512,7 +495,7 @@ export default function Sidebar({ user }: SidebarProps) {
             {filteredProjects.length} match{filteredProjects.length !== 1 ? 'es' : ''}
           </div>
         )}
-        {filteredProjects.map(p => {
+        {filteredProjects.filter(p => p.id === activeProject?.id && pathname !== '/dashboard/projects').map(p => {
           const isExpanded = isProjectExpanded(p.id)
           const isActive = activeProject?.id === p.id
           const isEditing = editingProjectId === p.id
@@ -811,13 +794,7 @@ export default function Sidebar({ user }: SidebarProps) {
                     // in the Deleted Items page (Versions tab) until restored
                     // or permanently deleted by Owner/Admin.
                     .filter(v => !v.deletedAt)
-                    .sort((a, b) => {
-                      // v14 — sort newest at top. Prefer dataDate, fall back
-                      // to uploadedAt for versions that don't have one.
-                      const at = new Date(b.dataDate || b.uploadedAt).getTime()
-                      const bt = new Date(a.dataDate || a.uploadedAt).getTime()
-                      return at - bt
-                    })
+                    .sort(compareScheduleVersions)
                     .map(v => {
                       const isActiveVersion = activeVersion?.id === v.id && isActive
                       const isConfirmingVerDelete = confirmDeleteVersionId === v.id
@@ -829,7 +806,7 @@ export default function Sidebar({ user }: SidebarProps) {
                       const isBaseline = v.scheduleType === 'baseline' || v.scheduleType === 'rebaseline'
                       const isVerActionMenuOpen = openActionMenu === `version:${v.id}`
                       const versionLabel = v.versionLabel || v.fileName || 'unnamed'
-                      const dateStr = shortDate(v.dataDate || v.uploadedAt)
+                      const dateStr = scheduleDataDate(v) ? `Data date: ${browserDate(scheduleDataDate(v))}` : 'Data date: Not reported'
                       if (isConfirmingVerDelete) {
                         return (
                           <div key={v.id} className="bg-red-500/15 border border-red-500/40 rounded-md p-1.5 my-0.5">

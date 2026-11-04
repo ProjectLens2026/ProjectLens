@@ -191,11 +191,7 @@ export default function EnterpriseDashboard() {
 // =============================================================================
 function ProjectRow({ row }: { row: ProjectRowData }) {
   const { project, status, condition, healthScore } = row
-  function handleView() {
-    setActiveProjectId(project.id)
-    const latest = getLatestVersion(project)
-    if (latest) setActiveVersionId(latest.id)
-  }
+  const projectVersionsHref = `/dashboard/projects?projectId=${encodeURIComponent(project.id)}`
   const conditionColor =
     condition === 'Recovery Required' ? 'bg-red-500' :
     condition === 'Attention Needed' ? 'bg-amber-500' :
@@ -210,7 +206,7 @@ function ProjectRow({ row }: { row: ProjectRowData }) {
       </td>
       {/* Project name */}
       <td className="py-3 pr-3 min-w-[200px]">
-        <Link href="/dashboard" onClick={handleView} className="text-slate-900 font-semibold hover:text-blue-600">
+        <Link href={projectVersionsHref} className="text-slate-900 font-semibold hover:text-blue-600">
           {project.name}
         </Link>
         <div className="text-[10px] text-slate-500">{condition || '—'} · {healthScore}/100</div>
@@ -287,8 +283,7 @@ function ProjectRow({ row }: { row: ProjectRowData }) {
       {/* View button */}
       <td className="py-3 pr-4 text-right">
         <Link
-          href="/dashboard"
-          onClick={handleView}
+          href={projectVersionsHref}
           className="text-blue-600 hover:text-blue-700 text-xs font-semibold"
         >View →</Link>
       </td>
