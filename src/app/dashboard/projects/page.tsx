@@ -209,7 +209,7 @@ export default function ProjectsPage() {
   if (!managementView) return <div className="flex flex-col h-full">
     <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between gap-4">
       <h1 className="text-lg font-bold text-slate-900">Projects & Schedule Versions</h1>
-      <div className="flex gap-3 items-center"><button onClick={() => setManagementView(true)} className="text-sm text-slate-600 border rounded-lg px-3 py-2">Manage projects</button>{permissions.can.createProject && <Link href="/dashboard/upload?mode=new" className="text-sm rounded-lg bg-blue-600 text-white px-3 py-2">+ New Project</Link>}</div>
+      <div className="flex gap-3 items-center"><button onClick={() => setManagementView(true)} className="text-sm text-slate-600 border rounded-lg px-3 py-2">Manage projects</button></div>
     </header>
     <Suspense fallback={<div className="p-6 text-slate-500">Loading projects…</div>}><ProjectVersionBrowser projects={projects} /></Suspense>
   </div>
@@ -230,10 +230,7 @@ export default function ProjectsPage() {
             </div>
             <div className="text-lg font-bold text-slate-700 mb-2">Welcome to NobelPM</div>
             <div className="text-sm text-slate-500 mb-6">Upload your first schedule to create a project. Every analysis, RFI, and TIA will be saved under it.</div>
-            <Link href="/dashboard/upload?mode=new"
-              className="inline-block bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors">
-              + Create First Project
-            </Link>
+            <Link href="/dashboard/enterprise" className="text-blue-600 text-sm">Go to Enterprise →</Link>
           </div>
         </div>
       </div>
@@ -248,9 +245,7 @@ export default function ProjectsPage() {
           <span className="font-bold text-slate-900 text-base">Projects</span>
           <span className="text-slate-400 text-sm ml-2">· {projects.length} active project{projects.length > 1 ? 's' : ''}</span>
         </div>
-        <Link href="/dashboard/upload?mode=new" className="ml-auto text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition-colors font-semibold">
-          + New Project
-        </Link>
+        <Link href="/dashboard/enterprise" className="text-blue-600 text-sm">Go to Enterprise →</Link>
       </div>
 
       <div className="flex-1 overflow-y-auto p-5 bg-slate-50">
@@ -614,7 +609,7 @@ export default function ProjectsPage() {
                     <div className="grid grid-cols-2 gap-2">
                       <button onClick={() => openProject(p.id)}
                         className="w-full bg-slate-900 text-white text-xs font-semibold py-2 rounded-lg hover:bg-slate-700 transition-colors">
-                        Open Latest Version →
+                        View schedule versions →
                       </button>
                       <Link href={`/dashboard/upload?mode=existing&project=${encodeURIComponent(p.id)}`}
                         className="w-full border border-blue-200 bg-blue-50 text-blue-700 text-xs font-semibold py-2 rounded-lg hover:border-blue-400 hover:bg-blue-100 transition-colors text-center">
@@ -629,14 +624,7 @@ export default function ProjectsPage() {
             )
           })}
 
-          <Link href="/dashboard/upload?mode=new"
-            className="bg-white border-2 border-dashed border-slate-300 rounded-2xl p-5 hover:border-blue-400 hover:bg-blue-50/30 transition-all flex flex-col items-center justify-center min-h-[200px] cursor-pointer">
-            <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-2">
-              <span className="text-2xl">+</span>
-            </div>
-            <div className="text-sm font-bold text-slate-700">Add New Project</div>
-            <div className="text-xs text-slate-400 mt-1">Upload an XER to begin</div>
-          </Link>
+          <Link href="/dashboard/enterprise" className="text-blue-600 text-sm">Go to Enterprise →</Link>
         </div>
       </div>
     </div>

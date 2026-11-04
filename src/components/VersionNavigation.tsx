@@ -22,6 +22,19 @@ export default function VersionNavigation({ children }: { children: React.ReactN
   const [error, setError] = useState('')
   const [revision, setRevision] = useState(0)
   const locked = useRef(false)
+  const edited = useRef(false)
+  const pathname = usePathname()
+  useEffect(() => {
+    edited.current = false
+    const markEdited = (event: Event) => {
+      const target = event.target as HTMLElement
+      if (['/dashboard/projects', '/dashboard/enterprise'].includes(pathname)) return
+      if (target.closest('aside')) return
+      if (target.matches('input:not([type="search"]), textarea, select, [contenteditable="true"]')) edited.current = true
+    }
+    document.addEventListener('input', markEdited)
+    return () => document.removeEventListener('input', markEdited)
+  }, [pathname, revision])
   const generation = useRef(0)
   const dialog = useRef<HTMLDivElement>(null)
   const background = useRef<HTMLDivElement>(null)
@@ -36,8 +49,10 @@ export default function VersionNavigation({ children }: { children: React.ReactN
     const version = project?.versions.find(v => v.id === versionId)
     if (!project || !version) return
     previousFocus.current = document.activeElement as HTMLElement
-    setError(''); setPhase('confirm')
-    setDestination({ projectId, versionId, projectName: project.name, label: label(version), date: date(version), fromLabel: label(current), fromDate: date(current) })
+    const next = { projectId, versionId, projectName: project.name, label: label(version), date: date(version), fromLabel: label(current), fromDate: date(current) }
+    setError(''); setDestination(next)
+    if (edited.current) setPhase('confirm')
+    else void confirm(next)
   }
   function cancel() {
     if (phase === 'opening') return
@@ -46,20 +61,20 @@ export default function VersionNavigation({ children }: { children: React.ReactN
     setDestination(null)
     previousFocus.current?.focus()
   }
-  async function confirm() {
-    if (!destination || locked.current) return
+  async function confirm(target: Destination | null = destination) {
+    if (!target || locked.current) return
     const attempt = ++generation.current
     locked.current = true; setError(''); setPhase('loading')
     const before = getActiveVersion(getActiveProject())
     try {
       // Preload without changing the current selection; retain the old analysis
       // so a failed download leaves the current page usable.
-      const loaded = await loadVersionAnalysis(destination.versionId, { retainWith: before ? [before.id] : [] })
+      const loaded = await loadVersionAnalysis(target.versionId, { retainWith: before ? [before.id] : [] })
       if (attempt !== generation.current) return
       if (!loaded || loaded.analysisState !== 'loaded' || !loaded.analysis) throw new Error('The selected schedule could not be loaded. Your current version is still selected.')
       setPhase('opening')
-      setActiveProjectId(destination.projectId)
-      setActiveVersionId(destination.versionId)
+      setActiveProjectId(target.projectId)
+      setActiveVersionId(target.versionId)
       setRevision(n => n + 1)
       router.push('/dashboard')
     } catch (e) {
@@ -87,14 +102,15 @@ export default function VersionNavigation({ children }: { children: React.ReactN
       }
     }}>
       <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="version-switch-title" aria-describedby="version-switch-description" className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-xl outline-none">
-        <h2 id="version-switch-title" className="text-lg font-bold text-slate-900">{phase === 'confirm' ? 'Switch schedule version?' : 'Switching schedule version…'}</h2>
-        <div className="mt-4 space-y-3 text-sm">
+        <h2 id="version-switch-title" className="text-lg font-bold text-slate-900">{phase === 'confirm' ? 'Leave edited page?' : 'Switching schedule version…'}</h2>
+        {phase === 'confirm' && <div className="mt-4 space-y-3 text-sm">
           <div className="rounded-lg border border-slate-200 p-3"><div className="text-xs font-semibold uppercase text-slate-500">Leaving</div><div className="break-words font-semibold">{destination.fromLabel}</div><div className="text-xs text-slate-500">Data date: {destination.fromDate}</div></div>
           <div className="rounded-lg border border-blue-200 bg-blue-50 p-3"><div className="text-xs font-semibold uppercase text-blue-700">Opening · {destination.projectName}</div><div className="break-words font-semibold text-blue-900">{destination.label}</div><div className="text-xs text-blue-700">Data date: {destination.date}</div></div>
         </div>
-        <p id="version-switch-description" className="mt-4 text-sm text-slate-600">{phase === 'confirm' ? 'You will open this version’s Overview. Save any unsaved edits before switching.' : 'Loading the selected schedule. Review and print actions are unavailable until it is ready.'}</p>
+        }
+        <p id="version-switch-description" className="mt-4 text-sm text-slate-600">{phase === 'confirm' ? 'You edited fields on this page. Save any changes you need before leaving.' : 'Loading the selected schedule. Review and print actions are unavailable until it is ready.'}</p>
         {error && <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-        {phase === 'confirm' ? <div className="mt-5 flex justify-end gap-3"><button onClick={cancel} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold">Stay on current version</button><button onClick={confirm} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">{error ? 'Retry switch' : 'Switch version'}</button></div> : <div role="status" aria-live="polite" className="mt-5 text-sm font-semibold text-blue-700">{phase === 'opening' ? 'Opening Overview…' : 'Loading schedule evidence…'}{phase === 'loading' && <button onClick={cancel} className="ml-4 rounded-lg border border-slate-300 px-3 py-2 text-slate-700">Cancel switch</button>}</div>}
+        {phase === 'confirm' ? <div className="mt-5 flex justify-end gap-3"><button onClick={cancel} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold">Stay on current version</button><button onClick={() => void confirm()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">{error ? 'Retry switch' : 'Switch version'}</button></div> : <div role="status" aria-live="polite" className="mt-5 text-sm font-semibold text-blue-700">{phase === 'opening' ? 'Opening Overview…' : 'Loading schedule evidence…'}{phase === 'loading' && <button onClick={cancel} className="ml-4 rounded-lg border border-slate-300 px-3 py-2 text-slate-700">Cancel switch</button>}</div>}
       </div>
     </div>}
   </Context.Provider>

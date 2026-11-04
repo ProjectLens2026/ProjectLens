@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import clsx from 'clsx'
+import { usePermissions } from '@/lib/usePermissions'
 import {
   loadProjects, getLatestVersion,
   setActiveProjectId, setActiveVersionId,
@@ -29,6 +30,7 @@ import { analysisWithProjectBasis } from '@/lib/projectReviewBasis'
 type SortKey = 'health' | 'daysBehind' | 'workComplete' | 'name' | 'contractEnd'
 type StatusFilter = 'all' | 'active' | 'onhold' | 'completed'
 export default function EnterpriseDashboard() {
+  const permissions = usePermissions()
   const [projects, setProjects] = useState<Project[]>([])
   const [sortKey, setSortKey] = useState<SortKey>('health')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -70,9 +72,9 @@ export default function EnterpriseDashboard() {
           <div className="text-sm text-slate-500 mb-4">
             Upload your first P6 XER to start your portfolio dashboard.
           </div>
-          <Link href="/dashboard/upload" className="inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2 rounded-lg">
+          {permissions.can.createProject && <Link href="/dashboard/upload?mode=new" className="inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2 rounded-lg">
             Upload Schedule
-          </Link>
+          </Link>}
         </div>
       </div>
     )
@@ -85,9 +87,9 @@ export default function EnterpriseDashboard() {
           <span className="font-bold text-slate-900 text-base">Enterprise Dashboard</span>
           <span className="text-slate-400 text-sm ml-2">· Portfolio Overview · {rows.length} project{rows.length !== 1 ? 's' : ''}</span>
         </div>
-        <Link href="/dashboard/upload" className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded-md">
+        {permissions.can.createProject && <Link href="/dashboard/upload?mode=new" className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded-md">
           + New Project
-        </Link>
+        </Link>}
       </div>
       <div className="p-6 max-w-7xl mx-auto w-full space-y-4">
         {/* Portfolio KPIs */}

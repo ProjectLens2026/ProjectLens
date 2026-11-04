@@ -45,7 +45,7 @@ export default function ProjectVersionBrowser({ projects }: { projects: Project[
     setColumns(next)
     if (layoutKey) { try { localStorage.setItem(layoutKey, JSON.stringify(next)) } catch {} }
   }
-  const activeProjects = projects.filter(p => !p.deletedAt && p.status !== 'Archived')
+  const activeProjects = projects.filter(p => !p.deletedAt && p.status !== 'Archived' && (!focusProject || p.id === focusProject))
   const term = query.trim().toLowerCase()
   const filtering = !!(term || from || to || type !== 'all')
   const rows = activeProjects.map(project => {
@@ -77,7 +77,7 @@ export default function ProjectVersionBrowser({ projects }: { projects: Project[
   }
   const columnCount = 3 + columns.length
   return <section className="p-5 space-y-4 bg-slate-50 flex-1 overflow-auto">
-    <div className="text-sm text-slate-600"><Link href="/dashboard/enterprise" className="text-blue-600 hover:underline">Enterprise</Link> / Projects / Schedule versions</div>
+    <div className="text-sm text-slate-600"><Link href="/dashboard/enterprise" className="text-blue-600 hover:underline">Enterprise</Link> / <Link href="/dashboard/projects" className="text-blue-600">Projects</Link> / {focusProject ? activeProjects[0]?.name || 'Project not found' : 'Schedule versions'}</div>
     <div className="flex flex-wrap gap-3 items-end">
       <label className="text-xs text-slate-600 flex-1 min-w-[200px]">Search projects, versions or filenames<input value={query} onChange={e => setQuery(e.target.value)} className="block mt-1 w-full border rounded-lg px-3 py-2 text-sm" placeholder="Search…" /></label>
       <label className="text-xs text-slate-600">Data date from<input type="date" value={from} onChange={e => setFrom(e.target.value)} className="block mt-1 border rounded-lg p-2" /></label>
@@ -87,14 +87,14 @@ export default function ProjectVersionBrowser({ projects }: { projects: Project[
       <button disabled={!selectedVersion || !selectionVisible || navigation.opening} onClick={openSelected} className="rounded-lg bg-blue-600 disabled:bg-slate-300 text-white px-4 py-2 text-sm font-semibold">Open Version →</button>
     </div>
     {showColumns && <div className="flex flex-wrap gap-4 bg-white border p-3 rounded-lg text-sm">{optionalColumns.map(c => <label key={c} className="flex items-center gap-2"><input type="checkbox" checked={columns.includes(c)} onChange={() => toggleColumn(c)} />{c}</label>)}</div>}
-    <p className="text-xs text-slate-500">Expand a project, select a version, then Open Version. Double-click or press Enter on a version to open it. Data dates come from the schedule; missing dates are never replaced by upload dates.</p>
+    <p className="text-xs text-slate-500">Select a version, then Open Version. Double-click or press Enter on a version to open it. Data dates come from the schedule; missing dates are never replaced by upload dates.</p>
     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
       <table className="w-full text-sm text-left border-collapse">
         <thead className="bg-slate-100 text-xs text-slate-600"><tr><th className="p-3 min-w-[300px]">Project / Schedule version</th><th className="p-3 whitespace-nowrap" aria-sort={newest ? 'descending' : 'ascending'}><button onClick={() => setNewest(!newest)}>Data Date {newest ? '↓' : '↑'}</button></th>{columns.map(c => <th className="p-3 whitespace-nowrap" key={c}>{c}</th>)}<th className="p-3">Actions</th></tr></thead>
         <tbody>
           <tr className="bg-slate-900 text-white"><td colSpan={columnCount} className="p-3"><button onClick={() => setCollapsed(!collapsed)} aria-expanded={!collapsed} className="font-semibold">{collapsed ? '▸' : '▾'} {permissions.user?.orgName || permissions.user?.company || 'Enterprise workspace'} · {activeProjects.length} projects</button></td></tr>
           {!collapsed && rows.map(({ project, versions }) => {
-            const isExpanded = expanded.includes(project.id) || filtering
+            const isExpanded = !!focusProject || expanded.includes(project.id) || filtering
             return <Fragment key={project.id}>
               <tr className="bg-blue-50 border-t border-blue-100"><td colSpan={columnCount - 1} className="p-3"><button aria-expanded={isExpanded} onClick={() => setExpanded(ids => ids.includes(project.id) ? ids.filter(id => id !== project.id) : [...ids, project.id])} className="font-semibold text-blue-950 text-left">{isExpanded ? '▾' : '▸'} {project.projectId || project.name}<span className="ml-3 font-normal text-slate-600">{project.name} · {versions.length} versions</span></button></td><td className="p-3 whitespace-nowrap">{permissions.can.uploadSchedule && <Link href={`/dashboard/upload?mode=existing&project=${encodeURIComponent(project.id)}`} className="text-blue-700 text-xs font-semibold">+ Upload Version</Link>}</td></tr>
               {isExpanded && versions.map(v => {
