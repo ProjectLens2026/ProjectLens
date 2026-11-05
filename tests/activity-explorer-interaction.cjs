@@ -5,7 +5,8 @@ const React=require(path.join(tooling,'react')),R=require(path.join(tooling,'rea
 function compile(file,deps={}){const exports={};vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,'..',file),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.ReactJSX}}).outputText,{exports,require:id=>id==='react'?React:id==='react/jsx-runtime'?require(path.join(tooling,id)):deps[id]});return exports}
 let exported
 const network=compile('src/lib/activityNetwork.ts')
-const Panel=compile('src/components/TraceLogicPanel.tsx',{'./ActivityBars':compile('src/components/ActivityBars.tsx',{'@/lib/activityNetwork':network}),'@/lib/activityNetwork':network,'@/lib/overviewXlsx':{downloadOverviewXlsx:s=>exported=s}}).default
+const Bars=compile('src/components/ActivityBars.tsx',{'@/lib/activityNetwork':network,'@/lib/ganttScale':compile('src/lib/ganttScale.ts')})
+const Panel=compile('src/components/TraceLogicPanel.tsx',{'./ActivityBars':Bars,'@/lib/activityNetwork':network,'@/lib/overviewXlsx':{downloadOverviewXlsx:s=>exported=s}}).default
 const t=(id,type)=>({task_id:id,task_code:id,task_name:'Activity '+id,task_type:type})
 let tree;R.act(()=>tree=R.create(React.createElement(Panel,{analysis:{traceTasks:{a:t('a','TT_Mile'),b:t('b','TT_FinMile'),c:t('c','TT_Task')},traceRelationships:[]}})))
 const label=n=>n.children.map(c=>typeof c==='string'?c:label(c)).join('')
@@ -33,5 +34,15 @@ assert.equal(exported[1].rows.length,1)
 assert.ok(!exported[0].rows.some(r=>r[0]==='z'||r[0]==='c'))
 R.act(()=>tree.root.findByProps({'aria-label':'Number of paths'}).props.onChange({target:{value:'2'}}))
 R.act(()=>tree.root.findAllByType('button').find(b=>label(b).includes('Export selected scope')).props.onClick())
+assert.equal(exported[0].rows.length,2)
+R.act(()=>tree.root.findByProps({'aria-label':'Selected path'}).props.onChange({target:{value:'1'}}))
+R.act(()=>tree.root.findAllByType('button').find(b=>label(b).includes('Export selected scope')).props.onClick())
+assert.deepEqual(Array.from(exported[0].rows,r=>r[0]).sort(),['b','c'])
+R.act(()=>tree.root.findAllByType('input').find(n=>n.props.type==='checkbox').props.onChange({target:{checked:true}}))
+R.act(()=>tree.root.findAllByType('button').find(b=>label(b).includes('Export selected scope')).props.onClick())
 assert.equal(exported[0].rows.length,3)
+R.act(()=>tree.root.findByProps({'aria-label':'Gantt timescale'}).props.onChange({target:{value:'month'}}))
+assert.equal(tree.root.findByProps({'aria-label':'Gantt timescale'}).props.value,'month')
+R.act(()=>tree.root.findByProps({'aria-label':'Resize activity column'}).props.onKeyDown({key:'ArrowRight',preventDefault(){}}))
+assert.equal(tree.root.findByProps({'aria-label':'Resize activity column'}).props['aria-valuenow'],360)
 console.log('PASS: selection, milestone filter, path-count controls, float days and milestone-scoped export')
