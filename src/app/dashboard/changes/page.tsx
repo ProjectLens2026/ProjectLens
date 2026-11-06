@@ -121,7 +121,7 @@ export default function VersionComparisonPage() {
 
   return <div className="flex h-full flex-col">
     <header className="flex h-14 flex-shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-6 no-print">
-      <Link href="/dashboard/approval" className="text-xs font-bold text-blue-600 hover:text-blue-800">← Back to Review Schedule</Link>
+      <Link href="/dashboard/controls" className="text-xs font-bold text-blue-600 hover:text-blue-800">← Project Controls</Link>
       <div className="h-6 border-l border-slate-200" />
       <div><span className="text-base font-bold text-slate-900">Version Comparison</span><span className="ml-2 text-sm text-slate-400">· {project.name}</span></div>
       {comparison && <button onClick={() => window.print()} className="ml-auto rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700">🖨 Print / Save PDF</button>}
