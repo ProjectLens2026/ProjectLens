@@ -10,13 +10,20 @@ const current={id:'v2',versionLabel:'Update 2',fileName:'current.xer',analysis:{
 const previous={id:'v1',fileName:'previous.xer',dataDate:'2026-10-10',analysis:{...current.analysis,dataDate:'2026-10-10',traceTasks:{a:{...current.analysis.traceTasks.a,early_end_date:'2026-10-15'}}}}
 const downloads=[]
 const exportHelpers=compile('src/lib/overviewExport.ts',{'./scheduleStatistics':stats})
-const Component=compile('src/components/ScheduleOverview.tsx',{'@/lib/projectStore':{loadVersionAnalysis:async id=>id==='v1'?previous:current},'@/lib/scheduleStatistics':stats,'@/lib/calendarDate':dates,'@/lib/overviewExport':exportHelpers,'@/lib/overviewXlsx':{downloadOverviewXlsx:(sheets,name)=>downloads.push({sheets,name})}}).default
+const icons=new Proxy({}, {get:(_,name)=>props=>React.createElement('svg',{'data-icon':name,...props})})
+const dashboard=compile('src/components/OverviewDashboard.tsx',{'lucide-react':icons,'next/link':{default:({children,...props})=>React.createElement('a',props,children)}})
+const Component=compile('src/components/ScheduleOverview.tsx',{'./OverviewDashboard':dashboard,'@/lib/projectStore':{loadVersionAnalysis:async id=>id==='v1'?previous:current},'@/lib/scheduleStatistics':stats,'@/lib/calendarDate':dates,'@/lib/overviewExport':exportHelpers,'@/lib/overviewXlsx':{downloadOverviewXlsx:(sheets,name)=>downloads.push({sheets,name})}}).default
 const project={id:'p',name:'Sample project',versions:[current,previous]};let tree
 const text=n=>n.children.map(c=>typeof c==='string'?c:text(c)).join('')
 const button=s=>tree.root.findAllByType('button').find(n=>text(n).includes(s))
 ;(async()=>{
 await Renderer.act(async()=>{tree=Renderer.create(React.createElement(Component,{project,version:current}))})
 assert.equal(tree.root.findAllByType('section').length,4)
+assert.ok(text(tree.root).includes('Schedule Overview'))
+assert.equal(tree.root.findByProps({className:'overview-detail-content'}).props.style.display,'none')
+Renderer.act(()=>button('View findings').props.onClick())
+assert.equal(tree.root.findByProps({className:'overview-detail-content'}).props.style.display,'block')
+assert.ok(tree.root.findAllByType('a').some(n=>n.props.href==='/dashboard/controls/progress'))
 assert.ok(!text(tree.root).includes('calendar days ahead'))
 assert.ok(tree.root.findAllByType('article').length>0,'Cards are the default view')
 Renderer.act(()=>button('Schedule statistics').props.onClick())

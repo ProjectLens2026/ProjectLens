@@ -11,13 +11,14 @@ function compile(file){
  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,'../src/components',file),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText,{exports,require:id=>{
  if(id==='react')return React
  if(id==='react/jsx-runtime')return require(path.join(tooling,'react/jsx-runtime'))
+ if(id==='lucide-react')return new Proxy({}, {get:(_,name)=>props=>React.createElement('svg',{'data-icon':name,...props})})
  if(id==='next/link')return {default:({children,...props})=>React.createElement('a',props,children)}
  if(id==='next/navigation')return {usePathname:()=>pathname,useRouter:()=>({push:x=>calls.push(x),replace:()=>{}})}
  if(id==='@/lib/projectStore')return store
  if(id==='@/lib/versionBrowser')return {compareScheduleVersions:()=>0,scheduleDataDate:v=>v.dataDate,browserDate:x=>x}
  if(id==='./VersionNavigation')return {useVersionNavigation:()=>({opening:false,request:(...args)=>calls.push(args)})}
  if(id==='@/lib/supabase/client')return {createClient:()=>({auth:{signOut:async()=>({})}})}
- if(id==='@/lib/usePermissions')return {usePermissions:()=>({isPlatformOwner:false,user:{displayName:'Assigned PM',initials:'AP',orgName:'Company',orgRole:'pm'}}),roleLabel:x=>x}
+ if(id==='@/lib/usePermissions')return {usePermissions:()=>({isPlatformOwner:false,can:{uploadSchedule:false},user:{displayName:'Assigned PM',initials:'AP',orgName:'Company',orgRole:'pm'}}),roleLabel:x=>x}
  throw Error(id)
  }})
  return exports.default
@@ -31,9 +32,11 @@ assert.ok(text(sidebar).includes('Assigned PM'))
 assert.ok(!text(sidebar).includes('Platform administration'))
 assert.ok(!text(sidebar).includes('old.xer'))
 assert.ok(!text(sidebar).includes('Accessible projects'))
-assert.ok(!text(sidebar).includes('first.xer'))
+assert.ok(text(sidebar).includes('first.xer'))
 assert.ok(text(sidebar).includes('IAD174'))
-assert.equal(sidebar.root.findAllByType('button').length,0)
+assert.ok(sidebar.root.findAllByType('button').length>0)
+assert.ok(sidebar.root.findByProps({'aria-label':'Portfolio project tree'}))
+assert.equal(header.root.findAllByType('a').filter(n=>String(n.props.href).includes('/upload')).length,0,'No upload for viewer permissions')
 assert.equal(sidebar.root.findAllByType('a').find(n=>n.props.href.includes('?projectId=')).props.href,'/dashboard/projects?projectId=p1')
 assert.ok(sidebar.root.findAllByType('a').some(n=>n.props.className.includes('workspace-brand')))
 const versionSelect=header.root.findByProps({'aria-label':'Showing schedule version'})
@@ -55,5 +58,5 @@ R.act(()=>{sidebar=R.create(React.createElement(Sidebar,{user}));header=R.create
 assert.equal(sidebar.root.findAllByProps({'aria-label':'Project destinations'}).length,0)
 assert.equal(header.root.findByProps({'aria-label':'Mobile project destinations'}).findAllByType('a').filter(n=>n.props.href==='/dashboard/controls').length,0)
 R.act(()=>{header.unmount();sidebar.unmount()})
-console.log('PASS: no duplicate project tree, named project workspace, scoped version link, guarded version selector, Changes under Controls, logo and no-project state')
+console.log('PASS: expandable authorized project tree, archived versions hidden, scoped links, guarded version selector, upload permission gate, Changes under Controls and no-project state')
 

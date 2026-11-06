@@ -20,6 +20,7 @@ interface ControlArea {
 }
 
 const CONTROL_AREAS: ControlArea[] = [
+  {href:'/dashboard/controls/progress',icon:'↗',title:'Period Progress',description:'Compare planned and achieved activity finishes between schedule submissions.'},
   {
     href: '/dashboard/tia',
     icon: '◷',
