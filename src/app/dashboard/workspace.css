@@ -1,4 +1,7 @@
 .workspace-header > div:first-child { background:#10213b; color:#e5edf8; min-height:72px; }
+.workspace-sidebar { min-height:0; }
+.workspace-sidebar .workspace-brand { min-height:88px; }
+.workspace-sidebar .workspace-brand svg { flex-shrink:0; background:#fff; padding:3px; border-radius:4px; }
 .workspace-header > div:first-child nav a { color:#cbd5e1; }
 .workspace-header > div:first-child nav a[aria-current="page"] { background:#243d61; color:white; }
 .workspace-header > div:first-child > span { color:#a6bad4; border-color:#33465f; }
