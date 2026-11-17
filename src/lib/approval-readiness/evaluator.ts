@@ -22,7 +22,9 @@ import { evaluateGates } from './gates'
 import { buildScheduleQualityFindings } from './qualityRules'
 import { evaluateStandardPractice } from './standardPractice'
 
-const ENGINE_VERSION = '2.1.1'
+import { reviewCommissioning, commissioningFindings } from './commissioning'
+
+const ENGINE_VERSION = '2.2.0'
 
 interface AnalysisInput {
   sourceFormat?: 'PRIMAVERA_XER' | 'MS_PROJECT_XML'
@@ -449,6 +451,10 @@ export function evaluateApprovalReadiness(
     })
   }
 
+  const commissioningChecks = (analysis as any).facilityType === 'DATA_CENTER' || opts.projectType === 'DATA_CENTER'
+    ? reviewCommissioning(analysis) : []
+  findings.push(...commissioningFindings(commissioningChecks))
+
   findings.sort((a, b) =>
     (a.kind === 'RECOMMENDATION' ? 1 : 0) - (b.kind === 'RECOMMENDATION' ? 1 : 0) ||
     (b.criticalGate ? 1 : 0) - (a.criticalGate ? 1 : 0) ||
@@ -484,6 +490,7 @@ export function evaluateApprovalReadiness(
     domains,
     findings,
     standardPractice: standardPractice.profile,
+    commissioningChecks,
     projectUnderstanding: path?.understanding,
     pathReview: path ? {
       criticalPath: toPathStatus(path.criticalPath, 'CPMr Critical Path'),

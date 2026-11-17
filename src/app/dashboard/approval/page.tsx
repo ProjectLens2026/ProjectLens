@@ -19,7 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { discoverUSProject, type USProjectDiscoveryResult, type DiscoveryEvidence } from '@/lib/construction/projectDiscovery'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { getActiveProject, getActiveVersion, loadVersionAnalysis, subscribeToProjects, updateVersionApprovalResult, type ContractMilestone } from '@/lib/projectStore'
+import { getActiveProject, getActiveVersion, loadVersionAnalysis, subscribeToProjects, updateProjectControlBasis, updateVersionApprovalResult, type ContractMilestone } from '@/lib/projectStore'
 import { formatCalendarDate } from '@/lib/calendarDate'
 import { milestoneDisplayName, taskMatchesContractMilestone } from '@/lib/milestoneVocabulary'
 import {
@@ -361,52 +361,19 @@ const ACTION_COPY: Record<string, Pick<ActionGroup, 'title' | 'why' | 'action' |
 }
 
 function buildActionGroups(result: ApprovalReadinessResult): { corrections: ActionGroup[]; clarifications: ActionGroup[] } {
-  const map = new Map<string, ApprovalFinding[]>()
-  for (const f of result.findings.filter(x => approvalKind(x) === 'FINDING')) {
-    // Older persisted/compiled ApprovalFinding definitions do not expose the
-    // optional disposition field yet. Read it as forward-compatible metadata
-    // and retain the existing gate/strength fallback when it is absent.
-    const commentDisposition = (f as ApprovalFinding & {
-      commentDisposition?: 'REQUIRED_CORRECTION' | 'CLARIFICATION'
-    }).commentDisposition
-    const disposition: ActionDisposition = commentDisposition === 'REQUIRED_CORRECTION'
-      ? 'CORRECTION'
-      : commentDisposition === 'CLARIFICATION'
-        ? 'CLARIFICATION'
-        : f.criticalGate || f.ruleStrength === 'REQUIRED'
-          ? 'CORRECTION'
-          : 'CLARIFICATION'
-    const family = actionFamily(f)
-    const key = `${disposition}:${family}`
-    map.set(key, [...(map.get(key) || []), f])
-  }
-
-  const groups = Array.from(map.entries()).map(([key, findings], index): ActionGroup => {
-    const [disposition, family] = key.split(':', 2) as [ActionDisposition, string]
-    const fallback = {
-      title: `Resolve remaining ${findings[0].primaryDomain} schedule-control observations`,
-      why: findings[0].whyItMatters,
-      action: disposition === 'CORRECTION'
-        ? 'Correct the identified schedule condition and rerun the review.'
-        : 'Verify the evidence and provide clarification or correct the schedule where appropriate.',
-      acceptance: 'Each underlying observation is corrected or supported by a documented explanation.',
-    }
-    const copy = ACTION_COPY[family] || fallback
-    const affected = new Set(findings.flatMap(f => f.affectedActivities.map(a => a.id)))
-    return {
-      id: `ACT-${String(index + 1).padStart(2, '0')}`,
-      disposition,
-      ...copy,
-      findings,
-      affectedCount: affected.size,
-      totalDeduction: findings.reduce((sum, f) => sum + f.scoreDeduction, 0),
-    }
-  }).sort((a, b) => b.totalDeduction - a.totalDeduction || b.findings.length - a.findings.length)
-
-  return {
-    corrections: groups.filter(g => g.disposition === 'CORRECTION'),
-    clarifications: groups.filter(g => g.disposition === 'CLARIFICATION'),
-  }
+  const groups: ActionGroup[] = result.findings.map(finding => ({
+    id: reviewFindingSourceKey(finding),
+    disposition: finding.commentDisposition === 'REQUIRED_CORRECTION' || finding.criticalGate || (finding.ruleStrength === 'REQUIRED' && finding.authority === 'PROJECT_REQUIREMENT')
+      ? 'CORRECTION' : 'CLARIFICATION',
+    title: finding.title,
+    why: finding.whatFound,
+    action: finding.reviewerCheck,
+    acceptance: 'Confirm the correction or provide the requested explanation and activity references.',
+    findings: [finding],
+    affectedCount: finding.affectedActivities.length,
+    totalDeduction: finding.scoreDeduction,
+  }))
+  return { corrections: groups.filter(g => g.disposition === 'CORRECTION'), clarifications: groups.filter(g => g.disposition !== 'CORRECTION') }
 }
 
 function legacyFindingSignature(findings: ApprovalFinding[]): string {
@@ -420,7 +387,7 @@ function canonicalFindingSignature(findings: ApprovalFinding[]): string {
 function existingFindingSignatures(comments: ReviewComment[]): Set<string> {
   return new Set(
     comments
-      .map(comment => [...(comment.sourceFindingIds || [])].sort().join('|'))
+      .flatMap(comment => [[...(comment.sourceFindingIds || [])].sort().join('|'), ...(comment.sourceFindingIds || [])])
       .filter(Boolean),
   )
 }
@@ -497,7 +464,6 @@ export default function ApprovalReadinessPage() {
   const [expandedSignalIds, setExpandedSignalIds] = useState<string[]>([])
   const [reportSignalIds, setReportSignalIds] = useState<string[]>([])
   const [reportKind, setReportKind] = useState<null | 'executive' | 'complete'>(null)
-  const [activeTab, setActiveTab] = useState<'comments' | 'recommendations' | 'status' | 'narrative' | 'changes' | 'evidence'>('comments')
   const [reviewData, setReviewData] = useState<ReviewWorkspaceCloudData>({ comments: [], narratives: {} })
   const [reviewDataLoading, setReviewDataLoading] = useState(false)
   const [reviewDataError, setReviewDataError] = useState<string | null>(null)
@@ -561,7 +527,6 @@ export default function ApprovalReadinessPage() {
       if (selectionChanged) {
         setExpandedSignalIds([])
         setReportKind(null)
-        setActiveTab('comments')
         setRunning(false)
       }
       setReady(true)
@@ -597,6 +562,8 @@ export default function ApprovalReadinessPage() {
     async function loadSavedReview() {
       const loaded = await loadScheduleReviewResultFromSupabase(version.id)
       if (!current || !loaded.ok || !loaded.data) return
+      if (loaded.data.result.meta.engineVersion !== '2.2.0') return
+      if ((analysis?.facilityType === 'DATA_CENTER') !== Boolean(loaded.data.result.commissioningChecks?.length)) return
       setResult(loaded.data.result)
       setReviewSnapshot(loaded.data.snapshot || null)
       setMode(loaded.data.mode)
@@ -607,22 +574,11 @@ export default function ApprovalReadinessPage() {
     }
     void loadSavedReview()
     return () => { current = false }
-  }, [version?.id])
-
-  useEffect(() => {
-    if ((activeTab !== 'narrative' && activeTab !== 'changes') || !project || !version) return
-    const versions = [...project.versions]
-      .filter(item => !item.deletedAt)
-      .sort((a, b) => new Date(a.dataDate || a.uploadedAt).getTime() - new Date(b.dataDate || b.uploadedAt).getTime())
-    const currentIndex = versions.findIndex(item => item.id === version.id)
-    const priorVersion = currentIndex > 0 ? versions[currentIndex - 1] : null
-    if (priorVersion?.analysisState === 'summary') {
-      void loadVersionAnalysis(priorVersion.id, { retainWith: [version.id] })
-    }
-  }, [activeTab, project, version])
+  }, [version?.id, analysis?.facilityType])
 
   async function runCheck() {
     if (!analysis) return
+    if (!analysis.facilityType) { setReviewDataError('Select the facility type before running the review.'); return }
     if (reviewPurpose === 'VERSION_COMPARISON') {
       router.push('/dashboard/changes')
       return
@@ -752,132 +708,6 @@ export default function ApprovalReadinessPage() {
     setReviewMutation(false)
   }
 
-  const narrativeForCurrentVersion = useMemo(() => {
-    if (!version?.id) return null
-    const saved = reviewData.narratives[version.id]
-
-    const versions = [...(project?.versions || [])]
-      .filter((item: any) => !item.deletedAt)
-      .sort((a: any, b: any) => new Date(a.dataDate || a.uploadedAt).getTime() - new Date(b.dataDate || b.uploadedAt).getTime())
-    const currentIndex = versions.findIndex((item: any) => item.id === version.id)
-    const priorVersion = currentIndex > 0 ? versions[currentIndex - 1] : null
-    const priorNarrative = priorVersion ? reviewData.narratives[priorVersion.id] : undefined
-    const narrative = saved
-      ? { ...saved, reviewPurpose, sections: saved.sections.map(section => ({ ...section, automatedFacts: [...section.automatedFacts] })) }
-      : createScheduleNarrative(version.id, reviewPurpose, priorNarrative)
-    const currentForecast = analysis?.projectedEnd || analysis?.forecastCompletion || analysis?.contractEnd
-    const priorForecast = priorVersion?.analysis?.projectedEnd || priorVersion?.analysis?.forecastCompletion || priorVersion?.analysis?.contractEnd
-    const summary = summarizeReviewComments(reviewData.comments)
-    const detectedGroups = result ? (() => {
-      const grouped = buildActionGroups(result)
-      const existingSignatures = existingFindingSignatures(reviewData.comments)
-      return [...grouped.corrections, ...grouped.clarifications].filter(group => {
-        const canonical = canonicalFindingSignature(group.findings)
-        const legacy = legacyFindingSignature(group.findings)
-        return canonical && !existingSignatures.has(canonical) && !existingSignatures.has(legacy)
-      })
-    })() : []
-    const openComments = reviewData.comments.filter(comment => !CLOSED_REVIEW_STATUSES.includes(comment.status) && comment.status !== 'DRAFT')
-
-    narrative.sections = narrative.sections.map(section => {
-      if (section.key === 'EXECUTIVE_SUMMARY') return {
-        ...section,
-        automatedFacts: [
-          { id: 'data-date', label: 'Data date', currentValue: shortDate(version.dataDate || analysis?.dataDate), source: 'XER' as const },
-          { id: 'forecast', label: 'Current forecast', currentValue: shortDate(currentForecast), priorValue: shortDate(priorForecast), source: 'XER' as const },
-          { id: 'open-comments', label: 'Open review comments', currentValue: String(summary.open), source: 'COMMENT_REGISTER' as const },
-          { id: 'detected-comments', label: 'Detected proposed comments', currentValue: String(detectedGroups.length), source: 'COMMENT_REGISTER' as const },
-        ],
-      }
-      if (section.key === 'CONTRACT_MILESTONES') return {
-        ...section,
-        automatedFacts: [
-          { id: 'contract-end', label: 'Authorized completion', currentValue: shortDate(project?.contractDates?.originalContractCompletion), source: 'PROJECT_BASIS' as const },
-          { id: 'forecast-end', label: 'Current XER forecast', currentValue: shortDate(currentForecast), priorValue: shortDate(priorForecast), source: 'XER' as const },
-        ],
-      }
-      if (section.key === 'CHANGES_FROM_PRIOR_VERSION') return {
-        ...section,
-        automatedFacts: [
-          { id: 'activity-count', label: 'Activities', currentValue: String(analysis?.totalActivities ?? analysis?.traceTasks?.length ?? '—'), priorValue: priorVersion ? String(priorVersion.analysis?.totalActivities ?? priorVersion.analysis?.traceTasks?.length ?? '—') : undefined, source: 'XER' as const },
-          { id: 'data-date-change', label: 'Data date', currentValue: shortDate(version.dataDate || analysis?.dataDate), priorValue: shortDate(priorVersion?.dataDate || priorVersion?.analysis?.dataDate), source: 'XER' as const },
-        ],
-      }
-      if (section.key === 'OWNER_COMMENT_RESPONSES') return {
-        ...section,
-        automatedFacts: [
-          { id: 'issued-comments', label: 'Comments issued', currentValue: String(summary.issued), source: 'COMMENT_REGISTER' as const },
-          { id: 'blocking-comments', label: 'Approval-blocking comments open', currentValue: String(summary.blocking), source: 'COMMENT_REGISTER' as const },
-          { id: 'closed-comments', label: 'Comments closed', currentValue: String(summary.closed), source: 'COMMENT_REGISTER' as const },
-          ...openComments.map(comment => ({
-            id: `comment-${comment.id}`,
-            label: `${comment.commentNumber} — ${comment.title}`,
-            currentValue: `${reviewStatusLabel(comment.status)}. ${comment.requiredCorrection || comment.concern}`,
-            source: 'COMMENT_REGISTER' as const,
-          })),
-          ...detectedGroups.map((group, index) => ({
-            id: `detected-${group.id}`,
-            label: `Proposed ${String(index + 1).padStart(2, '0')} — ${group.title}`,
-            currentValue: `${group.disposition === 'CORRECTION' ? 'Required correction' : 'Clarification'}: ${group.action}`,
-            source: 'COMMENT_REGISTER' as const,
-          })),
-        ],
-      }
-      return section
-    })
-
-    const technicalSignal = (id: string) => reviewSnapshot?.technicalSignals.find(signal => signal.id === id)?.count || 0
-    const taskValues = Object.values(analysis?.traceTasks || {}) as any[]
-    const submittalCount = taskValues.filter(task => /submittal|shop drawing|rfi|review|approval/i.test(String(task?.task_name || ''))).length
-    const commissioningCount = taskValues.filter(task => /startup|start-up|test|commission|turnover|training|acceptance|tab\b/i.test(String(task?.task_name || ''))).length
-    const complete = Number(analysis?.complete || 0)
-    const inProgress = Number(analysis?.inProgress || 0)
-    const notStarted = Number(analysis?.notStarted || 0)
-    const correctionCount = result ? buildActionGroups(result).corrections.length : 0
-    const clarificationCount = result ? buildActionGroups(result).clarifications.length : 0
-
-    const narrativeDisposition = result ? formalReviewDisposition(result, reviewData.comments) : null
-    const generatedDrafts: Record<string, string> = {
-      EXECUTIVE_SUMMARY: `The selected schedule dated ${shortDate(version.dataDate || analysis?.dataDate)} was reviewed. The current formal disposition is ${narrativeDisposition?.label || 'review pending'} with ${summary.open} open formal review comment${summary.open === 1 ? '' : 's'}. The current forecast is ${shortDate(currentForecast)}. This draft is generated from the submitted schedule, project basis and comment register and should be confirmed by the scheduler or authorized reviewer before issue.`,
-      CONTRACT_MILESTONES: `The authorized completion currently recorded in the Project Control Basis is ${shortDate(project?.contractDates?.originalContractCompletion)}. The selected schedule forecasts completion on ${shortDate(currentForecast)}${priorVersion ? `, compared with ${shortDate(priorForecast)} in the prior version` : ''}. These dates are reported without determining entitlement; approved time modifications remain the contractual source of truth.`,
-      PROGRESS_THIS_PERIOD: `The selected schedule reports ${complete} completed, ${inProgress} in-progress and ${notStarted} not-started activities as of ${shortDate(version.dataDate || analysis?.dataDate)}. The scheduler should confirm the physical-progress basis and add any material accomplishments that are not represented by these schedule statuses.`,
-      NEXT_PERIOD_WORK: `The current schedule status and available near-term activity evidence were identified from the selected schedule. The scheduler should confirm the work planned for the next reporting period, responsible trades, access needs and prerequisite approvals before this narrative is issued.`,
-      CHANGES_FROM_PRIOR_VERSION: priorVersion
-        ? `This version contains ${analysis?.totalActivities ?? taskValues.length} activities and advances the data date to ${shortDate(version.dataDate || analysis?.dataDate)}. The prior version contained ${priorVersion.analysis?.totalActivities ?? Object.keys(priorVersion.analysis?.traceTasks || {}).length} activities with a data date of ${shortDate(priorVersion.dataDate || priorVersion.analysis?.dataDate)}. Forecast completion changed from ${shortDate(priorForecast)} to ${shortDate(currentForecast)}. Review the Changes Since Prior Version tab for the detailed comparison.`
-        : `This is the first available schedule version for comparison. Changes cannot be stated until an earlier version is available.`,
-      LONGEST_AND_CRITICAL_PATHS: `The submitted critical and longest-path evidence was reviewed. ${neutralReportText(result?.pathReview?.criticalPath?.note) || 'Critical-path credibility requires reviewer confirmation.'} ${neutralReportText(result?.pathReview?.longestPath?.note) || 'Longest-path credibility requires reviewer confirmation.'} Detailed activity traces remain in Full CPM Analysis.`,
-      DELAYS_AND_CONSTRAINTS: `The selected schedule shows ${Number(analysis?.delayDays || 0)} calendar days of forecast variance, ${technicalSignal('NEGATIVE_FLOAT')} activities with negative float, ${technicalSignal('OUT_OF_SEQUENCE')} out-of-sequence conditions and ${technicalSignal('OPEN_ENDS')} unauthorized open ends. These are schedule signals; causation, responsibility and entitlement require scheduler/reviewer confirmation.`,
-      PROCUREMENT_AND_LONG_LEAD: `The review identified ${technicalSignal('LONG_LEAD_AT_RISK')} incomplete long-lead item${technicalSignal('LONG_LEAD_AT_RISK') === 1 ? '' : 's'} at risk under the current float threshold. Confirm required-on-site dates, submittal/approval status, fabrication, delivery and downstream installation interfaces before issue.`,
-      SUBMITTALS_RFIS_APPROVALS: `The submitted schedule contains ${submittalCount} activities whose names indicate submittal, shop-drawing, RFI, review or approval work. The schedule evidence is reported without inferring document status. The scheduler should confirm current status, responsible party and any effect on field work.`,
-      TESTING_COMMISSIONING_TURNOVER: `The submitted schedule contains ${commissioningCount} activities whose names indicate startup, testing, commissioning, training, acceptance or turnover work. Confirm that the submitted logic connects system readiness through final completion and that the stated sequence matches the project requirements.`,
-      CORRECTIVE_ACTIONS: `The automated review currently groups the findings into ${correctionCount} correction group${correctionCount === 1 ? '' : 's'} and ${clarificationCount} clarification group${clarificationCount === 1 ? '' : 's'}. The contractor/scheduler should describe the corrective action, responsible party and planned completion date for each issued item.`,
-      OWNER_COMMENT_RESPONSES: `${summary.issued} formal comment${summary.issued === 1 ? ' has' : 's have'} been issued; ${summary.closed} ${summary.closed === 1 ? 'is' : 'are'} closed and ${summary.open} remain open. Responses and claimed corrections should be recorded in the Comment Register so the next schedule version can verify whether each item was corrected, remains open or was reopened.`,
-      ASSUMPTIONS_AND_SUPPORT: `This automated draft is based on the selected schedule, the current Project Control Basis and the formal Comment Register. It does not infer contractual entitlement, causation or responsibility. The scheduler or authorized reviewer should confirm the statements and identify any supporting documents before approving or issuing the narrative.`,
-    }
-
-    narrative.sections = narrative.sections.map(section => {
-      if (narrative.issuedAt) return section
-      if (section.schedulerText.trim() && section.state !== 'AUTO_UPDATED') return section
-      return {
-        ...section,
-        schedulerText: generatedDrafts[section.key] || section.schedulerText,
-        state: 'AUTO_UPDATED',
-        updatedAt: new Date().toISOString(),
-      }
-    })
-    return narrative
-  }, [analysis, project, result, reviewData.comments, reviewData.narratives, reviewPurpose, reviewSnapshot, version])
-
-  async function saveNarrative(narrative: ScheduleNarrative, issue: boolean) {
-    if (!project?.id) return
-    setReviewMutation(true)
-    setReviewDataError(null)
-    const saved = await upsertScheduleNarrativeInSupabase(project.id, narrative, issue)
-    if (!saved.ok) setReviewDataError(saved.error || 'Could not save the schedule narrative.')
-    await reloadReviewWorkspace()
-    setReviewMutation(false)
-  }
-
   if (!ready) return <Shell><div className="p-6 text-sm text-slate-500">Loading…</div></Shell>
 
   if (project && version && (version.analysisState === 'summary' || version.analysisState === 'loading')) {
@@ -958,15 +788,16 @@ export default function ApprovalReadinessPage() {
               <div className="text-[9px] font-extrabold uppercase tracking-wide text-blue-600">Review level</div>
               <div className="text-[11px] font-bold text-blue-900 mt-0.5">Version-specific review</div>
             </div>
-            <button disabled={!result} onClick={() => setReportKind('executive')} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[11px] font-bold text-slate-700 disabled:opacity-40">
-              Executive Report
-            </button>
-            <button disabled={!result} onClick={() => setReportKind('complete')} className="rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-bold text-white disabled:opacity-40">
-              Complete Review / Print
-            </button>
+            <button disabled={!result} onClick={() => setReportKind('complete')} className="rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-bold text-white disabled:opacity-40">Print Comments</button>
           </div>
         </div>
       </div>
+
+      <label className="block rounded-xl border border-slate-200 bg-white p-4 mb-4"><span className="block text-xs font-bold text-slate-600 mb-2">Facility type *</span>
+        <select aria-label="Facility type" value={analysis.facilityType || ''} onChange={e => { updateProjectControlBasis(project.id, { facilityType: e.target.value as NonNullable<import('@/lib/projectStore').ProjectControlBasis['facilityType']> }); setReviewDataError(null) }} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" required>
+          <option value="" disabled>Select facility type</option><option value="DATA_CENTER">Data center</option><option value="HIGH_RISE">High-rise building</option><option value="BUILDING">Building</option><option value="INFRASTRUCTURE">Infrastructure</option><option value="OTHER">Other</option>
+        </select>
+      </label>
 
       {/* Review purpose + perspective + run */}
       <div className="rounded-2xl border border-slate-200 bg-white p-4 mb-4">
@@ -1001,194 +832,15 @@ export default function ApprovalReadinessPage() {
         </div>
       </div>
 
-      <div className="flex gap-1 border-b border-slate-200 mb-4 overflow-x-auto" role="tablist" aria-label="Review workspace">
-        {([
-          ['comments', '1 · Comments'],
-          ['recommendations', '2 · Recommendations'],
-          ['status', '3 · Review Status'],
-          ['narrative', 'Schedule Narrative'],
-          ['changes', 'Changes Since Prior Version'],
-          ['evidence', 'Supporting Evidence'],
-        ] as const).map(([tab, label]) => (
-          <button key={tab} role="tab" aria-selected={activeTab === tab} onClick={() => setActiveTab(tab)}
-            className={`whitespace-nowrap border-b-2 px-4 py-3 text-[12px] font-bold ${activeTab === tab ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {reviewDataError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4 text-[11px] text-red-800">{reviewDataError}</div>}
-      {reviewPersistenceError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4 text-[11px] font-semibold text-red-800">{reviewPersistenceError}</div>}
-
-      {activeTab === 'status' && result && <ReviewDecisionHero
-        result={result}
-        mode={mode}
-        disposition={reviewDisposition!}
-        workflowBlocking={workflowBlocking}
-        blockingComments={reviewCommentSummary.blocking}
-        openComments={reviewCommentSummary.open}
-        correctionGroups={snapshotActionGroups.corrections.length}
-        clarificationGroups={snapshotActionGroups.clarifications.length}
-      />}
-
-      {activeTab === 'status' && result && <ContractMilestoneSnapshot
-        milestones={project.contractDates?.contractMilestones || []}
-        analysis={analysis}
-        profile={project.controlBasis?.scheduleRequirements?.profile}
-      />}
-
-      {activeTab === 'comments' && (
-        <CommentRegisterPanel
-          comments={reviewData.comments}
-          loading={reviewDataLoading}
-          disabled={reviewMutation}
-          result={result}
-          mode={mode}
-          onAdd={() => setShowAddComment(true)}
-          onImport={importControlLensFindings}
-          onStatusChange={changeCommentStatus}
-          onResponse={submitContractorResponse}
-        />
-      )}
-
-      {activeTab === 'recommendations' && result && <RecommendationsPanel recommendations={recommendations} />}
-
-      {activeTab === 'recommendations' && result && <StandardPracticeScorecard result={result} />}
-
-      {activeTab === 'recommendations' && reviewSnapshot && <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden mb-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="p-5">
-            <div className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-blue-600">Unified CPM Review</div>
-            <h2 className="text-[17px] font-extrabold text-slate-900 mt-1">Technical evidence behind the decision</h2>
-            <p className="text-[11px] text-slate-500 mt-1 max-w-[700px]">Select a number to inspect the affected activities. Choose which evidence groups belong in the formal report; the underlying CPM analysis remains unchanged.</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 border-y border-slate-200 bg-slate-50">
-          <button onClick={() => setExpandedSignalIds(expandedSignalIds.length === reviewSnapshot.technicalSignals.length ? [] : reviewSnapshot.technicalSignals.map(signal => signal.id))} className="p-4 text-left border-r border-slate-200 hover:bg-blue-50 transition-colors">
-            <div className="text-[9px] font-bold uppercase tracking-wide text-slate-500">Detected occurrences</div>
-            <div className="text-[24px] font-black text-blue-700 mt-1">{reviewSnapshot.reconciliation.technicalOccurrences}</div>
-            <div className="text-[9px] font-bold text-blue-600 mt-1">Click to {expandedSignalIds.length ? 'collapse' : 'inspect'} evidence →</div>
-          </button>
-          {[
-            ['Signal groups', reviewSnapshot.reconciliation.technicalSignalGroups],
-            ['Action groups', snapshotConcernGroups],
-            ['Blocking findings', reviewSnapshot.reconciliation.blockingFindings],
-          ].map(([label, value]) => <div key={String(label)} className="p-4 border-r border-slate-200 last:border-r-0">
-            <div className="text-[9px] font-bold uppercase tracking-wide text-slate-500">{label}</div>
-            <div className="text-[24px] font-black text-slate-900 mt-1">{value}</div>
-          </div>)}
-        </div>
-
-        {reviewSnapshot.technicalSignals.length > 0 && <div className="divide-y divide-slate-200">
-          {reviewSnapshot.technicalSignals.map(signal => {
-            const isOpen = expandedSignalIds.includes(signal.id)
-            const rows = technicalEvidenceRows(signal, analysis)
-            const included = reportSignalIds.includes(signal.id)
-            return <div key={signal.id}>
-              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 px-4 py-3 items-start hover:bg-slate-50">
-                <button onClick={() => setExpandedSignalIds(current => current.includes(signal.id) ? current.filter(id => id !== signal.id) : [...current, signal.id])} className="h-10 min-w-[58px] rounded-lg bg-blue-50 border border-blue-200 font-mono text-[18px] font-black text-blue-700 hover:bg-blue-100" aria-expanded={isOpen}>
-                  {signal.count}
-                </button>
-                <button onClick={() => setExpandedSignalIds(current => current.includes(signal.id) ? current.filter(id => id !== signal.id) : [...current, signal.id])} className="text-left">
-                  <div className="text-[12px] font-extrabold text-slate-900">{signal.label}</div>
-                  <div className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">{signal.summary}</div>
-                  <div className="text-[9px] font-bold text-blue-600 mt-1">{isOpen ? 'Hide affected activities' : 'View affected activities'} {isOpen ? '▴' : '▾'}</div>
-                </button>
-                <label className="flex items-center gap-2 text-[9px] font-bold text-slate-600 whitespace-nowrap cursor-pointer">
-                  <input type="checkbox" checked={included} onChange={() => setReportSignalIds(current => current.includes(signal.id) ? current.filter(id => id !== signal.id) : [...current, signal.id])} />
-                  Include in report
-                </label>
-              </div>
-              {isOpen && <div className="bg-slate-50 border-t border-slate-100 px-4 py-3">
-                <div className="flex items-center justify-between gap-3 mb-2">
-                  <div className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500">Affected schedule evidence</div>
-                  <Link href={`/dashboard/lens?tab=${cpmTabForSignal(signal)}`} className="text-[10px] font-bold text-blue-600">Open this area in Full CPM →</Link>
-                </div>
-                {rows.length ? <div className="max-h-72 overflow-y-auto rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
-                  {rows.map(row => <div key={row.id} className="grid grid-cols-[120px_minmax(0,1fr)] gap-3 px-3 py-2 text-[10px]">
-                    <span className="font-mono font-bold text-slate-900">{row.code}</span>
-                    <span className="font-semibold text-slate-700">{row.name}</span>
-                  </div>)}
-                </div> : <div className="rounded-lg border border-dashed border-slate-300 bg-white p-3 text-[10px] text-slate-500">The saved analysis contains the aggregate count, but not activity-level records for this signal. Open Full CPM Analysis for the source view.</div>}
-              </div>}
-            </div>
-          })}
-        </div>}
-
-        {!reviewSnapshot.decisionIntegrity.internallyConsistent && <div role="alert" className="m-4 rounded-lg border border-red-200 bg-red-50 p-3 text-[11px] font-semibold text-red-800">{reviewSnapshot.decisionIntegrity.explanation}</div>}
-      </section>}
-
-      {activeTab === 'status' && !result && !running && (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 mb-4 text-center">
-          <div className="text-[13px] font-bold text-slate-900">Review status is not available yet</div>
-          <div className="text-[11px] text-slate-500 mt-1">Run the schedule review, issue the applicable numbered comments, and then confirm the formal review disposition.</div>
-          <button type="button" onClick={() => setActiveTab('comments')} className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-[11px] font-bold text-white">Go to Comments</button>
-        </div>
-      )}
-
-      {activeTab === 'recommendations' && !result && !running && (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 mb-4 text-center">
-          <div className="text-[13px] font-bold text-slate-900">Recommendations will appear after the schedule review</div>
-          <div className="text-[11px] text-slate-500 mt-1">Recommendations are review guidance. They do not become contractual requirements unless adopted in the Project Control Basis or issued as a formal comment.</div>
-        </div>
-      )}
-
-      {activeTab === 'comments' && result && (
-        <div className="flex justify-end mb-4">
-          <button type="button" onClick={() => setActiveTab('recommendations')} className="rounded-lg bg-blue-600 px-4 py-2.5 text-[11px] font-bold text-white hover:bg-blue-700">Continue to Recommendations →</button>
-        </div>
-      )}
-
-      {activeTab === 'recommendations' && result && (
-        <div className="flex flex-wrap justify-between gap-2 mb-4">
-          <button type="button" onClick={() => setActiveTab('comments')} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-[11px] font-bold text-slate-700">← Back to Comments</button>
-          <button type="button" onClick={() => setActiveTab('status')} className="rounded-lg bg-slate-900 px-4 py-2.5 text-[11px] font-bold text-white">Continue to Review Status →</button>
-        </div>
-      )}
-
-      {activeTab === 'status' && result && (
-        <div className="flex justify-start mb-4">
-          <button type="button" onClick={() => setActiveTab('recommendations')} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-[11px] font-bold text-slate-700">← Back to Recommendations</button>
-        </div>
-      )}
-
-      {activeTab === 'evidence' && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 mb-4">
-        <div className="text-xs text-slate-600">A concise index to project discovery and detailed CPM trace evidence. Actions and decisions remain in the Comment Register.</div>
-        <div className="flex gap-2">
-          <button disabled={!result} onClick={() => setReportKind('complete')} className="text-[11px] font-bold px-3 py-2 rounded-lg border border-slate-200 disabled:opacity-40">Evidence Summary PDF</button>
-        </div>
-      </div>}
-      {activeTab === 'evidence' && <ProjectDiscoveryPanel discovery={discovery} />}
-
-      {activeTab === 'comments' && !result && !running && (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-4 mb-4 text-center">
-          <div className="text-[13px] font-bold" style={{ color: COLORS.ink }}>Run the schedule review to generate CPM findings</div>
-          <div className="text-[11px] text-slate-500 mt-1">Reviewer-added comments can still be entered below before the automated review is run.</div>
-        </div>
-      )}
-
-      {activeTab === 'comments' && running && !result && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-[13px] text-slate-500">
-          Running check…
-        </div>
-      )}
-
-      {activeTab === 'narrative' && narrativeForCurrentVersion && (
-        <ScheduleNarrativePanel
-          key={`${narrativeForCurrentVersion.versionId}-${narrativeForCurrentVersion.updatedAt}`}
-          narrative={narrativeForCurrentVersion}
-          projectName={project?.name || 'Project'}
-          versionLabel={version?.versionLabel || version?.fileName || 'Schedule version'}
-          sourceFileName={version?.fileName || ''}
-          disabled={reviewMutation}
-          onSave={saveNarrative}
-        />
-      )}
-
-      {activeTab === 'changes' && (
-        <VersionChangesPanel project={project} version={version} />
-      )}
+      {reviewDataError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4 text-sm text-red-800">{reviewDataError}</div>}
+      {reviewPersistenceError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4 text-sm text-red-800">{reviewPersistenceError}</div>}
+      <CommentRegisterPanel
+        key={`${project.id}:${version?.id || ''}`}
+        comments={reviewData.comments} loading={reviewDataLoading} disabled={reviewMutation}
+        result={result} mode={mode} onAdd={() => setShowAddComment(true)}
+        onImport={importControlLensFindings} onStatusChange={changeCommentStatus} onResponse={submitContractorResponse}
+      />
+      {!result && <p className="text-sm text-slate-500">{running ? 'Running review…' : 'Run the review to generate proposed comments.'}</p>}
 
       {showAddComment && version?.id && (
         <AddReviewItemModal
@@ -1199,50 +851,6 @@ export default function ApprovalReadinessPage() {
         />
       )}
 
-      {result && (
-        <>
-          {activeTab === 'evidence' && <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 mb-4 text-[11px] text-slate-600 leading-relaxed">
-            <b className="text-slate-800">Technical evidence index.</b> Discovery describes the submitted schedule and helps organize review; it does not establish a jurisdiction, compliance or approval. Formal actions remain in the Comment Register and detailed schedule evidence remains in Full CPM Analysis.
-          </div>}
-
-          {/* Path credibility is now a first-class approval question. */}
-          {activeTab === 'evidence' && result.pathReview && (
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
-              <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-700 mb-1">Control Path Credibility</div>
-              <div className="text-[11px] text-slate-500 mb-3">This review evaluates whether the submitted schedule represents the work that should actually control completion. It is an engineering schedule review—not a silent CPM recalculation.</div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {[result.pathReview.criticalPath, result.pathReview.longestPath].filter(Boolean).map((p: any) => {
-                  const c = p.status === 'CREDIBLE' ? COLORS.green : p.status === 'REVIEW_REQUIRED' ? COLORS.red : COLORS.amber
-                  return (
-                    <div key={p.label} className="rounded-xl border p-4" style={{ borderColor: `${c}55`, background: `${c}08` }}>
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-[14px] font-extrabold" style={{ color: COLORS.ink }}>{p.label}</div>
-                        <span className="text-[9px] font-extrabold uppercase tracking-wide px-2 py-1 rounded" style={{ background: `${c}18`, color: c }}>{p.status.replace('_', ' ')}</span>
-                      </div>
-                      <div className="text-[11px] text-slate-600 leading-relaxed mt-2">{p.note}</div>
-                      <div className="text-[9px] text-slate-400 mt-2">{p.activityCount} submitted activities in the CPM review chain</div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'evidence' && <div className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
-            <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-700">Evidence locations</div>
-            <p className="text-[11px] text-slate-500 mt-1 mb-3">Supporting Evidence is an index only. Formal actions remain in the Comment Register; detailed CPM activity and relationship evidence remains in Full CPM Analysis.</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Link href="/dashboard/lens" className="rounded-xl border border-blue-200 bg-blue-50 p-3 hover:border-blue-400"><div className="text-[12px] font-extrabold text-blue-800">Full CPM Analysis</div><div className="text-[10px] text-slate-600 mt-1">Critical paths, logic, float, constraints and activity evidence.</div></Link>
-              <button type="button" onClick={() => setActiveTab('changes')} className="text-left rounded-xl border border-slate-200 bg-slate-50 p-3 hover:border-blue-400"><div className="text-[12px] font-extrabold text-slate-800">Version Changes</div><div className="text-[10px] text-slate-600 mt-1">Compare the selected schedule with its prior project version.</div></button>
-            </div>
-          </div>}
-
-          <div className="text-[10px] text-slate-400 mt-3 leading-relaxed">
-            Score is provisional pending calibration. The review detects, traces, explains, scores and triggers professional review —
-            the scheduler makes corrections; the authorized reviewer makes the final approval decision.
-          </div>
-        </>
-      )}
     </Shell>
   )
 }
@@ -1319,27 +927,16 @@ function CommentRegisterPanel({
     <section id="review-comment-register" className="rounded-2xl border border-slate-200 bg-white p-5 mb-4">
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
-          <h2 className="text-[15px] font-extrabold text-slate-900">Review Comment Register</h2>
-          <p className="text-[11px] text-slate-500 mt-1">Permanent numbers carry across every submission. Only the authorized reviewer closes an issued comment.</p>
+          <h2 className="text-[15px] font-extrabold text-slate-900">Comments</h2>
+          <p className="text-[11px] text-slate-500 mt-1">Review each observation and requested action. Proposed comments are not issued until confirmed by the reviewer.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {mode === 'REVIEWER' && <button disabled={disabled} onClick={onAdd} className="rounded-lg bg-blue-600 px-3 py-2 text-[11px] font-bold text-white disabled:opacity-50">+ Add Review Item</button>}
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-2 mb-4">
-        {[
-          ['Detected drafts', unissuedCount, 'text-blue-700'],
-          ['Issued', summary.issued, 'text-slate-900'],
-          ['Closed', summary.closed, 'text-green-700'],
-          ['Pending verification', summary.pendingVerification, 'text-emerald-700'],
-          ['Not corrected', summary.notCorrected, 'text-red-700'],
-          ['Blocking approval', summary.blocking, 'text-red-700'],
-        ].map(([label, value, color]) => <div key={String(label)} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <div className="text-[9px] font-bold uppercase tracking-wide text-slate-500">{label}</div>
-          <div className={`text-[20px] font-black mt-1 ${color}`}>{value}</div>
-        </div>)}
-      </div>
+      {!!result?.commissioningChecks?.length && <p className="mb-3 text-xs text-slate-500">{result.commissioningChecks.length} commissioning checks across {new Set(result.commissioningChecks.map(c => c.phase)).size} phase groups. Names and links are checked; field completion is not assessed.</p>}
+      <p className="text-xs text-slate-500 mb-4">{unissuedCount} proposed · {summary.open} open · {summary.closed} closed</p>
 
       <div className="flex items-center justify-between gap-3 mb-2">
         <div className="text-[12px] font-bold text-slate-800">{filter === 'open' ? `${summary.open + summary.drafts} active items` : `${comments.length} total items`}</div>
@@ -1355,10 +952,15 @@ function CommentRegisterPanel({
           {mode === 'REVIEWER' && <button disabled={disabled} onClick={onImport} className="rounded-md bg-blue-600 px-3 py-2 text-[10px] font-bold text-white disabled:opacity-50">Issue all {proposedGroups.length} comments</button>}
         </div>
         <div className="space-y-1.5">
-          {proposedGroups.map((group, index) => <details key={group.id} className="rounded-md border border-blue-100 bg-white px-3 py-2">
-            <summary className="cursor-pointer text-[11px] font-bold text-slate-800"><span className="font-mono text-blue-600 mr-2">PROPOSED-{String(index + 1).padStart(2, '0')}</span>{group.title}</summary>
-            <div className="grid md:grid-cols-2 gap-3 mt-2 border-t border-slate-100 pt-2 text-[10px] text-slate-600"><div><b className="text-slate-800">Why:</b> {group.why}</div><div><b className="text-slate-800">Required response:</b> {group.action}</div></div>
-          </details>)}
+          {proposedGroups.map((group, index) => <article key={group.id} className="rounded-lg border border-slate-200 bg-white p-4">
+            <h3 className="text-sm font-bold text-slate-900">{index + 1}. {group.title}</h3>
+            <p className={`mt-1 text-xs font-semibold ${group.disposition === 'CORRECTION' ? 'text-red-700' : 'text-amber-700'}`}>{group.disposition === 'CORRECTION' ? 'Required correction' : group.findings[0].kind === 'RECOMMENDATION' ? 'Recommendation' : 'Clarification required'}</p>
+            <p className="mt-3 text-sm leading-relaxed text-slate-700">{group.why}</p>
+            <p className="mt-2 text-sm leading-relaxed text-slate-700"><b>{group.disposition === 'CORRECTION' ? 'Required correction:' : 'Action:'}</b> {group.action}</p>
+            {group.findings[0].affectedActivities.length > 0 && <p className="mt-3 text-xs text-slate-500"><b>Activities:</b> {group.findings[0].affectedActivities.map(activity => activity.code || activity.id).join(', ')}</p>}
+            {group.disposition === 'CORRECTION' && <p className="mt-2 text-xs text-slate-500"><b>Basis:</b> {group.findings[0].referenceRequirement}</p>}
+            <p className="mt-3 text-xs text-slate-500">Status: Proposed · Not issued</p>
+          </article>)}
         </div>
       </div>}
 
@@ -1384,6 +986,7 @@ function CommentRegisterPanel({
                 <span className="text-slate-400">{isOpen ? '⌃' : '⌄'}</span>
               </div>
             </button>
+            <div className="px-4 pb-4 text-sm leading-relaxed text-slate-700"><p>{comment.concern}</p><p className="mt-2"><b>{comment.classification === 'REQUIRED' ? 'Required correction:' : 'Action:'}</b> {comment.requiredCorrection || 'Please clarify.'}</p>{comment.affectedActivities.length > 0 && <p className="mt-2 text-xs text-slate-500">Activities: {comment.affectedActivities.map(a => a.activityCode || a.activityId).join(', ')}</p>}</div>
             {isOpen && <div className="border-t border-slate-100 bg-slate-50/60 p-4">
               <div className="grid md:grid-cols-2 gap-4 text-[11px]">
                 <div><div className="font-bold text-slate-500 uppercase tracking-wide text-[9px] mb-1">Owner concern</div><p className="text-slate-700 leading-relaxed">{comment.concern}</p></div>
@@ -1803,298 +1406,26 @@ function buildCompleteScheduleAudit(analysis: any, project: any, completionTarge
 // Save-as-PDF uses the browser print dialog; the dashboard layout hides the
 // sidebar on print, and the toolbar below is print-hidden.
 // =============================================================================
-function ApprovalReport({ result, mode, kind, project, sourceFileName, reviewSnapshot, analysis, reportSignalIds, reviewComments, onBack }: {
-  result: ApprovalReadinessResult
-  mode: ApprovalMode
-  kind: 'executive' | 'complete'
-  project: any
-  sourceFileName: string
-  reviewSnapshot: ScheduleReviewSnapshot | null
-  analysis: any
-  reportSignalIds: string[]
-  reviewComments: ReviewComment[]
-  onBack: () => void
+function ApprovalReport({ result, project, sourceFileName, analysis, reviewComments, onBack }: {
+  result: ApprovalReadinessResult; mode: ApprovalMode; kind: 'executive' | 'complete'; project: any
+  sourceFileName: string; reviewSnapshot: ScheduleReviewSnapshot | null; analysis: any
+  reportSignalIds: string[]; reviewComments: ReviewComment[]; onBack: () => void
 }) {
-  const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit' })
-  const code = (project?.projectId || project?.name || 'PRJ').toString().replace(/\s+/g, '').toUpperCase().slice(0, 14)
-  const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-  const reportNo = `SR-AR-${code}-${kind === 'executive' ? 'EXEC' : 'FULL'}-${ymd}`
-  const voice = mode === 'PRE_SUBMISSION' ? 'Pre-Submission Check (Contractor)' : 'Reviewer Check (Owner / PM)'
-  const gc = gradeColor(result.grade)
-
-  const reportTitle = kind === 'executive'
-    ? (mode === 'REVIEWER' ? 'Owner Action Report' : 'Contractor Action Report')
-    : 'Complete Schedule Review'
-  const docKind = kind === 'executive' ? 'Required Corrections and Clarifications' : 'Contract, CPM, Milestone, and Schedule-Quality Review'
-
-  const reportFindings = result.findings.filter(f => approvalKind(f) === 'FINDING')
-  const reportRecommendations = result.findings.filter(f => approvalKind(f) === 'RECOMMENDATION')
-  const actionGroups = buildActionGroups(result)
-  const reportSignals = (reviewSnapshot?.technicalSignals || []).filter(signal => reportSignalIds.includes(signal.id))
-  const formalReviewComments = reviewComments
-    .filter(comment => !['DRAFT', 'VOID', 'WITHDRAWN'].includes(comment.status))
-    .sort((a, b) => a.sequence - b.sequence)
-  const showFormalReviewComments = mode === 'REVIEWER' || formalReviewComments.length > 0
-  const audit = buildCompleteScheduleAudit(analysis, project, result.projectUnderstanding?.completionTarget)
-  const reportDisposition = formalReviewDisposition(result, reviewComments)
-
-  return (
-    <div className="ar-print-root flex flex-col h-full">
-      <style>{`
-        @media print {
-          /* neutralize the app's fixed-height / scroll layout so the document
-             flows naturally instead of rendering a blank full-height page 1 */
-          html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
-          .ar-print-root { height: auto !important; overflow: visible !important; display: block !important; }
-          .ar-print-scroll { height: auto !important; overflow: visible !important; flex: none !important; padding: 0 !important; background: #fff !important; }
-          .ar-print-doc { max-width: none !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; }
-          @page { margin: 0.5in; }
-        }
-      `}</style>
-      {/* toolbar — hidden on print */}
-      <div className="print:hidden bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-3 flex-shrink-0">
-        <button onClick={onBack} className="text-[12px] text-slate-500 hover:text-slate-800">‹ Back to workspace</button>
-        <span className="text-[13px] font-bold ml-2" style={{ color: COLORS.ink }}>{reportTitle}</span>
-        <button onClick={() => printReport('ar-print-area', { title: reportTitle, footerLabel: reportNo })} className="ml-auto text-white text-[12px] font-bold px-4 py-2 rounded-lg" style={{ background: COLORS.blue }}>
-          🖨 Save as PDF
-        </button>
-      </div>
-
-      <div className="ar-print-scroll flex-1 overflow-y-auto bg-slate-100 p-6 print:p-0 print:bg-white">
-        <div id="ar-print-area" className="ar-print-doc max-w-[820px] mx-auto bg-white border border-slate-200 print:border-0 p-8 print:p-0">
-
-          {/* ── Cover header ─────────────────────────────────────────── */}
-          <div className="border-b-2 pb-4 mb-5" style={{ borderColor: COLORS.ink }}>
-            <div className="flex items-start justify-between">
-              <div><div className="text-[18px] font-extrabold leading-tight" style={{ color: COLORS.ink }}>PROJECT CONTROLS</div><div className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500 mt-0.5">Schedule Review &amp; Analysis</div></div>
-              <div className="text-right">
-                <div className="font-mono text-[10px] text-slate-500">{reportNo}</div>
-                <div className="font-mono text-[10px] text-slate-500">{today}</div>
-              </div>
-            </div>
-            {/* Bold, centered, mode-based title */}
-            <div className="text-center mt-4">
-              <div className="text-[22px] font-extrabold uppercase tracking-wide" style={{ color: COLORS.ink }}>
-                {reportTitle}
-              </div>
-              <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 mt-1">
-                {docKind}
-              </div>
-            </div>
-          </div>
-
-          {/* project strip */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-5">
-            <Info label="Project" value={project?.name || '—'} />
-            <Info label="Project Code" value={project?.projectId || '—'} mono />
-            <Info label="Review Mode" value={voice} />
-            <Info label="Reviewed Source File" value={sourceFileName || '—'} mono />
-          </div>
-
-          {/* ── Executive summary block (both reports) ───────────────── */}
-          <SectionBar>Executive Summary</SectionBar>
-          <div className="flex items-start gap-6 mb-4 print:break-inside-avoid">
-            <div className="flex-1">
-              <div className="text-[9px] font-extrabold uppercase tracking-[0.14em] text-slate-500 mb-1">Review Disposition</div>
-              <div className="text-[18px] font-black uppercase tracking-wide mb-1" style={{ color: mode === 'REVIEWER' ? reportDisposition.color : readinessColor(result.readinessStatus) }}>
-                {neutralReportText(mode === 'REVIEWER' ? reportDisposition.label : contextualReadinessLabel(result, mode))}
-              </div>
-              <div className="text-[10.5px] text-slate-600 leading-relaxed mb-2">{neutralReportText(mode === 'REVIEWER' ? reportDisposition.reason : (result.readinessReason || result.recommendation))}</div>
-              <div className="text-[10.5px] text-slate-600">
-                Technical Gates: <b style={{ color: result.criticalGates.passed ? COLORS.green : COLORS.red }}>{result.criticalGates.passed ? 'PASS' : 'REVIEW'}</b>
-                {'  ·  '}Critical {result.counts.critical} · Major {result.counts.major} · Minor {result.counts.minor}
-                {reportRecommendations.length > 0 ? ` · Recommendations ${reportRecommendations.length}` : ''}
-              </div>
-              {!result.criticalGates.passed && (
-                <div className="text-[10px] mt-1 font-semibold" style={{ color: COLORS.red }}>
-                  {result.criticalGates.failed.map(g => `✗ ${neutralReportText(g.label)} — ${neutralReportText(g.reason)}`).join('  ·  ')}
-                </div>
-              )}
-            </div>
-            <div className="text-center rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 min-w-[110px]">
-              <div className="text-[8px] font-extrabold uppercase tracking-wide text-slate-500">Technical Score</div>
-              <div className="font-mono text-[28px] font-extrabold leading-none mt-1" style={{ color: gc }}>
-                {result.totalScore}<span className="text-[12px] text-slate-400">/100</span>
-              </div>
-              <div className="text-[12px] font-extrabold mt-1" style={{ color: gc }}>{result.grade}</div>
-              <div className="text-[7.5px] text-slate-400 mt-1">supporting indicator</div>
-            </div>
-          </div>
-
-          {showFormalReviewComments && <>
-            <SectionBar>{mode === 'REVIEWER' ? "Owner's Review Comments" : 'Formal Review Comment Register'}</SectionBar>
-            <div className="text-[10px] text-slate-500 mb-3">
-              Permanent comment numbers and dispositions from the formal review register for this project.
-            </div>
-            <div className="mb-5 space-y-2">
-              {formalReviewComments.length === 0 && <div className="rounded-lg border border-dashed border-slate-300 p-4 text-[10.5px] text-slate-500 italic">No owner review comments have been issued.</div>}
-              {formalReviewComments.map(comment => <div key={comment.id} className="rounded-lg border border-slate-200 p-3 print:break-inside-avoid">
-                <div className="flex items-start gap-2">
-                  <span className="rounded bg-slate-900 px-2 py-1 font-mono text-[9px] font-bold text-white">{comment.commentNumber}</span>
-                  <div className="flex-1">
-                    <div className="text-[11px] font-extrabold" style={{ color: COLORS.ink }}>{comment.title}</div>
-                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[9px] text-slate-500">
-                      <RequirementBadge strength={comment.classification} gate={comment.classification === 'REQUIRED' && comment.approvalImpact === 'BLOCKS_APPROVAL'} />
-                      <span>{comment.approvalImpact.replaceAll('_', ' ')} · {reviewStatusLabel(comment.status)}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-2 grid grid-cols-2 gap-3 text-[9.5px]"><div><b>Concern:</b> {comment.concern}</div><div><b>Required correction:</b> {comment.requiredCorrection || 'Reviewer clarification requested.'}</div></div>
-                {(comment.responses || []).length > 0 && <div className="mt-2 rounded bg-slate-50 p-2 text-[9.5px]"><b>Latest contractor response:</b> {comment.responses[comment.responses.length - 1].response}</div>}
-              </div>)}
-            </div>
-          </>}
-
-          {kind === 'executive' && reportSignals.length > 0 && <>
-            <SectionBar>Selected CPM Technical Evidence</SectionBar>
-            <div className="mb-5 space-y-2">
-              {reportSignals.map(signal => <div key={signal.id} className="rounded-lg border border-slate-200 p-3 print:break-inside-avoid">
-                <div className="flex items-start gap-3">
-                  <div className="min-w-[48px] text-center rounded bg-blue-50 border border-blue-100 px-2 py-1 font-mono text-[16px] font-black text-blue-700">{signal.count}</div>
-                  <div className="flex-1"><div className="text-[11px] font-extrabold" style={{ color: COLORS.ink }}>{neutralReportText(signal.label)}</div><div className="text-[9.5px] text-slate-600 mt-0.5">{neutralReportText(signal.summary)}</div></div>
-                  <div className="text-[8px] font-bold uppercase text-slate-400">{signal.treatment.replaceAll('_', ' ')}</div>
-                </div>
-              </div>)}
-            </div>
-          </>}
-
-          {kind === 'complete' && (result.projectUnderstanding || result.pathReview) && (
-            <>
-              <SectionBar>Engineering Readiness Snapshot</SectionBar>
-              <div className="border border-slate-200 rounded-lg p-3 mb-5 print:break-inside-avoid">
-                {result.projectUnderstanding && (
-                  <div className="mb-3">
-                    <div className="text-[12px] font-extrabold" style={{ color: COLORS.ink }}>{result.projectUnderstanding.projectNature}</div>
-                    <div className="text-[10px] text-slate-600 mt-0.5">{result.projectUnderstanding.deliveryNature.join(' → ')}</div>
-                    <div className="grid grid-cols-3 gap-3 mt-2 text-[9.5px]">
-                      <div><b>Target:</b> {result.projectUnderstanding.completionTarget?.code || '—'} · {result.projectUnderstanding.completionTarget?.name || 'Not resolved'} {result.projectUnderstanding.completionTarget?.finish ? `(${shortDate(result.projectUnderstanding.completionTarget.finish)})` : ''}</div>
-                      <div><b>Areas:</b> {result.projectUnderstanding.areas.join(' · ') || '—'}</div>
-                      <div><b>Systems:</b> {result.projectUnderstanding.systems.join(' · ') || '—'}</div>
-                    </div>
-                  </div>
-                )}
-                {result.pathReview && (
-                  <div className="grid grid-cols-2 gap-3">
-                    {[result.pathReview.criticalPath, result.pathReview.longestPath].filter(Boolean).map((p: any) => {
-                      const c = p.status === 'CREDIBLE' ? COLORS.green : p.status === 'REVIEW_REQUIRED' ? COLORS.red : COLORS.amber
-                      return (
-                        <div key={p.label} className="rounded border p-2" style={{ borderColor: `${c}55` }}>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[10.5px] font-extrabold" style={{ color: COLORS.ink }}>{p.label}</span>
-                            <span className="text-[8px] font-extrabold uppercase" style={{ color: c }}>{p.status.replace('_', ' ')}</span>
-                          </div>
-                          <div className="text-[9px] text-slate-600 leading-relaxed mt-1">{neutralReportText(p.note)}</div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          {kind === 'complete' && <>
-            <SectionBar>Schedule Identity &amp; Control Boundary</SectionBar>
-            <div className="grid grid-cols-3 gap-3 mb-5 print:break-inside-avoid">
-              <div className="rounded-lg border border-slate-200 p-3"><div className="text-[8px] font-extrabold uppercase text-slate-500">Application project</div><div className="mt-1 font-mono text-[10px] font-bold">{audit.projectIdentity}</div></div>
-              <div className="rounded-lg border border-slate-200 p-3"><div className="text-[8px] font-extrabold uppercase text-slate-500">Submitted XER project</div><div className="mt-1 font-mono text-[10px] font-bold">{audit.xerIdentity}</div></div>
-              <div className="rounded-lg border p-3" style={{ borderColor: audit.identityStatus === 'MISMATCH' ? '#fca5a5' : '#cbd5e1', background: audit.identityStatus === 'MISMATCH' ? '#fef2f2' : '#f8fafc' }}><div className="text-[8px] font-extrabold uppercase text-slate-500">Identity check</div><div className="mt-1 text-[11px] font-black" style={{ color: audit.identityStatus === 'MISMATCH' ? COLORS.red : audit.identityStatus === 'MATCH' ? COLORS.green : COLORS.amber }}>{audit.identityStatus}</div></div>
-              <div className="col-span-3 rounded-lg border border-slate-200 p-3 text-[10px]"><b>Construction completion boundary:</b> {audit.completionTarget?.code || '—'} · {audit.completionTarget?.name || 'Not resolved'} {audit.completionTarget?.finish ? `(${shortDate(audit.completionTarget.finish)})` : ''}. Administrative term, retainage, final-payment, and document-review dates are not used as the construction completion target.</div>
-            </div>
-
-            <SectionBar>Schedule Composition</SectionBar>
-            <div className="grid grid-cols-5 gap-2 mb-5 print:break-inside-avoid">
-              {[
-                ['Activities', audit.counts.activities], ['Complete', audit.counts.completed], ['In progress', audit.counts.inProgress], ['Not started', audit.counts.notStarted], ['Milestones', audit.counts.milestones],
-                ['WBS nodes', audit.counts.wbs], ['Relationships', audit.counts.relationships], ['Calendars', audit.counts.calendars], ['Activity-code types', audit.counts.codeTypes], ['Code assignments', audit.counts.codeAssignments],
-              ].map(([label, value]) => <div key={String(label)} className="rounded border border-slate-200 bg-slate-50 p-2"><div className="text-[8px] font-bold uppercase text-slate-500">{label}</div><div className="mt-1 font-mono text-[16px] font-black text-slate-900">{value}</div></div>)}
-            </div>
-
-            <SectionBar>Customer-Confirmed Milestone Basis</SectionBar>
-            <div className="text-[10px] text-slate-500 mb-2">Only milestones entered and confirmed in Project Setup are evaluated here. CPMReview does not supply private-client milestones or sequencing criteria.</div>
-            {audit.milestoneRows.length === 0 ? <div className="mb-5 rounded border border-dashed border-slate-300 p-3 text-[10px] italic text-slate-500">No additional project-specific milestones were recorded in the Project Control Basis.</div> : <table className="w-full text-[8.5px] mb-5">
-              <thead><tr className="border-b-2 border-slate-200 text-left uppercase text-slate-500"><th className="py-1.5 pr-2">Milestone</th><th className="py-1.5 pr-2">Phase / area</th><th className="py-1.5 pr-2">Required</th><th className="py-1.5 pr-2">Submitted evidence</th><th className="py-1.5 pr-2">Forecast</th><th className="py-1.5 pr-2">Source</th></tr></thead>
-              <tbody>{audit.milestoneRows.map(row => <tr key={row.id} className="border-b border-slate-100 align-top"><td className="py-1.5 pr-2 font-bold">{row.label}</td><td className="py-1.5 pr-2">{row.phase}</td><td className="py-1.5 pr-2 font-mono">{shortDate(row.required)}</td><td className="py-1.5 pr-2"><span className="font-mono">{row.mappedCode}</span> · {row.mappedName}</td><td className="py-1.5 pr-2 font-mono">{row.forecast ? shortDate(row.forecast) : '—'}</td><td className="py-1.5 pr-2">{row.source}</td></tr>)}</tbody>
-            </table>}
-
-            <SectionBar>Calendar, Constraint &amp; Relationship Audit</SectionBar>
-            <div className="grid grid-cols-2 gap-3 mb-5">
-              <div className="rounded-lg border border-slate-200 p-3 print:break-inside-avoid"><div className="text-[10.5px] font-extrabold mb-2">Calendars ({audit.calendars.length})</div>{audit.calendars.length === 0 ? <div className="text-[9.5px] italic text-slate-500">No calendar records preserved.</div> : audit.calendars.map((calendar: any) => <div key={calendar.clndr_id} className="border-t border-slate-100 py-1.5 text-[9.5px]"><b>{calendar.clndr_name || calendar.clndr_id}</b><div className="text-slate-500">{calendar.clndr_type || 'Calendar'} · {calendar.day_hr_cnt || '—'} hr/day · {calendar.week_hr_cnt || '—'} hr/week</div></div>)}</div>
-              <div className="rounded-lg border border-slate-200 p-3 print:break-inside-avoid"><div className="text-[10.5px] font-extrabold mb-2">Constraints</div>{Object.keys(audit.constraints).length === 0 ? <div className="text-[9.5px] text-slate-500">No primary or secondary constraints detected.</div> : Object.entries(audit.constraints).map(([label, count]) => <div key={label} className="flex justify-between border-t border-slate-100 py-1.5 text-[9.5px]"><span>{label}</span><b className="font-mono">{String(count)}</b></div>)}</div>
-              <div className="rounded-lg border border-slate-200 p-3 print:break-inside-avoid"><div className="text-[10.5px] font-extrabold mb-2">Relationship types</div>{Object.entries(audit.relationshipCounts).map(([label, count]) => <div key={label} className="flex justify-between border-t border-slate-100 py-1.5 text-[9.5px]"><span>{label}</span><b className="font-mono">{String(count)}</b></div>)}</div>
-              <div className="rounded-lg border border-slate-200 p-3 print:break-inside-avoid"><div className="text-[10.5px] font-extrabold mb-2">Lag evidence</div><div className="grid grid-cols-3 gap-2 text-center"><div><div className="font-mono text-[16px] font-black">{audit.positiveLagCount}</div><div className="text-[8px] text-slate-500">Positive</div></div><div><div className="font-mono text-[16px] font-black">{audit.longPositiveLagCount}</div><div className="text-[8px] text-slate-500">≥ 40 hours</div></div><div><div className="font-mono text-[16px] font-black">{audit.maximumLagHours}</div><div className="text-[8px] text-slate-500">Max hours</div></div></div></div>
-            </div>
-
-            <SectionBar>P6 Calculation, Coding &amp; Loading Evidence</SectionBar>
-            <div className="grid grid-cols-2 gap-3 mb-5">
-              <div className="rounded-lg border border-slate-200 p-3"><div className="text-[10.5px] font-extrabold mb-2">Schedule calculation options</div>{audit.scheduleOptions.length === 0 ? <div className="text-[9.5px] italic text-slate-500">Scheduling-option records were not preserved in this analysis.</div> : <div className="grid grid-cols-2 gap-x-3">{audit.scheduleOptions.map(([key, value]) => <div key={String(key)} className="flex justify-between gap-2 border-t border-slate-100 py-1 text-[8.5px]"><span className="truncate">{String(key)}</span><b className="font-mono">{String(value)}</b></div>)}</div>}</div>
-              <div className="rounded-lg border border-slate-200 p-3"><div className="text-[10.5px] font-extrabold mb-2">Coding and resource evidence</div><div className="space-y-2 text-[9.5px]"><div className="flex justify-between"><span>Activity-code types / assignments</span><b>{audit.counts.codeTypes} / {audit.counts.codeAssignments}</b></div><div className="flex justify-between"><span>User-defined-field values</span><b>{audit.counts.udfValues}</b></div><div className="flex justify-between"><span>Resource-assignment table</span><b style={{ color: audit.resourceTablePresent ? COLORS.green : COLORS.amber }}>{audit.resourceTablePresent ? 'PRESENT' : 'NOT EVIDENCED'}</b></div></div></div>
-            </div>
-          </>}
-
-          {kind === 'executive' && <>
-            <SectionBar>Required Actions</SectionBar>
-            <div className="text-[10px] text-slate-500 mb-3">Observations are grouped only by corrective workflow. Grouping does not imply a shared root cause; Full CPM Analysis preserves the detailed activity and relationship trace.</div>
-            {([
-              { label: 'Corrections required', groups: actionGroups.corrections, color: COLORS.red },
-              { label: 'Clarifications needed', groups: actionGroups.clarifications, color: COLORS.amber },
-            ] as const).map(section => <div key={section.label} className="mb-5">
-              <div className="text-[12px] font-extrabold mb-2" style={{ color: section.color }}>{section.label}</div>
-              {section.groups.length === 0 ? <div className="text-[11px] text-slate-500 italic">None detected by the current checks.</div> : section.groups.map(group => <div key={group.id} className="mb-3 rounded-lg border border-slate-200 p-3 print:break-inside-avoid">
-                <div className="flex items-start gap-2">
-                  <span className="font-mono text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${section.color}18`, color: section.color }}>{neutralReportText(group.id)}</span>
-                  <div className="flex-1"><div className="text-[12px] font-extrabold" style={{ color: COLORS.ink }}>{group.title}</div><div className="text-[9.5px] text-slate-500 mt-0.5">{group.findings.length} observations · {group.affectedCount} affected activities</div></div>
-                </div>
-                <div className="grid grid-cols-3 gap-3 mt-2 text-[10px]">
-                  <div><b>Why:</b> {neutralReportText(group.why)}</div><div><b>Action:</b> {neutralReportText(group.action)}</div><div><b>Acceptance:</b> {neutralReportText(group.acceptance)}</div>
-                </div>
-                <div className="mt-2 text-[9.5px] text-slate-600">{group.findings.map(f => `${neutralReportText(f.id)} — ${neutralReportText(findingTitle(f))}`).join(' · ')}</div>
-              </div>)}
-            </div>)}
-          </>}
-
-          {kind === 'complete' && <>
-          <SectionBar>Consolidated Review Findings</SectionBar>
-          <div className="text-[10px] text-slate-500 mb-3">Each condition states the detected basis and the reviewer action. Full CPM Analysis preserves relationship-level activity trace.</div>
-          {reportFindings.length === 0 ? (
-            <div className="text-[12px] text-slate-500 italic py-3">No material findings.</div>
-          ) : <table className="w-full text-[10px] mb-5">
-            <thead><tr className="border-b-2 border-slate-200 text-left text-[8.5px] uppercase tracking-wide text-slate-500"><th className="py-1.5 pr-2">ID</th><th className="py-1.5 pr-2">Domain</th><th className="py-1.5 pr-2">Consolidated condition</th><th className="py-1.5 pr-2">Requirement</th><th className="py-1.5 text-right">Activities</th></tr></thead>
-            <tbody>{reportFindings.map(f => <tr key={f.id} className="border-b border-slate-100 align-top"><td className="py-2 pr-2 font-mono font-bold">{neutralReportText(f.id)}</td><td className="py-2 pr-2 font-mono">{f.primaryDomain}</td><td className="py-2 pr-2"><div className="font-semibold text-slate-800">{neutralReportText(findingTitle(f))}</div><div className="mt-1 text-[9px] text-slate-600"><b>Detected:</b> {neutralReportText(f.whatFound)}</div><div className="mt-1 text-[9px] text-slate-600"><b>Reviewer action:</b> {neutralReportText(f.reviewerCheck)}</div></td><td className="py-2 pr-2"><RequirementBadge strength={f.ruleStrength} gate={f.criticalGate} /></td><td className="py-2 text-right font-mono">{f.affectedActivities.length}</td></tr>)}</tbody>
-          </table>}
-          </>}
-
-          {/* Detailed CPM occurrences belong at the end of the Complete
-              Review. The reader sees the engineering snapshot and required
-              findings first, then drills into activity-level evidence. */}
-          {kind === 'complete' && reportSignals.length > 0 && <>
-            <SectionBar>Selected CPM Technical Evidence</SectionBar>
-            <div className="mb-5 space-y-2">
-              {reportSignals.map(signal => {
-                const rows = technicalEvidenceRows(signal, analysis)
-                return <div key={signal.id} className="rounded-lg border border-slate-200 p-3 print:break-inside-avoid">
-                  <div className="flex items-start gap-3">
-                    <div className="min-w-[48px] text-center rounded bg-blue-50 border border-blue-100 px-2 py-1 font-mono text-[16px] font-black text-blue-700">{signal.count}</div>
-                    <div className="flex-1"><div className="text-[11px] font-extrabold" style={{ color: COLORS.ink }}>{neutralReportText(signal.label)}</div><div className="text-[9.5px] text-slate-600 mt-0.5">{neutralReportText(signal.summary)}</div></div>
-                    <div className="text-[8px] font-bold uppercase text-slate-400">{signal.treatment.replaceAll('_', ' ')}</div>
-                  </div>
-                  {rows.length > 0 && <table className="w-full text-[9.5px] mt-2">
-                    <tbody>{rows.map(row => <tr key={row.id} className="border-t border-slate-100"><td className="py-1 pr-2 w-[24%] font-mono font-bold">{row.code}</td><td className="py-1 text-slate-700">{row.name}</td></tr>)}</tbody>
-                  </table>}
-                </div>
-              })}
-            </div>
-          </>}
-
-          {/* footer */}
-          <div className="flex items-center justify-between pt-3 mt-4 border-t-2 text-[10px] text-slate-400" style={{ borderColor: COLORS.ink }}>
-            <span>Prepared from the selected P6 schedule and recorded project basis. Advisory; the schedule of record and the authorized reviewer govern. Score is provisional pending calibration.</span>
-            <span className="font-mono">{reportNo}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
+  const existing = existingFindingSignatures(reviewComments)
+  const groups = buildActionGroups(result)
+  const proposed = [...groups.corrections, ...groups.clarifications].filter(g => !existing.has(canonicalFindingSignature(g.findings)) && !existing.has(legacyFindingSignature(g.findings)))
+  const issued = reviewComments.filter(c => !['VOID', 'WITHDRAWN'].includes(c.status)).sort((a, b) => a.sequence - b.sequence)
+  return <Shell project={project}>
+    <div className="print:hidden flex gap-2 mb-4"><button onClick={onBack} className="rounded-lg border px-4 py-2 text-sm">Back to Comments</button><button onClick={() => printReport('comments-report', { title: 'Schedule Review Comments', footerLabel: project.name })} className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white">Print / Save PDF</button></div>
+    <main id="comments-report" className="rounded-xl border bg-white p-6">
+      <h1 className="text-xl font-bold">Schedule Review Comments — {project.name}</h1>
+      <p className="mt-2 text-xs text-slate-500">{sourceFileName} · Data date: {shortDate(analysis?.dataDate)}</p>
+      <p className="mt-2 text-xs text-slate-500">These comments concern the submitted schedule. They do not confirm field completion or acceptance.</p>
+      {issued.map(c => <article key={c.id} className="border-t mt-5 pt-4 break-inside-avoid"><h2 className="text-sm font-bold">{c.commentNumber}. {c.title}</h2><p className="mt-2 text-sm">{c.concern}</p><p className="mt-2 text-sm"><b>{c.classification === 'REQUIRED' ? 'Required correction:' : 'Action:'}</b> {c.requiredCorrection}</p><p className="mt-2 text-xs">Activities: {c.affectedActivities.map(a => a.activityCode || a.activityId).join(', ') || 'See comment'}</p><p className="mt-2 text-xs">Status: {reviewStatusLabel(c.status)}</p></article>)}
+      {proposed.map((g, i) => <article key={g.id} className="border-t mt-5 pt-4 break-inside-avoid"><h2 className="text-sm font-bold">Proposed {i + 1}. {g.title}</h2><p className="mt-1 text-xs font-semibold">{g.disposition === 'CORRECTION' ? 'Required correction' : g.findings[0].kind === 'RECOMMENDATION' ? 'Recommendation' : 'Clarification required'}</p><p className="mt-2 text-sm">{g.why}</p><p className="mt-2 text-sm"><b>Action:</b> {g.action}</p><p className="mt-2 text-xs">Activities: {g.findings[0].affectedActivities.map(a => a.code || a.id).join(', ') || 'No activity explicitly identified; see observation'}</p><p className="mt-2 text-xs">Status: Proposed · Not issued</p></article>)}
+      {!issued.length && !proposed.length && <p className="mt-4 text-sm">No review comments identified.</p>}
+    </main>
+  </Shell>
 }
 
 function ContractMilestoneSnapshot({ milestones, analysis, profile }: {

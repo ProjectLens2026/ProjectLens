@@ -25,7 +25,7 @@ import { usePermissions } from '@/lib/usePermissions'
 import {
   getActiveProjectId, loadProjects,
   createProject, addVersionToProject,
-  subscribeToProjects, updateProjectContractDates,
+  subscribeToProjects, updateProjectContractDates, updateProjectControlBasis,
   computeRevisedCompletion,
   ScheduleVersion, ContractDates, VersionDates, Project,
 } from '@/lib/projectStore'
@@ -114,6 +114,7 @@ export default function UploadPage() {
     projectName: '', owner: '', gc: ''
   })
   const [cd, setCd] = useState<ContractDatesFormState>(EMPTY_CONTRACT_DATES)
+  const [facilityType, setFacilityType] = useState<NonNullable<import('@/lib/projectStore').ProjectControlBasis['facilityType']> | ''>('')
   const [dateError, setDateError] = useState<string>('')
 
   // Project assignment state
@@ -121,6 +122,9 @@ export default function UploadPage() {
   const [projectMode, setProjectMode] = useState<'new' | 'existing'>('new')
   const [selectedProjectId, setSelectedProjectId] = useState<string>('')
   const [newProjectId, setNewProjectId] = useState<string>('')
+  useEffect(() => {
+    setFacilityType(projectMode === 'existing' ? existingProjects.find(p => p.id === selectedProjectId)?.controlBasis?.facilityType || '' : '')
+  }, [projectMode, selectedProjectId, existingProjects])
 
   // v14 — schedule type + validation state
   const [scheduleType, setScheduleType] = useState<ScheduleType | null>(null)
@@ -391,6 +395,7 @@ export default function UploadPage() {
       setDateError('Project Name is required')
       return
     }
+    if (!facilityType) { setDateError('Select the facility type before uploading.'); return }
     setDateError('')
     setProjectIdError('')
 
@@ -500,6 +505,7 @@ export default function UploadPage() {
             scheduleType,
             sequenceNumber: nextSeq,
           })
+          updateProjectControlBasis(selectedProjectId, { facilityType })
           const updated = addVersionToProject(selectedProjectId, version)
           console.log('[ControlLens] Add result:', { success: !!updated, totalVersions: updated?.versions.length })
         } else {
@@ -538,6 +544,7 @@ export default function UploadPage() {
             projectId: pid,
             owner: ctx.owner,
             contractDates: projectContractDates,
+            controlBasis: { facilityType },
             version,
           })
           console.log('[ControlLens] Created new project', {
@@ -970,6 +977,11 @@ export default function UploadPage() {
               )}
             </div>
 
+            <label className="block mb-5"><span className="block text-xs font-bold text-slate-500 mb-2">Facility type <span className="text-red-600">*</span></span>
+              <select required aria-label="Facility type" value={facilityType} onChange={e => setFacilityType(e.target.value as typeof facilityType)} className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm">
+                <option value="">Select facility type</option><option value="DATA_CENTER">Data center</option><option value="HIGH_RISE">High-rise building</option><option value="BUILDING">Building</option><option value="INFRASTRUCTURE">Infrastructure</option><option value="OTHER">Other</option>
+              </select><span className="block mt-1 text-xs text-slate-500">Data centers include commissioning sequence checks. The selection is saved for future uploads.</span>
+            </label>
             {/* Project info — generic placeholders (Azizi/USACE removed in v14) */}
             <div className="space-y-4 mb-5">
               <div>

@@ -236,6 +236,7 @@ export interface ProjectSourceDocument {
 }
 
 export interface ProjectControlBasis {
+  facilityType?: 'DATA_CENTER' | 'HIGH_RISE' | 'BUILDING' | 'INFRASTRUCTURE' | 'OTHER'
   contractor?: string
   governingStandard?: string
   scheduleProjectIds?: string[]          // Authorized P6/MSP identifiers and accepted aliases
@@ -1236,6 +1237,7 @@ export function createProject(opts: {
   name: string
   projectId?: string
   owner?: string
+  controlBasis?: ProjectControlBasis
   contractDates?: ContractDates    // NEW — manual NTP + Original Completion
   version: ScheduleVersion
 }): Project {
@@ -1244,6 +1246,7 @@ export function createProject(opts: {
     projectId: opts.projectId,
     name: opts.name,
     owner: opts.owner,
+    controlBasis: opts.controlBasis,
     contractDates: opts.contractDates,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

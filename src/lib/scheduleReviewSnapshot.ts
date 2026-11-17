@@ -264,9 +264,10 @@ export function buildScheduleReviewSnapshot(
 ): ScheduleReviewSnapshot | null {
   if (!analysis) return null
 
+  const projectType = analysis.facilityType === 'DATA_CENTER' ? 'DATA_CENTER' : options.projectType || 'ALL'
   const cacheKey = JSON.stringify([
     options.versionId || '', options.mode || 'REVIEWER',
-    options.projectType || 'ALL', options.basisKey || '',
+    projectType, options.basisKey || '',
   ])
   const cached = completedReviews.get(analysis)
   if (!options.forceRefresh && cached?.key === cacheKey) return cached.snapshot
@@ -275,7 +276,7 @@ export function buildScheduleReviewSnapshot(
 
   const approval = evaluateApprovalReadiness(analysis as any, {
     mode: options.mode || 'REVIEWER',
-    projectType: options.projectType || 'ALL',
+    projectType,
   })
   if (!approval) return null
 

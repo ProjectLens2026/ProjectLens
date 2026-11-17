@@ -60,6 +60,7 @@ export function analysisWithProjectBasis(analysis: any, project?: Project | null
         : 'Stable'
   return {
     ...analysis,
+    facilityType: project?.controlBasis?.facilityType || analysis.facilityType,
     administrativeTermDate: analysis.administrativeTermDate
       || analysis.contractEnd
       || undefined,

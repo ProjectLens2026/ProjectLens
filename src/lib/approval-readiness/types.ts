@@ -99,6 +99,7 @@ export interface ApprovalPathStatus {
 }
 
 export interface ApprovalReadinessResult {
+  commissioningChecks?: import('./commissioning').CommissioningCheck[]
   mode: ApprovalMode
   totalScore: number
   grade: Grade
