@@ -56,7 +56,7 @@ export function reviewCommissioning(analysis: any): CommissioningCheck[] {
           ? `The schedule references L${def.level} in ${refs}, but does not separately identify the testing or startup work. It may be included in a broader activity.`
           : `No activity name in ${phase} explicitly identifies ${def.label.toLowerCase()}. The work may be included elsewhere or may not apply to this scope.`
       let action = `Confirm the equipment covered, prerequisites and acceptance steps against the project's commissioning plan.`
-      if (index > 0 && execution.length) {
+      if (index > 1 && execution.length) {
         const previous = scope.filter(t => LEVELS[index - 1].pattern.test(t.task_name || '') && !recordOnly.test(t.task_name || ''))
         const unlinked = execution.filter(t => !previous.some(p => reaches(String(p.task_id), String(t.task_id))))
         if (unlinked.length) {

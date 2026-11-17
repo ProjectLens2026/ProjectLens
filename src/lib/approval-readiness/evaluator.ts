@@ -22,9 +22,10 @@ import { evaluateGates } from './gates'
 import { buildScheduleQualityFindings } from './qualityRules'
 import { evaluateStandardPractice } from './standardPractice'
 
+import { buildPlanningReview } from './planningReview'
 import { reviewCommissioning, commissioningFindings } from './commissioning'
 
-const ENGINE_VERSION = '2.2.0'
+const ENGINE_VERSION = '2.3.0'
 
 interface AnalysisInput {
   sourceFormat?: 'PRIMAVERA_XER' | 'MS_PROJECT_XML'
@@ -491,6 +492,7 @@ export function evaluateApprovalReadiness(
     findings,
     standardPractice: standardPractice.profile,
     commissioningChecks,
+    planningReview: buildPlanningReview(analysis, findings),
     projectUnderstanding: path?.understanding,
     pathReview: path ? {
       criticalPath: toPathStatus(path.criticalPath, 'CPMr Critical Path'),

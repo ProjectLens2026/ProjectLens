@@ -56,3 +56,13 @@ export function isPostCompletionAdministrativeWork(task: any): boolean {
   const text = normalized(`${task?.task_code || ''} ${task?.task_name || task?.name || ''} ${(task?.wbs_path || []).join(' ')}`)
   return /ADMINISTRATIVE TERM|ADMIN TERM|FINAL INVOICE|FINAL BILL|FINAL PAYMENT|RELEASE (OF )?RETAINAGE|RETAINAGE RELEASE|CLOSEOUT DOCUMENT|CLOSE OUT DOCUMENT|FINAL CLOSEOUT DOCUMENT|DOCUMENT REVIEW|DOCUMENT ACCEPTANCE/.test(text)
 }
+
+/** Review fallback only: a phase turnover is not contractual Final Completion. */
+export function detectPhaseTurnoverTarget(tasks: any[]): { task: any; date?: string } | null {
+  const candidates = tasks.filter(task => isScheduleMilestone(task)
+    && /\bPFHO\b|PHASE (?:HANDOVER|HAND OVER|TURNOVER)|FACILITY (?:HANDOVER|TURNOVER)/.test(normalized(`${task?.task_code || ''} ${task?.task_name || ''}`)))
+    .map(task => ({ task, date: taskFinishDate(task) }))
+    .filter(item => item.date)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.task.task_code).localeCompare(String(a.task.task_code), undefined, { numeric: true }))
+  return candidates[0] || null
+}

@@ -236,6 +236,7 @@ interface ActionGroup {
   findings: ApprovalFinding[]
   affectedCount: number
   totalDeduction: number
+  kind?: ApprovalFinding['kind']
 }
 
 function actionFamily(f: ApprovalFinding): string {
@@ -361,19 +362,56 @@ const ACTION_COPY: Record<string, Pick<ActionGroup, 'title' | 'why' | 'action' |
 }
 
 function buildActionGroups(result: ApprovalReadinessResult): { corrections: ActionGroup[]; clarifications: ActionGroup[] } {
-  const groups: ActionGroup[] = result.findings.map(finding => ({
-    id: reviewFindingSourceKey(finding),
-    disposition: finding.commentDisposition === 'REQUIRED_CORRECTION' || finding.criticalGate || (finding.ruleStrength === 'REQUIRED' && finding.authority === 'PROJECT_REQUIREMENT')
-      ? 'CORRECTION' : 'CLARIFICATION',
-    title: finding.title,
-    why: finding.whatFound,
-    action: finding.reviewerCheck,
-    acceptance: 'Confirm the correction or provide the requested explanation and activity references.',
-    findings: [finding],
-    affectedCount: finding.affectedActivities.length,
-    totalDeduction: finding.scoreDeduction,
-  }))
+  const selected = result.planningReview?.comments || result.findings.filter(f => f.kind !== 'RECOMMENDATION')
+  const groups: ActionGroup[] = selected.map(finding => {
+    const sourceIds = (finding as ApprovalFinding & { sourceFindingIds?: string[] }).sourceFindingIds || []
+    const source = sourceIds.length ? result.findings.filter(f => sourceIds.includes(f.id)) : [finding]
+    return {
+      id: reviewFindingSourceKey(finding),
+      disposition: finding.commentDisposition === 'REQUIRED_CORRECTION' ? 'CORRECTION' : 'CLARIFICATION',
+      kind: finding.kind, title: finding.title, why: finding.whatFound, action: finding.reviewerCheck,
+      acceptance: 'Confirm the correction or provide the requested explanation and activity references.',
+      findings: source, affectedCount: finding.affectedActivities.length, totalDeduction: finding.scoreDeduction,
+    }
+  })
   return { corrections: groups.filter(g => g.disposition === 'CORRECTION'), clarifications: groups.filter(g => g.disposition !== 'CORRECTION') }
+}
+
+function groupAlreadyIssued(group: ActionGroup, signatures: Set<string>): boolean {
+  return signatures.has(canonicalFindingSignature(group.findings)) || signatures.has(legacyFindingSignature(group.findings))
+    || group.findings.every(f => signatures.has(reviewFindingSourceKey(f)) || signatures.has(f.id))
+}
+
+function planningIssuedComments(result: ApprovalReadinessResult | null, comments: ReviewComment[]): ReviewComment[] {
+  if (!result?.planningReview) return comments
+  const groups = buildActionGroups(result)
+  const ids = new Set(groups.corrections.concat(groups.clarifications).flatMap(g => g.findings.flatMap(f => [f.id, reviewFindingSourceKey(f)])))
+  return comments.filter(c => c.source === 'REVIEWER_ADDED' || c.sourceFindingIds?.some(key => ids.has(key)))
+}
+
+function planningGroupRecords(group: ActionGroup, comments: ReviewComment[]): ReviewComment[] {
+  const ids = new Set(group.findings.flatMap(f => [f.id, reviewFindingSourceKey(f)]))
+  return comments.filter(c => c.source !== 'REVIEWER_ADDED' && !['VOID', 'WITHDRAWN'].includes(c.status) && c.sourceFindingIds?.some(key => ids.has(key)))
+}
+
+function IssuedPlanningSummary({ group, comments }: { group: ActionGroup; comments: ReviewComment[] }) {
+  const states = Array.from(new Set(comments.map(c => reviewStatusLabel(c.status))))
+  return <article className="rounded-lg border border-slate-200 bg-white p-4 mb-3 break-inside-avoid"><h3 className="text-sm font-bold">{group.title}</h3><p className="mt-2 text-sm text-slate-700">{group.why}</p><p className="mt-2 text-sm text-slate-700"><b>Action:</b> {group.action}</p><p className="mt-2 text-xs text-slate-500">{conciseActivityRefs(group.findings)}</p><p className="mt-2 text-xs text-slate-500">Existing issued records: {comments.length} · Status: {states.join(', ')}. Individual responses and status controls remain in comment history.</p></article>
+}
+
+function conciseActivityRefs(findings: ApprovalFinding[]): string {
+  const refs = Array.from(new Set(findings.flatMap(f => f.affectedActivities.map(a => a.code || a.id))))
+  return refs.slice(0, 5).join(', ') + (refs.length > 5 ? ` · ${refs.length - 5} more references retained` : '')
+}
+
+function PhasePathOverview({ review }: { review?: ApprovalReadinessResult['planningReview'] }) {
+  if (!review) return null
+  return <section className="rounded-xl border border-slate-200 bg-white p-4 mb-4">
+    <h2 className="text-sm font-bold text-slate-900">Phase turnover paths</h2>
+    <p className="text-xs text-slate-500 mt-1">{review.note}</p>
+    {review.endpoint && <p className="text-xs text-slate-600 mt-2">Review endpoint: {review.endpoint.code} · {review.endpoint.date}{review.endpoint.basis === 'TURNOVER_REVIEW_BOUNDARY' ? ' · Phase turnover boundary' : ''}</p>}
+    <div className="overflow-x-auto mt-3"><table className="w-full text-xs text-left"><thead><tr className="border-b text-slate-500"><th className="py-2 pr-3">Phase</th><th className="py-2 pr-3">Turnover forecast</th><th className="py-2">Connected path candidates</th></tr></thead><tbody>{review.phases.map(row => <tr key={row.phase} className="border-b align-top"><td className="py-3 pr-3 font-bold">{row.phase.replace(/^PH/, 'Phase ')}</td><td className="py-3 pr-3">{row.milestones.map(m => <div key={m.code}>{m.code}: {m.date || 'Date unavailable'}</div>)}</td><td className="py-3">{row.candidates.length ? row.candidates.map(c => <div key={c.id}><b>{c.code}</b> — {c.name}</div>) : 'No current path candidate established from the exported data.'}{row.pathNumbers.length > 0 && <p className="mt-1 text-slate-500">Exported float paths: {row.pathNumbers.join(', ')}</p>}</td></tr>)}</tbody></table></div>
+  </section>
 }
 
 function legacyFindingSignature(findings: ApprovalFinding[]): string {
@@ -562,7 +600,7 @@ export default function ApprovalReadinessPage() {
     async function loadSavedReview() {
       const loaded = await loadScheduleReviewResultFromSupabase(version.id)
       if (!current || !loaded.ok || !loaded.data) return
-      if (loaded.data.result.meta.engineVersion !== '2.2.0') return
+      if (loaded.data.result.meta.engineVersion !== '2.3.0') return
       if ((analysis?.facilityType === 'DATA_CENTER') !== Boolean(loaded.data.result.commissioningChecks?.length)) return
       setResult(loaded.data.result)
       setReviewSnapshot(loaded.data.snapshot || null)
@@ -643,7 +681,7 @@ export default function ApprovalReadinessPage() {
     const pending = candidates.filter(group => {
       const canonical = canonicalFindingSignature(group.findings)
       const legacy = legacyFindingSignature(group.findings)
-      return canonical && !existingSignatures.has(canonical) && !existingSignatures.has(legacy)
+      return canonical && !groupAlreadyIssued(group, existingSignatures)
     })
     if (!pending.length) return
 
@@ -834,6 +872,7 @@ export default function ApprovalReadinessPage() {
 
       {reviewDataError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4 text-sm text-red-800">{reviewDataError}</div>}
       {reviewPersistenceError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4 text-sm text-red-800">{reviewPersistenceError}</div>}
+      <PhasePathOverview review={result?.planningReview} />
       <CommentRegisterPanel
         key={`${project.id}:${version?.id || ''}`}
         comments={reviewData.comments} loading={reviewDataLoading} disabled={reviewMutation}
@@ -903,16 +942,20 @@ function CommentRegisterPanel({
   onResponse: (commentId: string, response: string, correctionMade: string) => Promise<void>
 }) {
   const [filter, setFilter] = useState<'open' | 'all'>('open')
+  const [showHistory, setShowHistory] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
   const [responses, setResponses] = useState<Record<string, { response: string; correction: string }>>({})
-  const summary = summarizeReviewComments(comments)
-  const displayed = comments.filter(comment => filter === 'all' || !CLOSED_REVIEW_STATUSES.includes(comment.status))
+  const planningComments = planningIssuedComments(result, comments)
+  const historyCount = result?.planningReview ? comments.filter(c => c.source !== 'REVIEWER_ADDED').length : 0
+  const selectedComments = showHistory ? comments : planningComments
+  const summary = summarizeReviewComments(selectedComments)
+  const displayed = selectedComments.filter(comment => filter === 'all' || !CLOSED_REVIEW_STATUSES.includes(comment.status)).filter(c => !result?.planningReview || showHistory || c.source === 'REVIEWER_ADDED')
   const actionGroups = result ? buildActionGroups(result) : { corrections: [], clarifications: [] }
   const existingSignatures = existingFindingSignatures(comments)
   const proposedGroups = [...actionGroups.corrections, ...actionGroups.clarifications].filter(group => {
     const canonical = canonicalFindingSignature(group.findings)
     const legacy = legacyFindingSignature(group.findings)
-    return canonical && !existingSignatures.has(canonical) && !existingSignatures.has(legacy)
+    return canonical && !groupAlreadyIssued(group, existingSignatures)
   })
   const unissuedCount = proposedGroups.length
 
@@ -935,11 +978,12 @@ function CommentRegisterPanel({
         </div>
       </div>
 
-      {!!result?.commissioningChecks?.length && <p className="mb-3 text-xs text-slate-500">{result.commissioningChecks.length} commissioning checks across {new Set(result.commissioningChecks.map(c => c.phase)).size} phase groups. Names and links are checked; field completion is not assessed.</p>}
-      <p className="text-xs text-slate-500 mb-4">{unissuedCount} proposed · {summary.open} open · {summary.closed} closed</p>
+      {result?.planningReview && <p className="mb-3 text-xs text-slate-500">Grouped planning comments on turnover paths, long-lead work, power and commissioning. Routine checks remain in Overview and Schedule Analysis.</p>}
+      {historyCount > 0 && <div className="mb-3 text-xs text-slate-500">{historyCount} existing generated comment records are retained with their original status. <button onClick={() => setShowHistory(!showHistory)} className="font-semibold text-blue-600">{showHistory ? 'Return to planning comments' : 'Show comment history'}</button></div>}
+      <p className="text-xs text-slate-500 mb-4">{unissuedCount} proposed{result?.planningReview ? " planning comments · Existing issued records are grouped below" : ` · ${summary.open} open · ${summary.closed} closed`}</p>
 
       <div className="flex items-center justify-between gap-3 mb-2">
-        <div className="text-[12px] font-bold text-slate-800">{filter === 'open' ? `${summary.open + summary.drafts} active items` : `${comments.length} total items`}</div>
+        <div className="text-[12px] font-bold text-slate-800">{result?.planningReview && !showHistory ? `${actionGroups.corrections.length + actionGroups.clarifications.length} planning topics` : filter === 'open' ? `${summary.open + summary.drafts} active items` : `${comments.length} total items`}</div>
         <div className="flex gap-1">
           <button onClick={() => setFilter('open')} className={`rounded-md px-3 py-1.5 text-[10px] font-bold ${filter === 'open' ? 'bg-slate-900 text-white' : 'border border-slate-200 text-slate-600'}`}>Open items</button>
           <button onClick={() => setFilter('all')} className={`rounded-md px-3 py-1.5 text-[10px] font-bold ${filter === 'all' ? 'bg-slate-900 text-white' : 'border border-slate-200 text-slate-600'}`}>All</button>
@@ -954,19 +998,24 @@ function CommentRegisterPanel({
         <div className="space-y-1.5">
           {proposedGroups.map((group, index) => <article key={group.id} className="rounded-lg border border-slate-200 bg-white p-4">
             <h3 className="text-sm font-bold text-slate-900">{index + 1}. {group.title}</h3>
-            <p className={`mt-1 text-xs font-semibold ${group.disposition === 'CORRECTION' ? 'text-red-700' : 'text-amber-700'}`}>{group.disposition === 'CORRECTION' ? 'Required correction' : group.findings[0].kind === 'RECOMMENDATION' ? 'Recommendation' : 'Clarification required'}</p>
+            <p className={`mt-1 text-xs font-semibold ${group.disposition === 'CORRECTION' ? 'text-red-700' : 'text-amber-700'}`}>{group.disposition === 'CORRECTION' ? 'Required correction' : group.kind === 'RECOMMENDATION' ? 'Recommendation' : 'Clarification required'}</p>
             <p className="mt-3 text-sm leading-relaxed text-slate-700">{group.why}</p>
             <p className="mt-2 text-sm leading-relaxed text-slate-700"><b>{group.disposition === 'CORRECTION' ? 'Required correction:' : 'Action:'}</b> {group.action}</p>
-            {group.findings[0].affectedActivities.length > 0 && <p className="mt-3 text-xs text-slate-500"><b>Activities:</b> {group.findings[0].affectedActivities.map(activity => activity.code || activity.id).join(', ')}</p>}
+            {group.findings[0].affectedActivities.length > 0 && <p className="mt-3 text-xs text-slate-500"><b>Activities:</b> {conciseActivityRefs(group.findings)}</p>}
             {group.disposition === 'CORRECTION' && <p className="mt-2 text-xs text-slate-500"><b>Basis:</b> {group.findings[0].referenceRequirement}</p>}
             <p className="mt-3 text-xs text-slate-500">Status: Proposed · Not issued</p>
           </article>)}
         </div>
       </div>}
 
+      {result?.planningReview && !showHistory && [...actionGroups.corrections, ...actionGroups.clarifications].filter(g => groupAlreadyIssued(g, existingSignatures)).map(g => {
+        const records = planningGroupRecords(g, comments).filter(c => filter === 'all' || !CLOSED_REVIEW_STATUSES.includes(c.status))
+        return records.length ? <IssuedPlanningSummary key={g.id} group={g} comments={records} /> : null
+      })}
+
       {loading ? <div className="border border-slate-200 rounded-lg p-8 text-center text-[12px] text-slate-500">Loading review comments…</div> : displayed.length === 0 ? (
         <div className="border border-dashed border-slate-300 rounded-lg p-8 text-center">
-          <div className="text-[13px] font-bold text-slate-800">No {filter === 'open' ? 'issued open ' : ''}review items</div>
+          <div className="text-[13px] font-bold text-slate-800">{result?.planningReview && summary.open > 0 ? 'Issued comments are summarized above' : `No ${filter === 'open' ? 'issued open ' : ''}review items`}</div>
           <div className="text-[11px] text-slate-500 mt-1">Detected drafts are shown above; reviewer-added and issued comments appear here.</div>
         </div>
       ) : <div className="border border-slate-200 rounded-lg overflow-hidden">
@@ -986,7 +1035,7 @@ function CommentRegisterPanel({
                 <span className="text-slate-400">{isOpen ? '⌃' : '⌄'}</span>
               </div>
             </button>
-            <div className="px-4 pb-4 text-sm leading-relaxed text-slate-700"><p>{comment.concern}</p><p className="mt-2"><b>{comment.classification === 'REQUIRED' ? 'Required correction:' : 'Action:'}</b> {comment.requiredCorrection || 'Please clarify.'}</p>{comment.affectedActivities.length > 0 && <p className="mt-2 text-xs text-slate-500">Activities: {comment.affectedActivities.map(a => a.activityCode || a.activityId).join(', ')}</p>}</div>
+            <div className="px-4 pb-4 text-sm leading-relaxed text-slate-700"><p>{comment.concern}</p><p className="mt-2"><b>{comment.classification === 'REQUIRED' ? 'Required correction:' : 'Action:'}</b> {comment.requiredCorrection || 'Please clarify.'}</p>{comment.affectedActivities.length > 0 && <p className="mt-2 text-xs text-slate-500">Activities: {comment.affectedActivities.slice(0, 5).map(a => a.activityCode || a.activityId).join(', ')}{comment.affectedActivities.length > 5 ? ' · Additional references retained' : ''}</p>}</div>
             {isOpen && <div className="border-t border-slate-100 bg-slate-50/60 p-4">
               <div className="grid md:grid-cols-2 gap-4 text-[11px]">
                 <div><div className="font-bold text-slate-500 uppercase tracking-wide text-[9px] mb-1">Owner concern</div><p className="text-slate-700 leading-relaxed">{comment.concern}</p></div>
@@ -1413,17 +1462,23 @@ function ApprovalReport({ result, project, sourceFileName, analysis, reviewComme
 }) {
   const existing = existingFindingSignatures(reviewComments)
   const groups = buildActionGroups(result)
-  const proposed = [...groups.corrections, ...groups.clarifications].filter(g => !existing.has(canonicalFindingSignature(g.findings)) && !existing.has(legacyFindingSignature(g.findings)))
-  const issued = reviewComments.filter(c => !['VOID', 'WITHDRAWN'].includes(c.status)).sort((a, b) => a.sequence - b.sequence)
+  const proposed = [...groups.corrections, ...groups.clarifications].filter(g => !groupAlreadyIssued(g, existing))
+  const issued = planningIssuedComments(result, reviewComments).filter(c => !['VOID', 'WITHDRAWN'].includes(c.status)).filter(c => !result.planningReview || c.source === 'REVIEWER_ADDED').sort((a, b) => a.sequence - b.sequence)
   return <Shell project={project}>
     <div className="print:hidden flex gap-2 mb-4"><button onClick={onBack} className="rounded-lg border px-4 py-2 text-sm">Back to Comments</button><button onClick={() => printReport('comments-report', { title: 'Schedule Review Comments', footerLabel: project.name })} className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white">Print / Save PDF</button></div>
     <main id="comments-report" className="rounded-xl border bg-white p-6">
       <h1 className="text-xl font-bold">Schedule Review Comments — {project.name}</h1>
       <p className="mt-2 text-xs text-slate-500">{sourceFileName} · Data date: {shortDate(analysis?.dataDate)}</p>
       <p className="mt-2 text-xs text-slate-500">These comments concern the submitted schedule. They do not confirm field completion or acceptance.</p>
-      {issued.map(c => <article key={c.id} className="border-t mt-5 pt-4 break-inside-avoid"><h2 className="text-sm font-bold">{c.commentNumber}. {c.title}</h2><p className="mt-2 text-sm">{c.concern}</p><p className="mt-2 text-sm"><b>{c.classification === 'REQUIRED' ? 'Required correction:' : 'Action:'}</b> {c.requiredCorrection}</p><p className="mt-2 text-xs">Activities: {c.affectedActivities.map(a => a.activityCode || a.activityId).join(', ') || 'See comment'}</p><p className="mt-2 text-xs">Status: {reviewStatusLabel(c.status)}</p></article>)}
-      {proposed.map((g, i) => <article key={g.id} className="border-t mt-5 pt-4 break-inside-avoid"><h2 className="text-sm font-bold">Proposed {i + 1}. {g.title}</h2><p className="mt-1 text-xs font-semibold">{g.disposition === 'CORRECTION' ? 'Required correction' : g.findings[0].kind === 'RECOMMENDATION' ? 'Recommendation' : 'Clarification required'}</p><p className="mt-2 text-sm">{g.why}</p><p className="mt-2 text-sm"><b>Action:</b> {g.action}</p><p className="mt-2 text-xs">Activities: {g.findings[0].affectedActivities.map(a => a.code || a.id).join(', ') || 'No activity explicitly identified; see observation'}</p><p className="mt-2 text-xs">Status: Proposed · Not issued</p></article>)}
-      {!issued.length && !proposed.length && <p className="mt-4 text-sm">No review comments identified.</p>}
+      <PhasePathOverview review={result.planningReview} />
+      {reviewComments.length > planningIssuedComments(result, reviewComments).length && <p className="text-xs text-slate-500">Previously issued technical comments outside this planning summary remain in comment history with their original status.</p>}
+      {result.planningReview && [...groups.corrections, ...groups.clarifications].filter(g => groupAlreadyIssued(g, existing)).map(g => {
+        const records = planningGroupRecords(g, reviewComments)
+        return records.length ? <IssuedPlanningSummary key={g.id} group={g} comments={records} /> : null
+      })}
+      {issued.map(c => <article key={c.id} className="border-t mt-5 pt-4 break-inside-avoid"><h2 className="text-sm font-bold">{c.commentNumber}. {c.title}</h2><p className="mt-2 text-sm">{c.concern}</p><p className="mt-2 text-sm"><b>{c.classification === 'REQUIRED' ? 'Required correction:' : 'Action:'}</b> {c.requiredCorrection}</p><p className="mt-2 text-xs">Activities: {c.affectedActivities.slice(0, 5).map(a => a.activityCode || a.activityId).join(', ') || 'See comment'}{c.affectedActivities.length > 5 ? ' · Additional references retained' : ''}</p><p className="mt-2 text-xs">Status: {reviewStatusLabel(c.status)}</p></article>)}
+      {proposed.map((g, i) => <article key={g.id} className="border-t mt-5 pt-4 break-inside-avoid"><h2 className="text-sm font-bold">Proposed {i + 1}. {g.title}</h2><p className="mt-1 text-xs font-semibold">{g.disposition === 'CORRECTION' ? 'Required correction' : g.kind === 'RECOMMENDATION' ? 'Recommendation' : 'Clarification required'}</p><p className="mt-2 text-sm">{g.why}</p><p className="mt-2 text-sm"><b>Action:</b> {g.action}</p><p className="mt-2 text-xs">Activities: {conciseActivityRefs(g.findings) || 'No activity explicitly identified; see observation'}</p><p className="mt-2 text-xs">Status: Proposed · Not issued</p></article>)}
+      {!issued.length && !proposed.length && !reviewComments.length && <p className="mt-4 text-sm">No review comments identified.</p>}
     </main>
   </Shell>
 }

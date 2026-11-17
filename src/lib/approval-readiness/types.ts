@@ -99,6 +99,7 @@ export interface ApprovalPathStatus {
 }
 
 export interface ApprovalReadinessResult {
+  planningReview?: import('./planningReview').PlanningReview
   commissioningChecks?: import('./commissioning').CommissioningCheck[]
   mode: ApprovalMode
   totalScore: number
