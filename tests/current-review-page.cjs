@@ -1,0 +1,20 @@
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),ts=require('typescript')
+const root=path.resolve(__dirname,'..'),file=path.join(root,'src/app/dashboard/approval/page.tsx'),source=fs.readFileSync(file,'utf8')
+const parsed=ts.createSourceFile(file,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX)
+assert.equal(parsed.parseDiagnostics.length,0,'Current review page must parse')
+assert.equal((source.match(/<PhaseMilestoneReview\b/g)||[]).length,1,'Selectors are rendered once on the main review page')
+assert.ok(source.includes('findings={phaseReviewFindings(result, reviewFindingSourceKey)}'))
+assert.ok(source.includes('setPhaseContractMilestones(p?.contractDates?.contractMilestones || [])'))
+assert.ok(source.includes('contractMilestones={phaseContractMilestones}'),'Contract milestones survive the source-only scoring projection')
+assert.ok(!source.includes("activeTab === 'comments'"),'Current page has no old tab dependency')
+assert.ok(source.includes('<PhasePathOverview review={result?.planningReview} />')&&source.includes('<CommentRegisterPanel'),'Current overview and register retained')
+assert.ok(source.includes('flex flex-col flex-1 min-h-0 min-w-0')&&source.includes('flex-1 min-h-0 overflow-y-auto'))
+if(process.env.CPM_ORIGINAL_PAGE){
+ const original=fs.readFileSync(process.env.CPM_ORIGINAL_PAGE,'utf8'),before=ts.createSourceFile('original.tsx',original,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX)
+ const functions=p=>new Map(p.statements.filter(ts.isFunctionDeclaration).filter(n=>n.name).map(n=>[n.name.text,n.getText(p)]))
+ const a=functions(before),b=functions(parsed)
+ for(const [name,text] of a)if(!['ApprovalReadinessPage','Shell'].includes(name))assert.equal(b.get(name),text,`Existing function preserved: ${name}`)
+ const register=original.match(/      <CommentRegisterPanel\b[\s\S]*?\/>/)[0]
+ assert.ok(source.includes(register),'All original register props are preserved exactly')
+}
+console.log('PASS: supplied current page, selectors rendered once, planning comments and contract mappings connected, existing functions/register preserved, scroll layout and TSX syntax')

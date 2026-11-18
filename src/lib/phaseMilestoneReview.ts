@@ -107,18 +107,31 @@ export function commentsForTarget(index:ReviewIndex,target:PhaseTarget):PathComm
  if(graph.unresolved)add('external','Resolve external predecessor endpoints',`${graph.unresolved} upstream relationship endpoints are outside the saved task set. Identify their scope and dates before accepting path completeness.`)
  return out
 }
+// Preserve the current planning engine's grouped comments and canonical source identities.
+export function phaseReviewFindings(result:any,keyForFinding?:(finding:any)=>string):any[]{
+ if(!result)return []
+ const raw:any[]=result.findings||[],planning=result.planningReview?.comments
+ const selected:any[]=planning||raw
+ const shown=new Set(selected.map(f=>f.id))
+ return [...selected,...(planning?raw.filter(f=>f.kind==='RECOMMENDATION'&&!shown.has(f.id)):[])].map(f=>{
+  const sourceIds:string[]=f.sourceFindingIds||[]
+  const sources=raw.filter(x=>sourceIds.includes(x.id)||sourceIds.includes(x.sourceKey)||(keyForFinding&&sourceIds.includes(keyForFinding(x))))
+  const sourceKeys=Array.from(new Set([f.id,f.sourceKey,...sourceIds,keyForFinding?.(f),...sources.flatMap(x=>[x.id,x.sourceKey,keyForFinding?.(x)])].filter(Boolean)))
+  return {...f,sourceKeys,affectedActivities:[...(f.affectedActivities||[]),...sources.flatMap(x=>x.affectedActivities||[])]}
+ })
+}
 // Associate existing review items only through confirmed activity references.
 // A phase label or generic title alone is not evidence that a finding belongs to a path.
 export function linkedReviewComments(index:ReviewIndex,target:PhaseTarget,findings:any[]=[],register:any[]=[],scopeTasks?:ReviewTask[]):PathComment[]{
  const tasks=scopeTasks||backwardReview(index,target).tasks,ids=new Set(tasks.map(t=>String(t.task_id))),codes=new Set(tasks.map(t=>t.task_code).filter(Boolean))
  const matches=(refs:any[])=>refs.some(a=>ids.has(String(a.activityId??a.id??''))||codes.has(a.activityCode??a.code)||codes.has(a.activityId??a.id))
  const validFindings=findings.filter(f=>matches(f.affectedActivities||[]))
- const validIds=new Set(validFindings.map(f=>f.id))
+ const validIds=new Set(validFindings.flatMap(f=>[f.id,f.sourceKey,...(f.sourceKeys||[])]).filter(Boolean))
  const linked=register.filter(c=>!['VOID','WITHDRAWN'].includes(c.status)&&(matches(c.affectedActivities||[])||(c.sourceFindingIds||[]).some((id:string)=>validIds.has(id))))
  const covered=new Set(linked.flatMap(c=>c.sourceFindingIds||[]))
  return [
   ...linked.map(c=>({id:target.id+':register:'+c.id,title:c.title||c.commentNumber||'Review comment',text:[c.concern,c.requiredCorrection&&'Recommendation: '+c.requiredCorrection].filter(Boolean).join('\n\n'),classification:(c.classification==='REQUIRED'?'Required correction':'Clarification required') as PathComment['classification'],activityIds:(c.affectedActivities||[]).map((a:any)=>String(a.activityId||a.activityCode||'')),sourceLabel:`Register ${c.commentNumber||''} · ${c.status||'Status unavailable'} (report copy)`})),
-  ...validFindings.filter(f=>!covered.has(f.id)).map(f=>({id:target.id+':finding:'+f.id,title:f.title||'Schedule review finding',text:[f.whatFound,f.whyItMatters,f.reviewerCheck&&'Recommendation: '+f.reviewerCheck].filter(Boolean).join('\n\n'),classification:(f.commentDisposition==='REQUIRED_CORRECTION'?'Required correction':'Clarification required') as PathComment['classification'],activityIds:(f.affectedActivities||[]).map((a:any)=>String(a.id||a.code||'')),sourceLabel:f.kind==='RECOMMENDATION'?'Existing review recommendation':'Existing review finding'}))
+  ...validFindings.filter(f=>![f.id,f.sourceKey,...(f.sourceKeys||[])].some(id=>covered.has(id))).map(f=>({id:target.id+':finding:'+f.id,title:f.title||'Schedule review finding',text:[f.whatFound,f.whyItMatters,f.reviewerCheck&&'Recommendation: '+f.reviewerCheck].filter(Boolean).join('\n\n'),classification:(f.commentDisposition==='REQUIRED_CORRECTION'?'Required correction':'Clarification required') as PathComment['classification'],activityIds:(f.affectedActivities||[]).map((a:any)=>String(a.id||a.code||'')),sourceLabel:f.kind==='RECOMMENDATION'?'Existing review recommendation':'Existing review finding'}))
  ]
 }
 export function commentsForPhase(index:ReviewIndex,phase:string,findings:any[]=[],register:any[]=[]):PathComment[]{

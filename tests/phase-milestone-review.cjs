@@ -44,6 +44,44 @@ const cg=lib.backwardReview(cyc,cyc.targets.find(t=>t.id==='g'))
 assert.ok(cg.cycle);assert.equal(cg.unresolved,1)
 assert.ok(cg.tasks.some(t=>t.task_id==='a'))
 assert.deepEqual(Array.from(lib.LEVEL_GUIDE[2]),['L2','Installation checks, pre-startup tests and verification'])
+const findings=[
+ {id:'f1',title:'Transformer release',whatFound:'Transformer test pending',reviewerCheck:'Complete test before release',affectedActivities:[{id:'b',code:'b'}]},
+ {id:'rec1',kind:'RECOMMENDATION',title:'Acceptance recommendation',whatFound:'Confirm acceptance',affectedActivities:[{code:'d'}]},
+ {id:'other',title:'Unrelated phase issue',affectedActivities:[{id:'h'}]},
+ {id:'orphan',title:'Isolated Phase 1 ceiling',whatFound:'No milestone link',affectedActivities:[{id:'n'}]},
+ {id:'generic',title:'No activity mapping',affectedActivities:[]}
+]
+const register=[{id:'r1',commentNumber:'C-01',title:'Existing transformer comment',concern:'Transformer not released',requiredCorrection:'Close testing',status:'OPEN',sourceFindingIds:['f1'],affectedActivities:[]},
+ {id:'void',title:'Void comment',status:'VOID',affectedActivities:[{activityId:'b'}]}]
+const linked=lib.linkedReviewComments(idx,target,findings,register)
+assert.ok(linked.some(c=>c.id==='g:register:r1'),'Register comments follow mapped source findings')
+assert.ok(linked.some(c=>c.id==='g:finding:rec1'),'Existing recommendations follow the path')
+assert.ok(!linked.some(c=>c.id==='g:finding:f1'),'Imported finding is not duplicated')
+assert.ok(!linked.some(c=>/other|orphan|generic|void/.test(c.id)),'Unrelated, unlinked and void comments do not leak into milestone scope')
+assert.ok(lib.commentsForPhase(idx,'Phase 1',findings,register).some(c=>c.id==='phase:Phase 1:finding:orphan'),'Phase scope retains isolated activities with no milestone path')
+assert.ok(!lib.commentsForPhase(idx,'Phase 2',findings,register).some(c=>/rec1|orphan/.test(c.id)))
+const selectedPhase=idx.targets.filter(t=>t.phase==='Phase 1'&&t.kind!=='activity').map(t=>t.id)
+const integratedHtml=report(idx,{selected:selectedPhase,excluded:['g:register:r1','d:register:r1'],edits:{'g:finding:rec1':'Edited recommendation'},assignments:{}},analysis,'Test','x',false,findings,register)
+assert.ok(integratedHtml.includes('Edited recommendation'))
+assert.ok(integratedHtml.includes('Isolated Phase 1 ceiling'),'Phase report retains linked comments from disconnected phase activities')
+assert.ok(!integratedHtml.includes('Existing transformer comment'),'Excluded source comments do not reappear in phase extras')
+assert.ok(!integratedHtml.includes('Unrelated phase issue'))
+const mapped=lib.buildReviewIndex(analysis,[{id:'contract-task',name:'Contract task',mappedActivityCode:'n'}])
+assert.equal(mapped.targets.find(t=>t.id==='n').kind,'milestone','Contract mappings remain selectable even when typed as an ordinary task')
+const currentResult={findings:[...findings],planningReview:{comments:[{id:'group1',title:'Current planning topic',sourceFindingIds:['f1'],affectedActivities:[]}]}}
+const planning=lib.phaseReviewFindings(currentResult,f=>'CANON-'+f.id)
+assert.ok(planning.some(f=>f.id==='group1'&&f.affectedActivities.some(a=>a.id==='b')),'Grouped planning comments inherit confirmed source references')
+assert.ok(planning.some(f=>f.id==='rec1'),'Existing recommendations remain selectable')
+const canonicalRegister=[{id:'issued-group',title:'Issued current planning comment',status:'OPEN',sourceFindingIds:['CANON-f1'],affectedActivities:[]}]
+const canonicalLinked=lib.linkedReviewComments(idx,target,planning,canonicalRegister)
+assert.ok(canonicalLinked.some(c=>c.id==='g:register:issued-group'),'Canonical v2 source keys retain the issued comment')
+assert.ok(!canonicalLinked.some(c=>c.id==='g:finding:group1'),'Grouped planning topic is not duplicated after issue')
+const React=require('react'),{renderToStaticMarkup}=require('react-dom/server')
+const Component=load(path.join(root,'src/components/PhaseMilestoneReview.tsx')).default
+const markup=renderToStaticMarkup(React.createElement(Component,{analysis,findings,register,storageKey:'test',label:'Test',source:'x'}))
+assert.ok(markup.includes('Comment scope')&&markup.includes('Review milestone or activity'))
+assert.ok(markup.includes('Scrollable review targets')&&markup.includes('overflow-y-auto')&&markup.includes('60vh'),'Target list has bounded, keyboard-focusable vertical scrolling')
+assert.ok(markup.includes('Report only this scope'))
 console.log('PASS: phase scope, constrained/unconstrained start/finish milestones, arbitrary activity targets, full historical/converging traces, no fabricated driving links, report selection, dates, fractional days, escaping, cycles and external endpoints')
 if(process.env.CPM_XER){
  const parser=load(path.join(root,'src/lib/xerParser.ts'))

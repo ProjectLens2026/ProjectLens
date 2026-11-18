@@ -38,7 +38,5 @@ export default function WorkspaceHeader({user}:{user:{name:string;company:string
       {project&&<><span className="whitespace-nowrap p-2 font-semibold">{project.projectId||project.name} workspace</span><Link className="whitespace-nowrap p-2" href="/dashboard/controls">Project Controls</Link>
       <Link className="whitespace-nowrap p-2" href="/dashboard/reports">Reports</Link></>}
     </nav>
-  
-    {(pathname==='/dashboard/approval'||pathname.startsWith('/dashboard/approval/'))&&<nav aria-label="Milestone review navigation" className="border-t flex flex-wrap gap-4 px-5 py-3 text-sm"><Link href="/dashboard/approval" className="text-blue-700">Review comments</Link><Link href="/dashboard/approval/paths" className="text-blue-700 font-semibold">Phase and milestone paths</Link></nav>}
   </header>
 }

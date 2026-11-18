@@ -15,6 +15,9 @@
 // hardcodes scoring numbers — they come from the evaluator/framework.
 // =============================================================================
 
+import PhaseMilestoneReview from '@/components/PhaseMilestoneReview'
+import { phaseReviewFindings } from '@/lib/phaseMilestoneReview'
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { discoverUSProject, type USProjectDiscoveryResult, type DiscoveryEvidence } from '@/lib/construction/projectDiscovery'
 import Link from 'next/link'
@@ -491,6 +494,7 @@ function ProjectDiscoveryPanel({ discovery, expanded = false }: { discovery: USP
 export default function ApprovalReadinessPage() {
   const router = useRouter()
   const [project, setProject] = useState<any>(null)
+  const [phaseContractMilestones, setPhaseContractMilestones] = useState<ContractMilestone[]>([])
   const [version, setVersion] = useState<any>(null)
   const [analysis, setAnalysis] = useState<any>(null)
   const [ready, setReady] = useState(false)
@@ -532,6 +536,8 @@ export default function ApprovalReadinessPage() {
 
       // Preserve stored setup, but exclude manual criteria from source-only review.
       setProject(p ? { ...p, contractDates: undefined, controlBasis: undefined } : p)
+      // Contract mappings populate the review selectors without changing the source-only scoring basis.
+      setPhaseContractMilestones(p?.contractDates?.contractMilestones || [])
       setVersion(v)
       const waitingForDetail = v?.analysisState === 'summary' || v?.analysisState === 'loading'
       const basedAnalysis = waitingForDetail ? null : analysisWithProjectBasis(v?.analysis || null, p, v)
@@ -826,7 +832,7 @@ export default function ApprovalReadinessPage() {
               <div className="text-[9px] font-extrabold uppercase tracking-wide text-blue-600">Review level</div>
               <div className="text-[11px] font-bold text-blue-900 mt-0.5">Version-specific review</div>
             </div>
-            <button disabled={!result} onClick={() => setReportKind('complete')} className="rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-bold text-white disabled:opacity-40">Print Comments</button>
+            <button disabled={!result} onClick={() => setReportKind('complete')} className="rounded-lg bg-slate-900 px-3 py-2 text-[11px] font-bold text-white disabled:opacity-40">Print project-wide comments</button>
           </div>
         </div>
       </div>
@@ -872,13 +878,28 @@ export default function ApprovalReadinessPage() {
 
       {reviewDataError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4 text-sm text-red-800">{reviewDataError}</div>}
       {reviewPersistenceError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4 text-sm text-red-800">{reviewPersistenceError}</div>}
-      <PhasePathOverview review={result?.planningReview} />
+      {/* Integrated phase milestone comments — based on the supplied current page */}
+      <PhaseMilestoneReview
+        key={`${project.id}:${version?.id || ''}`}
+        analysis={analysis}
+        contractMilestones={phaseContractMilestones}
+        storageKey={'cpmr:milestone-review:v1:'+project.id+':'+(version?.id||'')}
+        label={project.projectId||project.name}
+        source={version?.fileName||''}
+        findings={phaseReviewFindings(result, reviewFindingSourceKey)}
+        register={reviewData.comments}
+      />
+      <details className="rounded-xl border border-slate-200 bg-white p-4 mt-5 mb-4">
+        <summary className="cursor-pointer font-semibold text-sm">Project-wide planning overview and comment register</summary>
+        <p className="text-sm text-slate-500 my-3">Use this register to issue, respond to and close comments. Items without confirmed activity links remain here. The selectors above show comments and recommendations linked to the selected phase or milestone.</p>
+        <PhasePathOverview review={result?.planningReview} />
       <CommentRegisterPanel
         key={`${project.id}:${version?.id || ''}`}
         comments={reviewData.comments} loading={reviewDataLoading} disabled={reviewMutation}
         result={result} mode={mode} onAdd={() => setShowAddComment(true)}
         onImport={importControlLensFindings} onStatusChange={changeCommentStatus} onResponse={submitContractorResponse}
       />
+      </details>
       {!result && <p className="text-sm text-slate-500">{running ? 'Running review…' : 'Run the review to generate proposed comments.'}</p>}
 
       {showAddComment && version?.id && (
@@ -1567,7 +1588,7 @@ function Memo({ label, children }: { label: string; children: React.ReactNode })
 
 function Shell({ children, project }: { children: React.ReactNode; project?: any }) {
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0 min-w-0">
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0 no-print">
         <Link href="/dashboard" className="text-xs font-bold text-blue-600 hover:text-blue-800 whitespace-nowrap">
           ← Back to Overview
@@ -1579,7 +1600,7 @@ function Shell({ children, project }: { children: React.ReactNode; project?: any
         </div>
         <span className="ml-auto text-[11px] text-slate-400 italic">Check before you submit · Verify before you approve</span>
       </div>
-      <div className="flex-1 overflow-y-auto p-5 bg-slate-50">
+      <div className="flex-1 min-h-0 overflow-y-auto p-5 bg-slate-50">
         <div className="max-w-[1180px] mx-auto">{children}</div>
       </div>
     </div>
