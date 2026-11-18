@@ -3,7 +3,7 @@ import { exploreActivity, displayActivityDates } from './activityNetwork'
 export type ReviewTask = Record<string, any> & {task_id: string; task_code?: string; task_name?: string}
 export type ReviewLink = Record<string, any> & {task_id: string; pred_task_id: string}
 export type PhaseTarget = {id:string; taskId?:string; name:string; code:string; phase:string; family:string; kind:'milestone'|'activity'|'unmapped'; constraint:boolean; assignmentNote?:string}
-export type PathComment = {id:string; title:string; text:string; classification:'Clarification required'|'Required correction'; activityIds:string[]}
+export type PathComment = {id:string; title:string; text:string; classification:'Clarification required'|'Required correction'; activityIds:string[]; sourceLabel?:string}
 export type ReviewIndex = {tasks:Record<string,ReviewTask>; links:ReviewLink[]; targets:PhaseTarget[]; phases:string[]; predecessors:Record<string,ReviewLink[]>}
 export const UNASSIGNED='Shared / unassigned'
 export const LEVEL_GUIDE=[['L0','Design review'],['L1','Submittal review and factory testing'],['L2','Installation checks, pre-startup tests and verification'],['L3','Equipment startup and energization'],['L4','Functional performance testing'],['L5','Integrated systems testing']]
@@ -49,7 +49,7 @@ export function buildReviewIndex(analysis:any,contractMilestones:any[]=[],assign
    const existing=targets.find(t=>t.taskId===mapped.task_id)
    const rawPhase=assignments[mapped.task_id]||m.phaseOrArea||taskPhase(mapped).phase
    const phase=phaseTokens(rawPhase).length===1?phaseTokens(rawPhase)[0]:rawPhase
-   if(existing){existing.phase=phase;continue}
+   if(existing){existing.phase=phase;existing.kind='milestone';continue}
    targets.push({id:mapped.task_id,taskId:mapped.task_id,code:mapped.task_code||mapped.task_id,name:mapped.task_name||m.name,phase,family:targetFamily(mapped),kind:'milestone',constraint:Boolean(mapped.cstr_type||mapped.cstr_type2)})
   } else {
    const id='contract:'+(m.id||m.mappedActivityCode||m.name)
@@ -107,9 +107,30 @@ export function commentsForTarget(index:ReviewIndex,target:PhaseTarget):PathComm
  if(graph.unresolved)add('external','Resolve external predecessor endpoints',`${graph.unresolved} upstream relationship endpoints are outside the saved task set. Identify their scope and dates before accepting path completeness.`)
  return out
 }
+// Associate existing review items only through confirmed activity references.
+// A phase label or generic title alone is not evidence that a finding belongs to a path.
+export function linkedReviewComments(index:ReviewIndex,target:PhaseTarget,findings:any[]=[],register:any[]=[],scopeTasks?:ReviewTask[]):PathComment[]{
+ const tasks=scopeTasks||backwardReview(index,target).tasks,ids=new Set(tasks.map(t=>String(t.task_id))),codes=new Set(tasks.map(t=>t.task_code).filter(Boolean))
+ const matches=(refs:any[])=>refs.some(a=>ids.has(String(a.activityId??a.id??''))||codes.has(a.activityCode??a.code)||codes.has(a.activityId??a.id))
+ const validFindings=findings.filter(f=>matches(f.affectedActivities||[]))
+ const validIds=new Set(validFindings.map(f=>f.id))
+ const linked=register.filter(c=>!['VOID','WITHDRAWN'].includes(c.status)&&(matches(c.affectedActivities||[])||(c.sourceFindingIds||[]).some((id:string)=>validIds.has(id))))
+ const covered=new Set(linked.flatMap(c=>c.sourceFindingIds||[]))
+ return [
+  ...linked.map(c=>({id:target.id+':register:'+c.id,title:c.title||c.commentNumber||'Review comment',text:[c.concern,c.requiredCorrection&&'Recommendation: '+c.requiredCorrection].filter(Boolean).join('\n\n'),classification:(c.classification==='REQUIRED'?'Required correction':'Clarification required') as PathComment['classification'],activityIds:(c.affectedActivities||[]).map((a:any)=>String(a.activityId||a.activityCode||'')),sourceLabel:`Register ${c.commentNumber||''} · ${c.status||'Status unavailable'} (report copy)`})),
+  ...validFindings.filter(f=>!covered.has(f.id)).map(f=>({id:target.id+':finding:'+f.id,title:f.title||'Schedule review finding',text:[f.whatFound,f.whyItMatters,f.reviewerCheck&&'Recommendation: '+f.reviewerCheck].filter(Boolean).join('\n\n'),classification:(f.commentDisposition==='REQUIRED_CORRECTION'?'Required correction':'Clarification required') as PathComment['classification'],activityIds:(f.affectedActivities||[]).map((a:any)=>String(a.id||a.code||'')),sourceLabel:f.kind==='RECOMMENDATION'?'Existing review recommendation':'Existing review finding'}))
+ ]
+}
+export function commentsForPhase(index:ReviewIndex,phase:string,findings:any[]=[],register:any[]=[]):PathComment[]{
+ const target:PhaseTarget={id:'phase:'+phase,phase,name:phase,code:phase,family:'Other',kind:'unmapped',constraint:false}
+ const scope=index.targets.filter(t=>t.phase===phase&&t.taskId).map(t=>index.tasks[t.taskId!])
+ return linkedReviewComments(index,target,findings,register,scope)
+}
+export const reviewCommentSourceKey=(c:PathComment)=>c.id.includes(':register:')?'register:'+c.id.split(':register:')[1]:c.id.includes(':finding:')?'finding:'+c.id.split(':finding:')[1]:c.id
+export function commentsForReview(index:ReviewIndex,target:PhaseTarget,findings:any[]=[],register:any[]=[]):PathComment[]{return [...linkedReviewComments(index,target,findings,register),...commentsForTarget(index,target)]}
 export function escapeReviewHtml(s:unknown):string{return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!))}
-export function reportModel(index:ReviewIndex,selected:string[],excludedComments:string[]=[],edits:Record<string,string>={}){
+export function reportModel(index:ReviewIndex,selected:string[],excludedComments:string[]=[],edits:Record<string,string>={},findings:any[]=[],register:any[]=[]){
  const wanted=new Set(selected),excluded=new Set(excludedComments)
- return index.targets.filter(t=>wanted.has(t.id)).map(target=>({target,graph:backwardReview(index,target),comments:commentsForTarget(index,target).filter(c=>!excluded.has(c.id)).map(c=>({...c,text:edits[c.id]??c.text}))}))
+ return index.targets.filter(t=>wanted.has(t.id)).map(target=>({target,graph:backwardReview(index,target),comments:commentsForReview(index,target,findings,register).filter(c=>!excluded.has(c.id)).map(c=>({...c,text:edits[c.id]??c.text}))}))
 }
 export function reviewTaskDate(t:ReviewTask){return displayActivityDates(t)}
