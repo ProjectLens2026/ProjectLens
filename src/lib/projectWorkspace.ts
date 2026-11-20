@@ -1,11 +1,11 @@
 import {compareScheduleVersions} from './versionBrowser'
 /** Shared navigation rules. Opening a version does not assign/approve a baseline. */
-export const PROJECT_TABS=[{label:'Schedules',href:'/dashboard/schedules'},{label:'Review',href:'/dashboard/approval'},{label:'Project Control',href:'/dashboard'},{label:'Compare',href:'/dashboard/changes'}]
+export const PROJECT_TABS=[{label:'Versions & uploads',href:'/dashboard/schedules'},{label:'QC & decisions',href:'/dashboard/approval'},{label:'Project Controls',href:'/dashboard'},{label:'Compare & revisions',href:'/dashboard/changes'}]
 export function workspaceTab(path:string):string|null {
- if(path==='/dashboard/schedules')return 'Schedules'
- if(path==='/dashboard/approval'||path.startsWith('/dashboard/approval/'))return 'Review'
- if(path==='/dashboard/changes')return 'Compare'
- if(path==='/dashboard'||['lens','controls','reports','report','trace','risks','procurement','submittals','evm','trend','tia','project-setup'].some(s=>path==='/dashboard/'+s||path.startsWith('/dashboard/'+s+'/')))return 'Project Control'
+ if(path==='/dashboard/schedules')return 'Versions & uploads'
+ if(path==='/dashboard/approval'||path.startsWith('/dashboard/approval/'))return 'QC & decisions'
+ if(path==='/dashboard/changes')return 'Compare & revisions'
+ if(path==='/dashboard'||['lens','controls','reports','report','trace','risks','procurement','submittals','evm','trend','tia','project-setup'].some(s=>path==='/dashboard/'+s||path.startsWith('/dashboard/'+s+'/')))return 'Project Controls'
  return null
 }
 export const visibleWorkspaceProjects=(projects:any[])=>projects.filter(p=>!p.deletedAt&&!['Deleted','Archived'].includes(p.status))

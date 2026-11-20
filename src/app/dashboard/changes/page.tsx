@@ -131,14 +131,14 @@ export default function VersionComparisonPage() {
       <div className="mx-auto max-w-6xl space-y-4">
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <div className="border-b border-slate-200 bg-gradient-to-r from-blue-50 to-white p-5">
-            <div className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-blue-600">Compare schedule versions</div>
-            <h1 className="mt-1 text-xl font-black text-slate-900">Compare any two schedule versions</h1>
+            <div className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-blue-600">Compare & revisions</div>
+            <h1 className="mt-1 text-xl font-black text-slate-900">Compare any two submissions</h1>
             <p className="mt-1 text-xs text-slate-500">This compares actual XER activities, dates, durations, float, logic and milestones. It does not depend on activity names containing “change” or “CO”.</p>
           </div>
           <div className="grid gap-4 p-5 md:grid-cols-[1fr_auto_1fr_auto] md:items-end">
-            <label><span className="mb-1.5 block text-[9px] font-extrabold uppercase tracking-wide text-slate-500">Prior version</span><select value={priorId} onChange={event => { setPriorId(event.target.value); setComparison(null) }} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-xs font-bold text-slate-800"><option value="">Select prior version</option>{versions.filter(version => version.id !== currentId).map(version => <option key={version.id} value={version.id}>{versionName(version)} · {shortDate(version.dataDate)}</option>)}</select></label>
+            <label><span className="mb-1.5 block text-[9px] font-extrabold uppercase tracking-wide text-slate-500">Reference version</span><select value={priorId} onChange={event => { setPriorId(event.target.value); setComparison(null) }} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-xs font-bold text-slate-800"><option value="">Select prior version</option>{versions.filter(version => version.id !== currentId).map(version => <option key={version.id} value={version.id}>{versionName(version)} · {shortDate(version.dataDate)}</option>)}</select></label>
             <div className="pb-2 text-center text-slate-400">→</div>
-            <label><span className="mb-1.5 block text-[9px] font-extrabold uppercase tracking-wide text-slate-500">Current / selected version</span><select value={currentId} onChange={event => selectCurrent(event.target.value)} className="w-full rounded-lg border border-blue-300 bg-blue-50 px-3 py-2.5 text-xs font-bold text-slate-900"><option value="">Select current version</option>{versions.map(version => <option key={version.id} value={version.id}>{versionName(version)} · {shortDate(version.dataDate)}</option>)}</select></label>
+            <label><span className="mb-1.5 block text-[9px] font-extrabold uppercase tracking-wide text-slate-500">Compared version</span><select value={currentId} onChange={event => selectCurrent(event.target.value)} className="w-full rounded-lg border border-blue-300 bg-blue-50 px-3 py-2.5 text-xs font-bold text-slate-900"><option value="">Select current version</option>{versions.map(version => <option key={version.id} value={version.id}>{versionName(version)} · {shortDate(version.dataDate)}</option>)}</select></label>
             <button disabled={running || !priorVersion || !currentVersion} onClick={runComparison} className="rounded-lg bg-blue-600 px-5 py-2.5 text-xs font-bold text-white disabled:opacity-40">{running ? 'Comparing XERs…' : 'Run Comparison'}</button>
           </div>
         </section>

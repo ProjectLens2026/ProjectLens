@@ -1,5 +1,6 @@
 'use client'
 import VersionDecisionPanel from '@/components/VersionDecisionPanel'
+import ProjectControlBanner from '@/components/ProjectControlBanner'
 
 // =============================================================================
 // src/app/dashboard/approval/page.tsx   (Approval Readiness workspace)
@@ -838,6 +839,9 @@ export default function ApprovalReadinessPage() {
         </div>
       </div>
 
+      <div className="mb-4"><h1 className="text-2xl font-bold">QC & decisions</h1><p className="text-sm text-slate-500 mt-1">Evaluate the submission below, complete the review, then record its decision. These actions update the version history.</p></div>
+      <VersionDecisionPanel key={project.id+':'+version.id} projectId={project.id} versionId={version.id} />
+      <ProjectControlBanner />
       <label className="block rounded-xl border border-slate-200 bg-white p-4 mb-4"><span className="block text-xs font-bold text-slate-600 mb-2">Facility type *</span>
         <select aria-label="Facility type" value={analysis.facilityType || ''} onChange={e => { updateProjectControlBasis(project.id, { facilityType: e.target.value as NonNullable<import('@/lib/projectStore').ProjectControlBasis['facilityType']> }); setReviewDataError(null) }} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" required>
           <option value="" disabled>Select facility type</option><option value="DATA_CENTER">Data center</option><option value="HIGH_RISE">High-rise building</option><option value="BUILDING">Building</option><option value="INFRASTRUCTURE">Infrastructure</option><option value="OTHER">Other</option>
@@ -880,7 +884,6 @@ export default function ApprovalReadinessPage() {
       {reviewDataError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4 text-sm text-red-800">{reviewDataError}</div>}
       {reviewPersistenceError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4 text-sm text-red-800">{reviewPersistenceError}</div>}
       {/* Integrated phase milestone comments — based on the supplied current page */}
-      <VersionDecisionPanel key={project.id+':'+version.id} projectId={project.id} versionId={version.id} />
       <PhaseMilestoneReview
         key={`${project.id}:${version?.id || ''}`}
         analysis={analysis}
@@ -1593,11 +1596,11 @@ function Shell({ children, project }: { children: React.ReactNode; project?: any
     <div className="flex flex-col flex-1 min-h-0 min-w-0">
       <div className="bg-white border-b border-slate-200 px-6 h-14 flex items-center gap-4 flex-shrink-0 no-print">
         <Link href="/dashboard" className="text-xs font-bold text-blue-600 hover:text-blue-800 whitespace-nowrap">
-          ← Back to Overview
+          ← Back to Project Controls
         </Link>
         <div className="h-6 border-l border-slate-200" />
         <div>
-          <span className="font-bold text-slate-900 text-base">Review Schedule</span>
+          <span className="font-bold text-slate-900 text-base">QC & decisions</span>
           <span className="text-slate-400 text-sm ml-2">{project ? `· ${project.name}` : ''}</span>
         </div>
         <span className="ml-auto text-[11px] text-slate-400 italic">Check before you submit · Verify before you approve</span>
