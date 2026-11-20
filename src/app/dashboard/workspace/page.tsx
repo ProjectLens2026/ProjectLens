@@ -4,18 +4,76 @@ import Link from 'next/link'
 import {useRouter} from 'next/navigation'
 import PortfolioCreateProject from '@/components/PortfolioCreateProject'
 import PortfolioEditProject from '@/components/PortfolioEditProject'
-import {setActiveProjectId,setActiveVersionId} from '@/lib/projectStore'
+import {setActiveProjectId,setActiveVersionId,ensureWorkspaceProject} from '@/lib/projectStore'
 import {usePermissions} from '@/lib/usePermissions'
 import {useProjectDirectory} from '@/components/useProjectDirectory'
 import DirectoryControls,{DirectoryPager} from '@/components/DirectoryControls'
-import {ensureWorkspaceProject} from '@/lib/projectStore'
 import {useProjectWorkspace,rememberedProjectVersion} from '@/components/useProjectWorkspace'
 import {workspaceVersion} from '@/lib/projectWorkspace'
 import {decisionLabel} from '@/lib/controlWorkflow'
 import {useVersionNavigation} from '@/components/VersionNavigation'
-export default function PortfolioWorkspace(){const permissions=usePermissions(),state=useProjectWorkspace(),directory=useProjectDirectory(permissions.user?.orgId),navigation=useVersionNavigation(),router=useRouter(),[error,setError]=useState(''),[busy,setBusy]=useState(false),[created,setCreated]=useState(''),generation=useRef(0)
+import './portfolio.css'
+
+function date(value:string){
+ const raw=String(value||'').slice(0,10)
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(raw))return 'Not recorded'
+ const [year,month,day]=raw.split('-'),label=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(month)-1]
+ return label?`${day}-${label}-${year}`:'Not recorded'
+}
+
+export default function PortfolioWorkspace(){
+ const permissions=usePermissions(),state=useProjectWorkspace(),directory=useProjectDirectory(permissions.user?.orgId),navigation=useVersionNavigation(),router=useRouter()
+ const [error,setError]=useState(''),[busy,setBusy]=useState(false),[created,setCreated]=useState(''),generation=useRef(0)
  useEffect(()=>{generation.current++;setBusy(false);setError('');setCreated('');return()=>{generation.current++}},[permissions.user?.orgId])
- async function open(row:any){const ticket=++generation.current;setBusy(true);setError('');try{const project=await ensureWorkspaceProject(row.id);if(ticket!==generation.current)return;const version=workspaceVersion(project,project.id===state.project?.id?state.version?.id:rememberedProjectVersion(project.id));if(!version){setActiveProjectId(project.id);setActiveVersionId(null);router.push('/dashboard/schedules');return}navigation.request(project.id,version.id,'/dashboard/schedules')}catch(e){if(ticket===generation.current)setError(String((e as any)?.message||e))}finally{if(ticket===generation.current)setBusy(false)}}
- const date=(s:string)=>s?String(s).slice(0,10):'Not recorded'
- return <main data-navigation-controls className="flex-1 min-h-0 overflow-y-auto p-5"><div className="flex flex-wrap gap-4 items-center mb-5"><h1 className="text-2xl font-bold">Portfolio</h1><div className="ml-auto flex items-center gap-4"><Link href="/dashboard/projects" className="text-blue-700 text-sm">Manage projects</Link>{permissions.can.createProject&&<PortfolioCreateProject onCreated={id=>{setCreated(id);directory.setQuery('');directory.setStatus('');directory.setStage('');directory.setPage(0);directory.reload()}}/>}</div></div><DirectoryControls directory={directory}/>{created&&<div role="status" className="rounded-lg border border-blue-200 bg-blue-50 p-3 mt-4 text-sm">Project saved. <button type="button" disabled={busy||navigation.opening} className="text-blue-700 underline" onClick={()=>open({id:created})}>Open new project</button></div>}{directory.error&&<p role="alert" className="text-red-700 my-3">{directory.error}</p>}{error&&<p role="alert" className="text-red-700 my-3">{error}</p>}<div className="flex justify-between text-sm text-slate-500 mt-4 mb-3"><span>{directory.total.toLocaleString()} matching projects</span><span>Results {directory.total?directory.page*directory.size+1:0}–{Math.min((directory.page+1)*directory.size,directory.total)}</span></div><div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4">{directory.rows.map((row:any,index:number)=><article key={row.id} className="rounded-xl border bg-white p-5 flex flex-col gap-3 min-w-0"><div className="flex justify-between gap-3 items-start"><span className="text-xs text-slate-400">Result {directory.page*directory.size+index+1}</span><span className="text-xs rounded-full px-2 py-1 bg-slate-100 text-slate-700">{row.status.replace(/_/g,' ')}</span></div><button className="text-left font-bold text-lg text-slate-900" disabled={busy||navigation.opening} onClick={()=>open(row)}>{row.project_code||row.name}</button><p className="text-sm text-slate-600">{row.name}</p><p className="text-sm break-words">{row.address||'Address not recorded'}</p><p className="text-sm text-slate-600">Stage: {row.stage||'Not recorded'}</p><div className="grid grid-cols-2 gap-3 border-t pt-3 text-xs"><div><span className="text-slate-500 block">Data date · latest upload</span>{date(row.data_date)}</div><div><span className="text-slate-500 block">Uploaded</span>{date(row.uploaded_at)}</div><div><span className="text-slate-500 block">Reviewed</span>{date(row.reviewed_at)}</div><div><span className="text-slate-500 block">Decision</span>{decisionLabel(row.decision)}</div></div><div className="mt-auto flex flex-wrap gap-2 items-center"><button className="self-start border rounded-lg px-3 py-2 text-blue-700 text-sm" disabled={busy||navigation.opening} onClick={()=>open(row)}>Open project</button>{permissions.can.renameProject&&<PortfolioEditProject key={row.id} projectId={row.id} onSaved={()=>directory.reload()}/>}</div></article>)}</div>{directory.loading&&<p role="status" className="p-5">Loading projects…</p>}{!directory.loading&&!directory.rows.length&&!directory.error&&<p className="p-5">No projects match your filters.</p>}<DirectoryPager directory={directory}/></main>
+ async function open(row:any){
+  const ticket=++generation.current;setBusy(true);setError('')
+  try{
+   const project=await ensureWorkspaceProject(row.id)
+   if(ticket!==generation.current)return
+   const version=workspaceVersion(project,project.id===state.project?.id?state.version?.id:rememberedProjectVersion(project.id))
+   if(!version){setActiveProjectId(project.id);setActiveVersionId(null);router.push('/dashboard/schedules');return}
+   navigation.request(project.id,version.id,'/dashboard/schedules')
+  }catch(e){if(ticket===generation.current)setError(String((e as any)?.message||e))}
+  finally{if(ticket===generation.current)setBusy(false)}
+ }
+ return <main data-navigation-controls className="portfolio-root flex-1 min-h-0 overflow-y-auto">
+  <div className="portfolio-heading">
+   <h1>Portfolio <span>{directory.total.toLocaleString()} projects</span></h1>
+   <div className="portfolio-heading-actions">
+    <Link href="/dashboard/projects">Manage projects</Link>
+    {permissions.can.createProject&&<PortfolioCreateProject onCreated={id=>{setCreated(id);directory.setQuery('');directory.setStatus('');directory.setStage('');directory.setPage(0);directory.reload()}}/>}
+   </div>
+  </div>
+  <div className="portfolio-filters"><DirectoryControls directory={directory}/></div>
+  {created&&<div role="status" className="portfolio-notice">Project saved. <button type="button" disabled={busy||navigation.opening} onClick={()=>open({id:created})}>Open new project</button></div>}
+  {directory.error&&<p role="alert" className="portfolio-error">{directory.error}</p>}
+  {error&&<p role="alert" className="portfolio-error">{error}</p>}
+  <div className="portfolio-results"><span>{directory.total.toLocaleString()} matching projects</span><span>Results {directory.total?directory.page*directory.size+1:0}–{Math.min((directory.page+1)*directory.size,directory.total)}</span></div>
+  <div className="portfolio-grid" aria-label="Projects">
+   {directory.rows.map((row:any,index:number)=><article key={row.id} className="portfolio-card" aria-label={row.project_code||row.name}>
+    <span className="sr-only">Result {directory.page*directory.size+index+1}</span>
+    <div className="portfolio-card-heading">
+     <h2><button type="button" className="portfolio-project-id" disabled={busy||navigation.opening} onClick={()=>open(row)}>{row.project_code||row.name}</button></h2>
+     <span className="portfolio-status" data-status={row.status}>{String(row.status||'Not recorded').replace(/_/g,' ')}</span>
+    </div>
+    <p className="portfolio-project-name">{row.name}</p>
+    <p className="portfolio-address">{row.address||'Address not recorded'}</p>
+    <p className="portfolio-stage">Stage: {row.stage||'Not recorded'}</p>
+    <div className="portfolio-card-footer">
+     <div className="portfolio-data-date"><span>Data date</span>{row.data_date?<time dateTime={String(row.data_date).slice(0,10)}>{date(row.data_date)}</time>:<strong>Not recorded</strong>}</div>
+     <div className="portfolio-card-actions">
+      <button type="button" className="portfolio-open" disabled={busy||navigation.opening} onClick={()=>open(row)}>Open project</button>
+      {permissions.can.renameProject&&<div className="portfolio-edit"><PortfolioEditProject key={row.id} label="Edit" projectId={row.id} onSaved={()=>directory.reload()}/></div>}
+     </div>
+     <details className="portfolio-schedule-details">
+      <summary>Schedule details</summary>
+      <dl><div><dt>Uploaded</dt><dd>{date(row.uploaded_at)}</dd></div><div><dt>Reviewed</dt><dd>{date(row.reviewed_at)}</dd></div><div><dt>Decision</dt><dd>{decisionLabel(row.decision)}</dd></div></dl>
+     </details>
+    </div>
+   </article>)}
+  </div>
+  {directory.loading&&<p role="status" className="portfolio-empty">Loading projects…</p>}
+  {!directory.loading&&!directory.rows.length&&!directory.error&&<p className="portfolio-empty">No projects match your filters.</p>}
+  <div className="portfolio-pager"><DirectoryPager directory={directory}/></div>
+ </main>
 }

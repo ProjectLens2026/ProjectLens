@@ -8,7 +8,7 @@ function load(file, mocks = {}, globals = {}) {
     compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX}
   }).outputText
   vm.runInNewContext(code, {exports, Date, Map, Set, console, setTimeout, clearTimeout,
-    require: id => Object.hasOwn(mocks,id) ? mocks[id] : id === 'react' || id === 'react/jsx-runtime' ? require(id) : (()=>{throw Error('Unmocked dependency '+id+' in '+file)})(), ...globals})
+    require: id => Object.hasOwn(mocks,id) ? mocks[id] : id.endsWith('.css') ? {} : id === 'react' || id === 'react/jsx-runtime' ? require(id) : (()=>{throw Error('Unmocked dependency '+id+' in '+file)})(), ...globals})
   return exports
 }
 // Small hook harness: keeps state, re-runs only changed effects and checks cleanup.
