@@ -21,6 +21,8 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import UploadDestination, {UploadFolderChoice} from '@/components/UploadDestination'
+import {completeUploadDestination, UploadTarget} from '@/lib/uploadDestination'
 import { usePermissions } from '@/lib/usePermissions'
 import {
   getActiveProjectId, loadProjects,
@@ -104,6 +106,14 @@ export default function UploadPage() {
       ? 'existing'
       : null
   const requestedProjectId = uploadRequest?.get('project') || ''
+  const requestedFolderId = uploadRequest?.get('folder') || ''
+  const [destination,setDestination]=useState<UploadFolderChoice>({projectId:'',folderId:null,ready:false})
+  const [savedUpload,setSavedUpload]=useState<UploadTarget|null>(null)
+  const [filingError,setFilingError]=useState('')
+  const [savePhase,setSavePhase]=useState('')
+  const [retrying,setRetrying]=useState(false)
+  const uploadLock=useRef(false)
+  async function retryFiling(){if(!savedUpload||uploadLock.current)return;uploadLock.current=true;setRetrying(true);setFilingError('');try{const target={...savedUpload,folderId:destination.projectId===savedUpload.projectId?destination.folderId:savedUpload.folderId};const route=await completeUploadDestination(target);router.push(route)}catch(e){setFilingError(String((e as any)?.message||e))}finally{uploadLock.current=false;setRetrying(false)}}
   const [step, setStep] = useState<Step>('upload')
   const [file, setFile] = useState<File | null>(null)
   const [uploadError, setUploadError] = useState('')
@@ -356,6 +366,13 @@ export default function UploadPage() {
   // labeling metadata attached.
   // -------------------------------------------------------------------------
   async function runAnalysis() {
+    if(uploadLock.current)return;
+    uploadLock.current=true;
+    try { await performAnalysis(); } finally { uploadLock.current=false; }
+  }
+  async function performAnalysis() {
+    if(projectMode==='existing'&&(!destination.ready||destination.projectId!==selectedProjectId)){setDateError('Choose a valid upload destination before continuing.');return}
+    setFilingError('');setSavedUpload(null);setSavePhase('');
     // v14 — schedule type required
     if (!scheduleType) {
       setDateError('Please pick a Schedule Type (Baseline, Rebaseline, or Update) above')
@@ -450,6 +467,8 @@ export default function UploadPage() {
       // (always 0 for baseline since it's the first version). For EXISTING,
       // we look up the next sequence number for the chosen schedule type.
       // ---------------------------------------------------------------------
+      let savedIdentity:UploadTarget|null=null
+      let pendingCloudSave:Promise<boolean>|undefined
       try {
         const versionDates: VersionDates = { timeExtensionDays: 0 }
         const dataDate = data.analysis?.dataDate || undefined
@@ -506,7 +525,10 @@ export default function UploadPage() {
             sequenceNumber: nextSeq,
           })
           updateProjectControlBasis(selectedProjectId, { facilityType })
-          const updated = addVersionToProject(selectedProjectId, version)
+          savedIdentity={projectId:selectedProjectId,versionId:version.id,folderId:destination.folderId}
+          setSavedUpload(savedIdentity)
+          const updated = addVersionToProject(selectedProjectId, version, {onCloudSave:pending=>{pendingCloudSave=pending}})
+          if(!updated)throw Error('The project could not be found. The submission was not saved.')
           console.log('[ControlLens] Add result:', { success: !!updated, totalVersions: updated?.versions.length })
         } else {
           // NEW project — schedule type is always baseline (UI enforces it).
@@ -540,6 +562,7 @@ export default function UploadPage() {
           }
 
           const newProj = createProject({
+            onCloudSave:pending=>{pendingCloudSave=pending},
             name: projectName,
             projectId: pid,
             owner: ctx.owner,
@@ -547,6 +570,8 @@ export default function UploadPage() {
             controlBasis: { facilityType },
             version,
           })
+          savedIdentity={projectId:newProj.id,versionId:version.id,folderId:null}
+          setSavedUpload(savedIdentity)
           console.log('[ControlLens] Created new project', {
             id: newProj.id,
             name: newProj.name,
@@ -555,21 +580,22 @@ export default function UploadPage() {
           })
         }
 
+        setSavePhase('Saving the original file and analysis…')
+        if(!pendingCloudSave||!await pendingCloudSave)throw Error('Cloud saving could not be confirmed. Keep this page open and retry verification; do not upload another copy.')
+        if(!savedIdentity)throw Error('The saved submission could not be identified.')
+        setSavePhase('Placing the saved schedule in its folder…')
+        const route=await completeUploadDestination(savedIdentity)
+        router.push(route)
+
         // The active project/version is the source of truth. Do not duplicate
         // a multi-megabyte analysis in localStorage; large schedules exceed its
         // quota and JSON.stringify blocks the main browser thread.
       } catch (err: any) {
         console.error('[ControlLens] Failed to save project:', err)
-        const userMessage = err?.message ||
-          'Failed to save this project. The analysis displayed above is correct, but it was not saved.'
-        alert(
-          'Your schedule was analyzed successfully, but we could not save it:\n\n' +
-          userMessage +
-          '\n\nThe analysis below is still accurate — but it will not appear in your Projects list unless saving succeeds.'
-        )
+        setFilingError(err?.message||'Saving or folder filing could not be verified. Keep this page open.')
+        setStep('done')
       }
 
-      setTimeout(() => router.push('/dashboard'), 300)
     } catch (err: any) {
       clearInterval(progInterval)
       console.error('[ControlLens] Analysis error:', err)
@@ -1012,6 +1038,7 @@ export default function UploadPage() {
               </div>
             </div>
 
+            {projectMode==='existing'&&selectedProjectId&&<UploadDestination projectId={selectedProjectId} requestedProject={requestedProjectId} requestedFolder={requestedFolderId} onChange={setDestination}/>}
             <div className="bg-blue-50 border rounded-xl p-4 mb-5 text-sm">Schedule dates are read from the uploaded file. Contract dates and manual data-date overrides are not required.</div>
             {dateError && <p role="alert" className="text-red-700 mb-3">{dateError}</p>}
             <div className="flex gap-3 pt-2">
@@ -1026,10 +1053,11 @@ export default function UploadPage() {
           </div>
         )}
 
+        {step === 'done' && (filingError||retrying) && <section className="max-w-2xl mx-auto bg-white rounded-xl border p-6"><h2 className="text-lg font-bold">Upload needs attention</h2><p role="alert" className="text-red-700 my-4">{filingError}</p>{savedUpload&&<><p className="text-sm text-slate-600">Retry verifies and files the same submission. It does not upload another copy.</p><fieldset disabled={retrying}><UploadDestination projectId={savedUpload.projectId} requestedProject={savedUpload.projectId} requestedFolder={savedUpload.folderId||''} onChange={setDestination}/></fieldset><button type="button" disabled={retrying||!destination.ready||destination.projectId!==savedUpload.projectId} onClick={()=>void retryFiling()} className="rounded-lg bg-blue-600 text-white p-3 disabled:opacity-50">{retrying?'Verifying…':'Retry verification and filing'}</button></>}</section>}
         {step === 'analyzing' && (
           <div className="max-w-2xl mx-auto text-center py-16">
             <div className="text-6xl mb-6 animate-pulse">🔍</div>
-            <h2 className="text-xl font-extrabold text-slate-900 mb-2">ControlLens is reading your schedule</h2>
+            <h2 className="text-xl font-extrabold text-slate-900 mb-2">{savePhase||'ControlLens is reading your schedule'}</h2>
             <p className="text-slate-500 text-sm mb-8">Parsing activities, relationships, logic, and critical path...</p>
             <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
               <div className="bg-slate-100 rounded-full h-2 overflow-hidden mb-3">

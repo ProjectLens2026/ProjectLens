@@ -1241,6 +1241,7 @@ export function createProject(opts: {
   controlBasis?: ProjectControlBasis
   contractDates?: ContractDates    // NEW — manual NTP + Original Completion
   version: ScheduleVersion
+  onCloudSave?: (save: Promise<boolean>) => void
 }): Project {
   const project: Project = {
     id: 'proj_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
@@ -1263,15 +1264,12 @@ export function createProject(opts: {
   })
   // v15 — also push to Supabase in background. Fire-and-forget; if cloud
   // write fails we still have the local copy. User can retry via next push.
-  insertProjectToSupabase(project).then(ok => {
-    if (!ok) {
-      console.warn('[ControlLens] createProject: Supabase persist failed (will retry on next session)')
-      return
-    }
+  const cloudSave = insertProjectToSupabase(project).then(ok => {
+    if (!ok) { console.warn('[ControlLens] createProject: Supabase persist failed'); return false }
     releaseRawScheduleSource(project.id, opts.version.id)
-  }).catch(err => {
-    console.error('[ControlLens] createProject: Supabase persist error:', err)
-  })
+    return true
+  }).catch(err => { console.error('[ControlLens] createProject: Supabase persist error:', err); return false })
+  opts.onCloudSave?.(cloudSave)
   setActiveProjectId(project.id)
   setActiveVersionId(opts.version.id)
   return project
@@ -1338,7 +1336,7 @@ export async function createEmptyProject(opts: {
   return { project, cloudOk, error: errorMsg }
 }
 
-export function addVersionToProject(projectId: string, version: ScheduleVersion): Project | null {
+export function addVersionToProject(projectId: string, version: ScheduleVersion, options?: { onCloudSave?: (save: Promise<boolean>) => void }): Project | null {
   const idx = _projects.findIndex(p => p.id === projectId)
   if (idx === -1) return null
   const loadedVersion: ScheduleVersion = { ...version, analysisState: 'loaded' }
@@ -1353,15 +1351,12 @@ export function addVersionToProject(projectId: string, version: ScheduleVersion)
     console.error('[ControlLens] addVersionToProject: IndexedDB persist failed:', err)
   })
   // v15 — push the new version (with raw XER upload) to Supabase. Background.
-  addVersionToSupabase(projectId, version).then(ok => {
-    if (!ok) {
-      console.warn('[ControlLens] addVersion: Supabase persist failed')
-      return
-    }
+  const cloudSave = addVersionToSupabase(projectId, version).then(ok => {
+    if (!ok) { console.warn('[ControlLens] addVersion: Supabase persist failed'); return false }
     releaseRawScheduleSource(projectId, version.id, version.analysisPath)
-  }).catch(err => {
-    console.error('[ControlLens] addVersion: Supabase persist error:', err)
-  })
+    return true
+  }).catch(err => { console.error('[ControlLens] addVersion: Supabase persist error:', err); return false })
+  options?.onCloudSave?.(cloudSave)
   setActiveProjectId(projectId)
   setActiveVersionId(version.id)
   return updated

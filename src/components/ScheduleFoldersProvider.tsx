@@ -73,6 +73,14 @@ export default function ScheduleFoldersProvider({ children }: {
         }
     }, [projectId]);
     useEffect(() => { writeLock.current = false; setBusy(false); setView({ projectId, scope: 'all', query: '', sort: 'newest' }); void reload(); return () => { generation.current++; }; }, [projectId, reload]);
+    useEffect(() => {
+        if (path !== '/dashboard/schedules' || !projectId || typeof window === 'undefined') return;
+        const params = new URLSearchParams(window.location.search);
+        if (!params.has('folder')) return;
+        try { if (params.get('project') !== cloudId(projectId)) return; } catch { return; }
+        setView({projectId,scope:params.get('folder') || 'unfiled',query:'',sort:'newest'});
+        void reload();
+    }, [path, projectId, reload]);
     const current = state.projectId === projectId ? state : { projectId, library: emptyLibrary(), loading: !!projectId, error: '' };
     const visibleView = view.projectId === projectId ? view : { projectId, scope: 'all', query: '', sort: 'newest' as FolderSort };
     const changeView = (patch: Partial<typeof view>) => setView(v => ({ ...((v.projectId === projectId) ? v : { projectId, scope: 'all', query: '', sort: 'newest' }), ...patch }));
