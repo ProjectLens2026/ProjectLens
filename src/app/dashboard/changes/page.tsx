@@ -131,8 +131,8 @@ export default function VersionComparisonPage() {
       <div className="mx-auto max-w-6xl space-y-4">
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <div className="border-b border-slate-200 bg-gradient-to-r from-blue-50 to-white p-5">
-            <div className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-blue-600">Changes since prior version</div>
-            <h1 className="mt-1 text-xl font-black text-slate-900">Compare the selected submission to its immediate predecessor</h1>
+            <div className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-blue-600">Compare schedule versions</div>
+            <h1 className="mt-1 text-xl font-black text-slate-900">Compare any two schedule versions</h1>
             <p className="mt-1 text-xs text-slate-500">This compares actual XER activities, dates, durations, float, logic and milestones. It does not depend on activity names containing “change” or “CO”.</p>
           </div>
           <div className="grid gap-4 p-5 md:grid-cols-[1fr_auto_1fr_auto] md:items-end">
