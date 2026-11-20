@@ -200,7 +200,7 @@ export async function loadProjectsFromSupabase(): Promise<Project[] | null> {
     .from('projects')
     .select('*, schedule_versions(*, schedule_review_results(version_id, mode, readiness_status, readiness_label, total_score, grade, critical_gates_passed, counts, generated_at))')
     .eq('org_id', orgId)
-    .order('updated_at', { ascending: false })
+    .order('updated_at', { ascending: false }).limit(100)
 
   // Safe deployment order: if application code reaches production before the
   // migration is applied, project loading still works. Reviews remain local
@@ -211,7 +211,7 @@ export async function loadProjectsFromSupabase(): Promise<Project[] | null> {
       .from('projects')
       .select('*, schedule_versions(*)')
       .eq('org_id', orgId)
-      .order('updated_at', { ascending: false })
+      .order('updated_at', { ascending: false }).limit(100)
     rows = fallback.data
     error = fallback.error
   }
@@ -226,6 +226,12 @@ export async function loadProjectsFromSupabase(): Promise<Project[] | null> {
   // analyses are multi-megabyte Storage objects and are loaded separately for
   // the selected version. This keeps portfolio/sidebar hydration bounded as
   // the organization accumulates projects and monthly updates.
+  const selected=typeof localStorage!=='undefined'?localStorage.getItem('pl_active_project_id'):null
+  const selectedUuid=selected&&(/^[0-9a-f-]{36}$/i.test(selected)?selected:getLocalIdMap()[selected])
+  if(selectedUuid&&!rows.some((r:any)=>r.id===selectedUuid)){
+    const {data:extra}=await supabase.from('projects').select('*, schedule_versions(*)').eq('id',selectedUuid).eq('org_id',orgId).maybeSingle()
+    if(extra)rows.push(extra)
+  }
   return rows.map(rowToProject)
 }
 
@@ -2195,4 +2201,12 @@ export async function saveLifecycleChange(projectId: string, versionId: string |
   const { data, error } = await query.select('id').abortSignal(signal)
   if (error) throw new Error(error.message)
   if (!data || data.length !== 1) throw new Error('No row was updated. Check access permissions or reload the project list.')
+}
+
+// CPMR_ON_DEMAND_PROJECT: directory selection fetches only one project and its version summaries.
+export async function loadWorkspaceProjectFromSupabase(cloudId:string):Promise<Project>{
+ if(!/^[0-9a-f-]{36}$/i.test(cloudId))throw new Error('Invalid project identity')
+ const {data,error}=await createClient().from('projects').select('*, schedule_versions(*)').eq('id',cloudId).maybeSingle()
+ if(error||!data)throw new Error(error?.message||'Project unavailable or access denied')
+ return rowToProject(data)
 }

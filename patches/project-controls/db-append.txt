@@ -1,0 +1,7 @@
+// CPMR_ON_DEMAND_PROJECT: directory selection fetches only one project and its version summaries.
+export async function loadWorkspaceProjectFromSupabase(cloudId:string):Promise<Project>{
+ if(!/^[0-9a-f-]{36}$/i.test(cloudId))throw new Error('Invalid project identity')
+ const {data,error}=await createClient().from('projects').select('*, schedule_versions(*)').eq('id',cloudId).maybeSingle()
+ if(error||!data)throw new Error(error?.message||'Project unavailable or access denied')
+ return rowToProject(data)
+}

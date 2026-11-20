@@ -31,9 +31,10 @@ export function analysisWithProjectBasis(analysis: any, project?: Project | null
   if (!analysis) return analysis
   // Source-only review mode while Project Setup is hidden. Keep saved project
   // records intact, but do not inject manual dates/specifications into analysis.
-  const contractDates: ContractDates | undefined = undefined
-  const scheduleRequirements: ScheduleRequirementsBasis | undefined = undefined
-  const p6Settings: P6SettingsBasis | undefined = undefined
+  const enabled=(project?.controlBasis as any)?.reviewBasisEnabled===true
+  const contractDates: ContractDates | undefined = enabled?project?.contractDates:undefined
+  const scheduleRequirements: ScheduleRequirementsBasis | undefined = enabled?project?.controlBasis?.scheduleRequirements:undefined
+  const p6Settings: P6SettingsBasis | undefined = enabled?project?.controlBasis?.p6Settings:undefined
   const authorizedCompletion = authorizedContractCompletion(contractDates)
   const completionTarget = detectFinalCompletionTarget(Object.values(analysis.traceTasks || {}))
   const completionForecast = completionTarget?.date
@@ -76,13 +77,13 @@ export function analysisWithProjectBasis(analysis: any, project?: Project | null
     reviewBasis: {
       projectId: project?.projectId,
       projectName: project?.name,
-      scheduleProjectIds: undefined,
+      scheduleProjectIds: enabled?project?.controlBasis?.scheduleProjectIds:undefined,
       submittedProjectId: analysis.projectName,
       sourceFileName: version?.fileName,
       contractDates,
       scheduleRequirements: scheduleRequirements as ScheduleRequirementsBasis | undefined,
       p6Settings: p6Settings as P6SettingsBasis | undefined,
-      governingStandard: undefined,
+      governingStandard: enabled?project?.controlBasis?.governingStandard:undefined,
       scheduleType: version?.scheduleType,
     },
   }

@@ -1,0 +1,11 @@
+// CPMR_ENSURE_WORKSPACE_PROJECT: read-through cache; never writes a directory result back to the server.
+export async function ensureWorkspaceProject(cloudId:string):Promise<Project>{
+ const {loadWorkspaceProjectFromSupabase}=await import('./supabase/db')
+ const incoming=await loadWorkspaceProjectFromSupabase(cloudId),old=_projects.find(p=>p.id===incoming.id)
+ const merged:Project={...incoming,versions:incoming.versions.map(v=>{
+  const prior=old?.versions.find(x=>x.id===v.id)
+  return prior?.analysisState==='loaded'?{...prior,...v,analysis:prior.analysis,analysisState:'loaded' as const}:v
+ })}
+ _projects=old?_projects.map(p=>p.id===merged.id?merged:p):[..._projects,merged]
+ notifyListeners();await idbPutProject(merged).catch(()=>{});return merged
+}

@@ -1,0 +1,4 @@
+export const REVIEW_DECISIONS=['APPROVED','ACCEPTED_WITH_COMMENTS','RETURNED_FOR_REVISION']
+export function cloudId(id:string){if(/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(id))return id;let map:any={};try{map=JSON.parse(localStorage.getItem('pl_id_map')||'{}')}catch{};if(!map[id])throw Error('This project/version has no saved cloud identity. Reload or save the upload first.');return map[id] as string}
+export function directoryParams(orgId:string,query:string,status:string,stage:string,sort:string,page:number,size:number){return {p_org:orgId,p_query:query.trim().slice(0,150),p_status:status,p_stage:stage.trim(),p_sort:['name','updated','data_date','uploaded'].includes(sort)?sort:'updated',p_page:Math.max(0,page),p_size:Math.min(100,Math.max(1,size))}}
+export const decisionLabel=(s?:string)=>s?s.replace(/_/g,' ').toLowerCase().replace(/^./,c=>c.toUpperCase()):'Not recorded'

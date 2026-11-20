@@ -1,4 +1,5 @@
 'use client'
+import ProjectControlPosition from './ProjectControlPosition'
 import OverviewDashboard from './OverviewDashboard'
 import { useEffect, useMemo, useState } from 'react'
 import { Project, ScheduleVersion, loadVersionAnalysis } from '@/lib/projectStore'
@@ -89,7 +90,7 @@ export default function ScheduleOverview({project,version,initialSection}:{proje
     } catch(error) { setExportError(error instanceof Error?error.message:'Excel export failed. Please try again.') }
     finally {setExporting(false)}
   }
-  return <main className="overview-root bg-slate-50 h-full overflow-y-auto text-slate-800 p-6">
+  return <main className="overview-root bg-slate-50 h-full overflow-y-auto text-slate-800 p-6"><ProjectControlPosition project={project} viewedVersion={version}/>
     <style>{`.overview-table th,.overview-table td{padding:12px;text-align:left;border-bottom:1px solid #e2e8f0;vertical-align:top}.overview-table th{background:#f1f5f9;font-size:12px}.print-only{display:none}@media print{body *{visibility:hidden}.overview-root,.overview-root *{visibility:visible}.overview-root{position:absolute;left:0;top:0;width:100%;padding:0;background:white}.overview-root .no-print,.overview-root .report-excluded,.overview-root .detail-dialog{display:none!important}.overview-root .overview-section{display:block!important;break-inside:auto;margin:12px 0}.overview-root .overview-section.report-excluded{display:none!important}.overview-root .print-only{display:inline}.overview-root .overflow-x-auto{overflow:visible}.overview-table{font-size:9pt}.overview-table th,.overview-table td{padding:6px}.overview-table tr{break-inside:avoid}thead{display:table-header-group}}`}</style>
     <style>{`@media print{.overview-root .overview-table td button{display:inline!important;color:inherit;text-decoration:none}.overview-root .overview-section{page-break-inside:auto!important}}`}</style>
     {initialSection===undefined&&!preview&&<><div className="approved-overview-heading no-print"><div><h1>Schedule Overview</h1><p>Source: {version.fileName}</p></div><label>Compare version <select aria-label="Compare overview version" value={priorId} onChange={e=>setPriorId(e.target.value)}><option value="">Select a version</option>{candidates.map(v=><option key={v.id} value={v.id}>{formatCalendarDate(sourceDataDate(v.analysis||{})||v.dataDate)} · {v.versionLabel||v.fileName}</option>)}</select></label><button className="overview-export" disabled={exporting||loading||!model.available||!!(priorId&&!prior&&!priorError)} onClick={()=>exportExcel('all')}>{exporting?'Preparing Excel…':'Export Excel'}</button></div>

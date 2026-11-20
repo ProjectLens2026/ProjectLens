@@ -1,4 +1,5 @@
 'use client'
+import VersionDecisionPanel from '@/components/VersionDecisionPanel'
 
 // =============================================================================
 // src/app/dashboard/approval/page.tsx   (Approval Readiness workspace)
@@ -535,7 +536,7 @@ export default function ApprovalReadinessPage() {
       activeSelectionRef.current = selectionKey
 
       // Preserve stored setup, but exclude manual criteria from source-only review.
-      setProject(p ? { ...p, contractDates: undefined, controlBasis: undefined } : p)
+      setProject(p)
       // Contract mappings populate the review selectors without changing the source-only scoring basis.
       setPhaseContractMilestones(p?.contractDates?.contractMilestones || [])
       setVersion(v)
@@ -879,6 +880,7 @@ export default function ApprovalReadinessPage() {
       {reviewDataError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4 text-sm text-red-800">{reviewDataError}</div>}
       {reviewPersistenceError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 mb-4 text-sm text-red-800">{reviewPersistenceError}</div>}
       {/* Integrated phase milestone comments — based on the supplied current page */}
+      <VersionDecisionPanel key={project.id+':'+version.id} projectId={project.id} versionId={version.id} />
       <PhaseMilestoneReview
         key={`${project.id}:${version?.id || ''}`}
         analysis={analysis}

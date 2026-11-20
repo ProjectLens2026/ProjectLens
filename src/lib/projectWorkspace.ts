@@ -10,5 +10,5 @@ export function workspaceTab(path:string):string|null {
 }
 export const visibleWorkspaceProjects=(projects:any[])=>projects.filter(p=>!p.deletedAt&&!['Deleted','Archived'].includes(p.status))
 export function workspaceVersion(project:any,rememberedId?:string){const versions=(project?.versions||[]).filter((v:any)=>!v.deletedAt&&!v.archivedAt);return versions.find((v:any)=>v.id===rememberedId)||versions.slice().sort(compareScheduleVersions)[0]||null}
-export function workspaceIdentity(project:any){return {name:project.projectId||project.name,address:typeof project.address==='string'?project.address:'Not recorded',stage:project.phase||'Not recorded',status:project.status||'Active'}}
+export function workspaceIdentity(project:any){return {name:project.projectId||project.name,address:project.controlBasis?.projectProfile?.address||(typeof project.address==='string'?project.address:'Not recorded'),stage:project.controlBasis?.projectProfile?.stage||project.phase||'Not recorded',status:project.status||'Active'}}
 export function versionReviewFields(version:any){const r=version.reviewRecord;return {reviewedAt:r?.reviewedAt||version.reviewedAt||'',decisionAt:r?.decidedAt||version.decidedAt||'',approvedAt:r?.approvedAt||version.approvedAt||'',decision:r?.disposition||version.reviewDisposition||'Not recorded'}}

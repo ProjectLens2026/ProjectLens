@@ -1,4 +1,5 @@
 'use client'
+import ProjectSetupAccess from '@/components/ProjectSetupAccess'
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
@@ -215,9 +216,7 @@ function calculateAuthorizedPosition(
   }
 }
 
-export default function ProjectControlBasisPage() {
-  return <div className="p-8"><h1 className="text-xl font-bold">Project Setup is temporarily hidden</h1><p className="my-4">Upload and review your schedule without entering setup dates. Existing records are preserved.</p><Link href="/dashboard">Return to Overview</Link></div>
-}
+export default function ProjectControlBasisPage(){return <ProjectSetupAccess><PreservedProjectControlBasisPage /></ProjectSetupAccess>}
 function PreservedProjectControlBasisPage() {
   const [project, setProject] = useState<Project | null>(null)
   const [section, setSection] = useState<BasisSection>('contract-dates')
