@@ -7,6 +7,7 @@ import { SELF_SERVICE_CHECKOUT_ENABLED, PILOT_CONTACT_HREF } from '@/lib/launchP
 import WorkspaceSidebar from '@/components/WorkspaceSidebar'
 import './workspace.css'
 import WorkspaceHeader from '@/components/WorkspaceHeader'
+import ScheduleFoldersProvider from '@/components/ScheduleFoldersProvider'
 import HelpWidget from '@/components/HelpWidget'
 import { migrateLegacyData, loadProjects, getActiveProjectId, setActiveProjectId } from '@/lib/projectStore'
 import { createClient } from '@/lib/supabase/client'
@@ -139,10 +140,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const showPaywall = planInfo?.requiresPayment && !isPathAllowedDuringPaywall(pathname || '')
 
   return (
-    <VersionNavigation><div className="app-shell flex h-screen overflow-hidden bg-slate-50">
+    <VersionNavigation><ScheduleFoldersProvider><div className="app-shell flex h-screen overflow-hidden bg-slate-50">
       {/* print:hidden — sidebar should not appear in printed pages.
           Each page's main content prints on its own. */}
-      <WorkspaceSidebar user={user} />
+      {pathname !== '/dashboard/workspace' && <WorkspaceSidebar user={user} />}
       <div className="workspace-body flex flex-col flex-1 min-w-0 min-h-0">
         <WorkspaceHeader user={user} />
       <div className="app-main flex-1 min-h-0 overflow-hidden flex flex-col min-w-0">
@@ -153,7 +154,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <div className="print:hidden">
         <HelpWidget />
       </div>
-    </div></VersionNavigation>
+    </div></ScheduleFoldersProvider></VersionNavigation>
   )
 }
 

@@ -236,6 +236,7 @@ export interface ProjectSourceDocument {
 }
 
 export interface ProjectControlBasis {
+  projectProfile?: { address?: string; stage?: string }
   facilityType?: 'DATA_CENTER' | 'HIGH_RISE' | 'BUILDING' | 'INFRASTRUCTURE' | 'OTHER'
   contractor?: string
   governingStandard?: string
