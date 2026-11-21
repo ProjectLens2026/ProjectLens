@@ -4,6 +4,9 @@ import Link from 'next/link'
 import {useRouter} from 'next/navigation'
 import PortfolioCreateProject from '@/components/PortfolioCreateProject'
 import PortfolioEditProject from '@/components/PortfolioEditProject'
+import PortfolioGroupEditor from '@/components/PortfolioGroupEditor'
+import PortfolioAssignments from '@/components/PortfolioAssignments'
+import {usePortfolioGroups} from '@/components/usePortfolioGroups'
 import {setActiveProjectId,setActiveVersionId,ensureWorkspaceProject} from '@/lib/projectStore'
 import {usePermissions} from '@/lib/usePermissions'
 import {useProjectDirectory} from '@/components/useProjectDirectory'
@@ -22,9 +25,15 @@ function date(value:string){
 }
 
 export default function PortfolioWorkspace(){
- const permissions=usePermissions(),state=useProjectWorkspace(),directory=useProjectDirectory(permissions.user?.orgId),navigation=useVersionNavigation(),router=useRouter()
+ const permissions=usePermissions(),state=useProjectWorkspace(),orgId=permissions.user?.orgId,groups=usePortfolioGroups(orgId),navigation=useVersionNavigation(),router=useRouter()
+ const [selection,setSelection]=useState<{orgId:string;scope:string}|null>(null)
+ const scope=selection?.orgId===orgId?selection?.scope:null
+ const directory=useProjectDirectory(groups.ready&&scope?orgId:null,25,scope||'all')
+ const selectedGroup=groups.groups.find(g=>g.id===scope)||null
+ useEffect(()=>{if(orgId&&groups.ready&&!scope)setSelection({orgId,scope:groups.groups[0]?.id||'unassigned'})},[orgId,groups.ready,scope,groups.groups])
+ function chooseScope(value:string){if(orgId)setSelection({orgId,scope:value});directory.setQuery('');directory.setPage(0)}
  const [error,setError]=useState(''),[busy,setBusy]=useState(false),[created,setCreated]=useState(''),generation=useRef(0)
- useEffect(()=>{generation.current++;setBusy(false);setError('');setCreated('');return()=>{generation.current++}},[permissions.user?.orgId])
+ useEffect(()=>{generation.current++;setBusy(false);setError('');setCreated('');return()=>{generation.current++}},[orgId,scope])
  async function open(row:any){
   const ticket=++generation.current;setBusy(true);setError('')
   try{
@@ -38,13 +47,31 @@ export default function PortfolioWorkspace(){
  }
  return <main data-navigation-controls className="portfolio-root flex-1 min-h-0 overflow-y-auto">
   <div className="portfolio-heading">
-   <h1>Portfolio <span>{directory.total.toLocaleString()} projects</span></h1>
+   <h1>Portfolio <span>{Number(groups.total_count).toLocaleString()} projects</span></h1>
    <div className="portfolio-heading-actions">
     <Link href="/dashboard/projects">Manage projects</Link>
-    {permissions.can.createProject&&<PortfolioCreateProject onCreated={id=>{setCreated(id);directory.setQuery('');directory.setStatus('');directory.setStage('');directory.setPage(0);directory.reload()}}/>}
    </div>
   </div>
-  <div className="portfolio-filters"><DirectoryControls directory={directory}/></div>
+  <section className="portfolio-group-section" aria-label="Companies and programs">
+   <p className="portfolio-group-label">Companies / Programs</p>
+   <nav className="portfolio-group-list" aria-label="Select company or program">
+    {groups.ready&&<button type="button" aria-pressed={scope==='all'} disabled={busy||navigation.opening} onClick={()=>chooseScope('all')}>All projects <span>{Number(groups.total_count).toLocaleString()}</span></button>}
+    {groups.groups.map(g=><button key={g.id} type="button" aria-pressed={scope===g.id} disabled={busy||navigation.opening} onClick={()=>chooseScope(g.id)}>{g.name}<span>{Number(g.project_count).toLocaleString()} projects</span></button>)}
+    {groups.ready&&<button type="button" aria-pressed={scope==='unassigned'} disabled={busy||navigation.opening} onClick={()=>chooseScope('unassigned')}>Unassigned <span>{Number(groups.unassigned_count).toLocaleString()} projects</span></button>}
+    {orgId&&groups.can_manage&&<PortfolioGroupEditor key={orgId} orgId={orgId} onSaved={g=>{setSelection({orgId,scope:g.id});groups.reload()}}/>}
+   </nav>
+   {groups.loading&&!groups.ready&&<p role="status">Loading companies/programs…</p>}
+   {groups.error&&<p role="alert" className="portfolio-error">{groups.error} <button type="button" onClick={groups.reload}>Reload groups</button></p>}
+  </section>
+  {groups.ready&&scope&&<div className="portfolio-group-heading">
+   <h2>{selectedGroup?selectedGroup.name+' projects':scope==='all'?'All projects':scope==='unassigned'?'Unassigned projects':'Company / program projects'}</h2>
+   <div className="portfolio-group-actions" key={orgId}>
+    {orgId&&groups.can_manage&&selectedGroup&&<PortfolioGroupEditor key={selectedGroup.id} orgId={orgId} group={selectedGroup} onSaved={()=>groups.reload()}/>}
+    {orgId&&groups.can_manage&&<PortfolioAssignments orgId={orgId} groups={groups.groups} onSaved={()=>{groups.reload();directory.reload()}}/>}
+    {permissions.can.createProject&&<PortfolioCreateProject group={selectedGroup} onCreated={id=>{setCreated(id);directory.setQuery('');directory.setStatus('');directory.setStage('');directory.setPage(0);directory.reload();groups.reload()}}/>}
+   </div>
+  </div>}
+  {groups.ready&&scope&&<div className="portfolio-filters"><DirectoryControls directory={directory}/></div>}
   {created&&<div role="status" className="portfolio-notice">Project saved. <button type="button" disabled={busy||navigation.opening} onClick={()=>open({id:created})}>Open new project</button></div>}
   {directory.error&&<p role="alert" className="portfolio-error">{directory.error}</p>}
   {error&&<p role="alert" className="portfolio-error">{error}</p>}
@@ -63,7 +90,7 @@ export default function PortfolioWorkspace(){
      <div className="portfolio-data-date"><span>Data date</span>{row.data_date?<time dateTime={String(row.data_date).slice(0,10)}>{date(row.data_date)}</time>:<strong>Not recorded</strong>}</div>
      <div className="portfolio-card-actions">
       <button type="button" className="portfolio-open" disabled={busy||navigation.opening} onClick={()=>open(row)}>Open project</button>
-      {permissions.can.renameProject&&<div className="portfolio-edit"><PortfolioEditProject key={row.id} label="Edit" projectId={row.id} onSaved={()=>directory.reload()}/></div>}
+      {permissions.can.renameProject&&<div className="portfolio-edit"><PortfolioEditProject key={row.id} label="Edit" projectId={row.id} onSaved={()=>{directory.reload();groups.reload()}}/></div>}
      </div>
      <details className="portfolio-schedule-details">
       <summary>Schedule details</summary>
@@ -73,7 +100,7 @@ export default function PortfolioWorkspace(){
    </article>)}
   </div>
   {directory.loading&&<p role="status" className="portfolio-empty">Loading projects…</p>}
-  {!directory.loading&&!directory.rows.length&&!directory.error&&<p className="portfolio-empty">No projects match your filters.</p>}
-  <div className="portfolio-pager"><DirectoryPager directory={directory}/></div>
+  {groups.ready&&scope&&!directory.loading&&!directory.rows.length&&!directory.error&&<p className="portfolio-empty">No projects match your filters in this company/program. Use Assign projects to organize existing projects, or Create project to add one.</p>}
+  <div className="portfolio-pager">{groups.ready&&scope&&<DirectoryPager directory={directory}/>}</div>
  </main>
 }

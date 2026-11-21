@@ -546,7 +546,7 @@ export async function getOrgPlanInfo(): Promise<OrgPlanInfo | null> {
   }
 }
 
-export async function insertProjectToSupabase(project: Project): Promise<boolean> {
+export async function insertProjectToSupabase(project: Project & {portfolioGroupId?: string}): Promise<boolean> {
   const supabase = createClient()
   const orgId = await ensureUserHasOrg()
   if (!orgId) return false
@@ -584,6 +584,7 @@ export async function insertProjectToSupabase(project: Project): Promise<boolean
     .from('projects')
     .insert({
       id: cloudProjectId,
+      ...(project.portfolioGroupId ? {portfolio_group_id: project.portfolioGroupId} : {}),
       org_id: orgId,
       project_code: project.projectId || null,
       name: project.name,

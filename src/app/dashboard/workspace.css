@@ -83,3 +83,6 @@
 @media(max-width:1200px) { .workspace-sidebar { width:245px; }.overview-kpi { gap:10px; padding-left:12px; }.overview-kpi strong { font-size:28px; }.overview-panels { grid-template-columns:1fr; }.version-data-date { margin-left:0; } }
 @media(max-width:767px) { .workspace-sidebar { display:none; }.workspace-breadcrumb { display:none; }.approved-version-bar { padding:16px; gap:14px; }.version-upload { margin-left:0; }.approved-overview-heading label { margin-left:0; flex-wrap:wrap; }.overview-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }.overview-control-links { grid-template-columns:1fr; }.workspace-body main.overview-root { padding:16px; }.overview-stat-links { grid-template-columns:1fr; gap:16px; }.overview-stat-links button { padding:0; border:0; }.approved-version-bar select { max-width:200px; } }
 @media print { .approved-overview,.approved-overview-heading,.overview-detail-toggle { display:none!important; }.overview-detail-content { display:block!important; } }
+
+/* Existing CPMreview mark and typography on the approved dark-blue background. */
+.workspace-header > div:first-child,.workspace-sidebar .workspace-brand { background:#102d4b; }
