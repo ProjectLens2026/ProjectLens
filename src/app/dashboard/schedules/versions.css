@@ -1,0 +1,68 @@
+.workspace-body main.versions-root { padding:20px; background:#f3f5f8; color:#183047; font-size:14px; line-height:1.45; }
+.versions-root .versions-heading { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:15px; }
+.versions-root .versions-heading h2 { margin:0; font-size:20px; color:#183047; font-weight:500; }
+.versions-root .versions-heading > a { color:#245b8d; font-size:13px; }
+.versions-root .versions-references { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:12px; margin-bottom:16px; border:1px solid #d5e0ec; border-radius:7px; background:#eaf0f6; }
+.versions-root .versions-references > span { font-size:13px; color:#526a82; overflow-wrap:anywhere; }
+.versions-root .versions-references > span strong { font-weight:500; color:#183c5e; margin-left:5px; }
+.versions-root .versions-references > button { margin-left:auto; padding:6px 10px; border:1px solid #c7d3e1; border-radius:6px; background:#fff; color:#23496f; font-size:13px; }
+.versions-root .versions-viewing { display:flex; align-items:center; flex-wrap:wrap; gap:9px; margin-bottom:16px; }
+.versions-root .versions-viewing label { font-size:13px; color:#183047; }
+.versions-root .versions-viewing select { max-width:400px; min-width:0; padding:8px; border:1px solid #c9d5e3; border-radius:5px; background:#fff; color:#183047; font-size:14px; }
+.versions-root .versions-viewing > span { color:#657b92; font-size:12px; }
+.versions-root .versions-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:12px; }
+.versions-root .versions-toolbar input { flex:1; min-width:160px; }
+.versions-root .versions-toolbar input,.versions-root .versions-toolbar select { padding:8px; border:1px solid #c9d5e3; border-radius:5px; background:#fff; color:#183047; font-size:13px; max-width:100%; }
+.versions-root .versions-toolbar > button { padding:8px 10px; border:1px solid #c7d3e1; border-radius:6px; background:#fff; color:#23496f; font-size:13px; }
+.versions-root .versions-scope { margin:0 0 10px; color:#667d92; font-size:13px; overflow-wrap:anywhere; }
+.versions-root .versions-scope > span { color:#284a69; }
+.versions-root .versions-error { margin:10px 0; padding:10px 12px; color:#973e49; background:#fceef0; border-radius:6px; font-size:13px; overflow-wrap:anywhere; }
+.versions-root .versions-table-shell { border:1px solid #d5e0ea; border-radius:7px; background:#fff; container-type:inline-size; }
+.versions-root .versions-table { width:100%; table-layout:fixed; border-collapse:collapse; font-size:13px; }
+.versions-root .versions-table th { padding:12px 9px; text-align:left; border-bottom:1px solid #dce5ee; color:#516c85; background:#f7f9fc; font-weight:500; overflow-wrap:anywhere; }
+.versions-root .versions-table th:first-child { width:21%; }
+.versions-root .versions-table th:nth-child(5) { width:16%; }
+.versions-root .versions-table th:nth-child(7) { width:13%; }
+.versions-root .versions-table th:last-child { width:12%; }
+.versions-root .versions-table td { padding:13px 9px; vertical-align:top; border-bottom:1px solid #e2e8f0; color:#27425a; overflow-wrap:anywhere; }
+.versions-root .versions-table tr:last-child td { border-bottom:0; }
+.versions-root .versions-selected { background:#eff5fc; }
+.versions-root .versions-submission { padding:0; border:0; border-radius:0; background:transparent; color:#164c7c; font-size:14px; font-weight:500; text-align:left; overflow-wrap:anywhere; }
+.versions-root .versions-filename { margin:4px 0 0; color:#687d93; font-size:12px; line-height:1.4; overflow-wrap:anywhere; }
+.versions-root .versions-decision { display:inline-block; padding:3px 5px; border-radius:4px; background:#edf1f6; color:#51677f; font-size:12px; line-height:1.4; }
+.versions-root .versions-decision[data-decision=APPROVED],.versions-root .versions-decision[data-decision=ACCEPTED_WITH_COMMENTS] { background:#e8f4ef; color:#276048; }
+.versions-root .versions-decision[data-decision=RETURNED_FOR_REVISION] { background:#fceef0; color:#98414c; }
+.versions-root .versions-decision[data-decision=NOT_RECORDED] { background:#f9f1e3; color:#826024; }
+.versions-root .versions-decision-date { color:#6f8196; margin:5px 0 0; font-size:12px; }
+.versions-root .versions-row-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.versions-root .versions-evaluate { padding:0; border:0; background:transparent; color:#225b91; font-size:13px; }
+.versions-root .versions-row-actions > div > button { font-size:19px; line-height:1.3; color:#23496f; }
+.versions-root .versions-row-actions [role=menu] { font-size:13px; color:#183047; }
+.versions-root .versions-row-actions [role=menu] button { font-size:13px; }
+.versions-root .versions-note { margin:14px 0 0; font-size:13px; color:#647a91; }
+.versions-root .versions-empty { padding:25px; text-align:center; color:#61778d; font-size:14px; }
+.versions-root .versions-mobile-folders { display:none; border:1px solid #cbd7e5; border-radius:6px; background:#fff; padding:12px; margin-bottom:14px; }
+.versions-root .versions-mobile-folders > summary { font-size:14px; color:#23496f; cursor:pointer; }
+.versions-root button:disabled { opacity:.5; }
+@container(max-width:850px) {
+ .versions-root .versions-table,.versions-root .versions-table tbody { display:block; }
+ .versions-root .versions-table thead { display:none; }
+ .versions-root .versions-table tr { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); padding:8px; border-bottom:1px solid #dce5ee; }
+ .versions-root .versions-table tr:last-child { border-bottom:0; }
+ .versions-root .versions-table td { display:block; padding:8px; border:0; }
+ .versions-root .versions-table td:first-child { grid-column:1 / -1; }
+ .versions-root .versions-table td::before { content:attr(data-label); display:block; margin-bottom:4px; font-size:12px; color:#6b8096; }
+ .versions-root .versions-table td:first-child::before { display:none; }
+ .versions-root .versions-row-actions [role=menu] { left:0; right:auto; }
+}
+@container(max-width:500px) { .versions-root .versions-table tr { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:767px) { .versions-root .versions-mobile-folders { display:block; } }
+@media(max-width:540px) {
+ .workspace-body main.versions-root { padding:15px; }
+ .versions-root .versions-viewing select { width:100%; max-width:none; }
+ .versions-root .versions-references > button { margin-left:0; }
+ .versions-root .versions-toolbar input { min-width:100%; }
+ .versions-root .versions-toolbar select { min-width:0; flex:1; }
+ .versions-root input,.versions-root select { font-size:16px!important; }
+}
+@media(pointer:coarse) { .versions-root button,.versions-root input,.versions-root select { min-height:44px; } }
