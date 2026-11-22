@@ -1,4 +1,6 @@
 'use client'
+import SchedulerReportWriter from '@/components/SchedulerReportWriter'
+import {useProjectWorkspace} from '@/components/useProjectWorkspace'
 import VersionDecisionPanel from '@/components/VersionDecisionPanel'
 import ProjectControlBanner from '@/components/ProjectControlBanner'
 
@@ -493,7 +495,15 @@ function ProjectDiscoveryPanel({ discovery, expanded = false }: { discovery: USP
   </section>
 }
 
-export default function ApprovalReadinessPage() {
+export default function SchedulerReviewPage(){
+  const {project,version,ready}=useProjectWorkspace()
+  useEffect(()=>{if(version?.analysisState==='summary')void loadVersionAnalysis(version.id)},[version?.id,version?.analysisState])
+  if(!ready)return <p className="p-6">Loading project…</p>
+  if(!project||!version)return <p className="p-6">Select a project and saved schedule version to write a report.</p>
+  return <Shell project={project}><SchedulerReportWriter key={project.id+':'+version.id} project={project} version={version}/></Shell>
+}
+
+function ApprovalReadinessPage() {
   const router = useRouter()
   const [project, setProject] = useState<any>(null)
   const [phaseContractMilestones, setPhaseContractMilestones] = useState<ContractMilestone[]>([])
