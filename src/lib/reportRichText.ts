@@ -5,7 +5,20 @@ export const plainRich=(s:string):RichText=>s.split('\n').map(text=>({runs:[{tex
 export const richPlain=(doc:RichText)=>doc.map(p=>p.runs.map(r=>r.text).join('')).join('\n')
 // Keep content and emphasis, discard source-page paragraph alignment and padding.
 export function tidyRichPaste(doc:RichText):RichText{
- return validateRich(doc).map(p=>({...p,align:'left',runs:p.runs.map(r=>({...r,text:r.text.replace(/\r\n?/g,'\n').replace(/[\t\u00a0 ]+/g,' ')}))}))
+ const output:RichText=[];
+ for(const p of validateRich(doc)){
+  let runs:RichRun[]=[];
+  const flush=()=>{output.push({...p,align:'left',runs:runs.length?runs:[{text:''}]});runs=[]};
+  for(const r of p.runs){
+   // Single copied line breaks are wrapping; blank lines remain paragraphs.
+   const parts=r.text.replace(/\r\n?/g,'\n').split(/(\n[ \t\u00a0]*\n)/);
+   for(const part of parts){if(/^\n[ \t\u00a0]*\n$/.test(part)){flush();continue}
+    if(part)runs.push({...r,text:part.replace(/[\n\t\u00a0 ]+/g,' ')});
+   }
+  }
+  flush();
+ }
+ return validateRich(output);
 }
 export function validateRich(doc:any):RichText{
  if(!Array.isArray(doc)||doc.length>4000)throw Error('Invalid formatted text.')
